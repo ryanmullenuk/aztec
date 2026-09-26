@@ -38,13 +38,32 @@ const waterFrag = /* glsl */ `
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hsh(i), hsh(i + vec2(1.0, 0.0)), u.x), mix(hsh(i + vec2(0.0, 1.0)), hsh(i + vec2(1.0, 1.0)), u.x), u.y);
   }
-  float waveH(vec2 p, float t){
-    float amp = 1.0 + uStorm * 1.5;
-    float h = 0.05 * sin(dot(p, vec2(0.8, 0.6)) * 1.1 + t * 1.2)
-            + 0.035 * sin(dot(p, vec2(-0.5, 0.9)) * 1.8 + t * 1.6)
-            + 0.04 * vnoise(p * 1.3 + vec2(t * 0.32, t * 0.21) * (1.0 + uFlow * 2.0))
-            + 0.022 * vnoise(p * 3.2 - vec2(t * 0.45, -t * 0.28) * (1.0 + uFlow * 3.0));
-    return h * amp;
+  const float TAU = 6.2831853;
+  /**
+   * Sixteen directional waves spread around the wind, from long swells to fine chop, with analytic
+   * slopes. Each wave fades out once it is smaller than a few pixels (no shimmering in the distance).
+   */
+  float waves(vec2 p, float t, float fw, out vec2 g, out float ampSum) {
+    float h = 0.0;
+    g = vec2(0.0);
+    ampSum = 0.0;
+    float amp = 1.0 + uStorm * 1.7;
+    float lam = 7.5;
+    for (int i = 0; i < 16; i++) {
+      float fi = float(i);
+      // Long waves follow the wind; short chop comes from all around.
+      float ang = 0.62 + sin(fi * 2.39 + 0.4) * (0.7 + fi * 0.09);
+      vec2 d = vec2(cos(ang), sin(ang));
+      float k = TAU / lam;
+      float w = sqrt(9.8 * k) * 0.55 * (1.0 + uFlow * 1.5);
+      float ph = dot(d, p) * k + t * w + fi * 1.93;
+      float A = lam * 0.0135 * amp * (1.0 - smoothstep(lam * 0.12, lam * 0.45, fw));
+      h += A * sin(ph);
+      g += A * k * d * cos(ph);
+      ampSum += A;
+      lam *= 0.79;
+    }
+    return h;
   }
   void main() {
     vec2 uv = (vW.xz + uWorld * 0.5) / uWorld;
@@ -54,28 +73,69 @@ const waterFrag = /* glsl */ `
     float depth = max(vW.y - bed, 0.0);
     float t = uTime;
     vec2 p = vW.xz;
-    float e = 0.12;
-    float h0 = waveH(p, t);
-    vec3 n = normalize(vec3(h0 - waveH(p + vec2(e, 0.0), t), e * 1.4, h0 - waveH(p + vec2(0.0, e), t)));
+    // World units covered by one pixel here: drives wave level of detail.
+    // (Scaled up so waves fade a little early at grazing angles instead of banding.)
+    float fw = length(fwidth(p)) * 1.5;
+    vec2 grad; float ampSum;
+    float h0 = waves(p, t, fw, grad, ampSum);
+    // Calm the surface in very shallow water (waves break into foam instead).
+    grad *= mix(0.35, 1.0, smoothstep(0.05, 0.8, depth));
+    vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
     vec3 V = normalize(cameraPosition - vW);
+    vec3 L = normalize(uSunDir);
+    float crest = h0 / max(ampSum, 1e-3);
 
-    // Colour by depth: luminous turquoise shallows -> azure -> cobalt/sapphire, darker toward the map edge.
-    vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.55, depth));
-    col = mix(col, cMid, smoothstep(0.55, 1.7, depth));
-    col = mix(col, cDeep2, smoothstep(1.7, 3.6, depth));
+    // Body colour by depth: turquoise shallows -> teal -> deep navy, darker toward the map edge.
+    // Colour uses a blurred depth so seabed terrace steps don't show as contour stripes.
+    float bs = 0.0;
+    for (int k = 0; k < 6; k++) {
+      float ak = float(k) * 1.0472;
+      vec2 ou = vec2(cos(ak), sin(ak)) * (2.2 / uWorld);
+      bs += texture2D(uHeight, clamp(uv + ou, 0.0, 1.0)).r;
+    }
+    float cdepth = max(vW.y - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0);
+    vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.6, cdepth));
+    col = mix(col, cMid, smoothstep(0.5, 2.4, cdepth));
+    col = mix(col, cDeep2, smoothstep(1.8, 5.0, cdepth));
     float far = smoothstep(uWorld * 0.42, uWorld * 1.4, length(vW.xz));
-    col = mix(col, cDeep, clamp(max(smoothstep(3.6, 6.5, depth), far), 0.0, 1.0));
+    col = mix(col, cDeep, clamp(max(smoothstep(4.5, 8.0, cdepth), far), 0.0, 1.0));
 
-    float ndl = max(dot(n, uSunDir), 0.0);
-    vec3 lit = col * (0.62 + 0.38 * ndl) * mix(vec3(1.0), uSunCol, 0.22) * mix(0.28, 1.0, uDay);
-    // Fresnel sky reflection.
-    float F = 0.02 + 0.55 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-    lit = mix(lit, uSkyCol * mix(0.35, 1.0, uDay), F);
-    // Sun sparkle.
-    vec3 R = reflect(-uSunDir, n);
-    float sp = pow(max(dot(R, V), 0.0), 220.0);
-    float glint = step(0.72, vnoise(p * 9.0 + t * 1.3)) * pow(max(dot(R, V), 0.0), 40.0);
-    lit += uSunCol * (sp * 2.2 + glint * 0.9) * uSunI * 0.45 * (1.0 - uStorm * 0.8);
+    float dayK = mix(0.3, 1.0, uDay);
+    float ndl = max(dot(n, L), 0.0);
+    vec3 lit = col * (0.6 + 0.4 * ndl) * mix(vec3(1.0), uSunCol, 0.2) * dayK;
+    // Light scattering through the crests (teal glow on wave tops, strongest looking toward the sun).
+    float back = pow(max(dot(-V, L) * 0.5 + 0.5, 0.0), 3.0);
+    lit += vec3(0.05, 0.28, 0.3) * max(crest, 0.0) * (0.35 + back) * dayK * smoothstep(0.8, 3.0, depth);
+    // Troughs a touch darker.
+    lit *= 0.9 + 0.2 * clamp(crest + 0.5, 0.0, 1.0);
+
+    // Sky reflection (Fresnel): brighter toward the horizon, deeper blue overhead.
+    vec3 R = reflect(-V, n);
+    vec3 skyR = mix(uSkyCol * 0.95 + vec3(0.04), uSkyCol * vec3(0.42, 0.56, 0.75), clamp(R.y, 0.0, 1.0)) * mix(0.28, 1.0, uDay);
+    float F = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+    F = clamp(F * 1.5 + 0.02, 0.0, 0.8);
+    lit = mix(lit, skyR, F);
+
+    // Sun (or moon) glitter: a tight core, a wider sheen, and scattered sparkles on the chop.
+    vec3 H = normalize(L + V);
+    float nh = max(dot(n, H), 0.0);
+    float glare = pow(nh, 1400.0) * 16.0 + pow(nh, 200.0) * 1.8 + pow(nh, 40.0) * 0.22 + pow(nh, 8.0) * 0.03;
+    vec2 cell = floor(p * 16.0);
+    float r1 = hsh(cell + floor(t * 2.5) * 0.37);
+    vec3 nn = normalize(n + vec3(hsh(cell + 3.1) - 0.5, 0.0, hsh(cell + 7.7) - 0.5) * 0.8);
+    // Round glints inside each cell (not square), only on crests facing the light.
+    // Glints sit at a random spot and size inside each cell, so no grid shows.
+    vec2 fc = fract(p * 16.0) - 0.5 - (vec2(hsh(cell + 11.3), hsh(cell + 5.9)) - 0.5) * 0.5;
+    float dot1 = smoothstep(0.1 + 0.18 * hsh(cell + 2.2), 0.02, length(fc));
+    float spark = step(0.84, r1) * dot1 * pow(max(dot(nn, H), 0.0), 500.0) * 10.0 * (1.0 - smoothstep(0.04, 0.16, fw)) * smoothstep(-0.2, 0.3, crest);
+    float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y);
+    lit += uSunCol * (glare + spark) * uSunI * 0.32 * sunVis;
+
+    // Whitecaps: small flecks on the highest crests out in deeper water (more in storms).
+    float capN = vnoise(p * 1.7 + vec2(t * 0.25, -t * 0.15));
+    float cap = smoothstep(0.55, 0.85, crest + (capN - 0.5) * 0.5) * smoothstep(2.5, 5.0, cdepth);
+    cap *= smoothstep(0.55, 0.85, vnoise(p * 3.4 - vec2(t * 0.5, t * 0.3))) * (0.3 + uStorm * 1.0);
+    lit = mix(lit, cFoam * mix(0.3, 1.0, uDay), clamp(cap, 0.0, 1.0) * 0.85);
 
     // Shoreline foam from the depth difference, curling bands and foam around rocks.
     float fn = vnoise(p * 1.4 + t * 0.15);
@@ -86,11 +146,15 @@ const waterFrag = /* glsl */ `
     float foam = clamp(shore + bands * 0.55 + rock, 0.0, 1.0);
     foam *= smoothstep(0.25, 0.55, vnoise(p * 3.6 + vec2(t * 0.4, -t * 0.25)) + shore * 0.7 + rock * 0.4);
     foam *= inside;
-    lit = mix(lit, cFoam * mix(0.35, 1.05, uDay), foam);
+    lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
 
     // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
-    float alpha = mix(0.32, 0.82, smoothstep(0.2, 3.2, depth));
+    float alpha = mix(0.2, 0.52, smoothstep(0.0, 0.9, cdepth));
+    alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
     alpha = max(alpha, foam);
+    // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
+    float edgeD = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    alpha = mix(1.0, alpha, inside * smoothstep(0.0, 0.07, edgeD));
     gl_FragColor = vec4(lit, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -213,6 +277,15 @@ export class Water {
     ocean.name = 'ocean';
     ocean.renderOrder = 10;
     this.group.add(ocean);
+    // Dark ocean floor under everything, so looking through the water past the island's seabed
+    // never shows the sky colour behind.
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD.oceanSize, WORLD.oceanSize, 1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0x06202f), fog: true })
+    );
+    floor.position.y = -6.2;
+    floor.name = 'oceanFloor';
+    this.group.add(floor);
 
     this.buildRivers();
     this.buildWaterfall();
@@ -335,8 +408,17 @@ export class Water {
 
   /** Waves at a point in world space (used for boats bobbing). */
   waveHeight(x: number, z: number, t: number): number {
-    const s = 1 + this.shared.uStorm.value * 1.5;
-    return (0.05 * Math.sin((x * 0.8 + z * 0.6) * 1.1 + t * 1.2) + 0.035 * Math.sin((-x * 0.5 + z * 0.9) * 1.8 + t * 1.6)) * s;
+    // The four longest of the shader's waves (the rest are too small to move a boat).
+    const amp = 1 + this.shared.uStorm.value * 1.7;
+    let h = 0, lam = 7.5;
+    for (let i = 0; i < 4; i++) {
+      const ang = 0.62 + Math.sin(i * 2.39 + 0.4) * 0.95;
+      const k = (Math.PI * 2) / lam;
+      const w = Math.sqrt(9.8 * k) * 0.55;
+      h += lam * 0.0125 * amp * Math.sin((Math.cos(ang) * x + Math.sin(ang) * z) * k + t * w + i * 1.93);
+      lam *= 0.72;
+    }
+    return h;
   }
 
   update(dt: number, time: number): void {
