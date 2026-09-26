@@ -1,0 +1,533 @@
+import * as THREE from 'three';
+import { FAUNA } from '../config';
+import { peopleMaterial } from '../render/materials';
+import { RNG } from '../world/rng';
+import { SpatialHash } from '../world/SpatialHash';
+import { World } from '../world/World';
+import { Islander } from './Islander';
+import * as models from './animalModels';
+
+/** A canopy tree monkeys can use: base position plus canopy height and radius. */
+export interface CanopyTree {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  mid: number;
+  top: number;
+  r: number;
+}
+
+type MState = 'sit' | 'walk' | 'climb' | 'hang' | 'crouch' | 'jump' | 'land' | 'eat' | 'watch';
+
+interface Monkey {
+  group: number;
+  tree: number;
+  /** Current spot on the tree: angle around the trunk, radial fraction, height fraction (0 trunk base → 1 canopy top). */
+  a: number;
+  rf: number;
+  hf: number;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  state: MState;
+  timer: number;
+  /** Move / jump from → to. */
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  toTree: number;
+  toA: number;
+  toRf: number;
+  toHf: number;
+  t: number;
+  dur: number;
+  phase: number;
+  look: number;
+  scale: number;
+  lod: number;
+}
+
+interface Troop {
+  tree: number;
+  timer: number;
+}
+
+const _m = new THREE.Matrix4();
+const _b = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _p = new THREE.Vector3();
+const _s = new THREE.Vector3();
+const TAU = Math.PI * 2;
+
+function local(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
+  _e.set(rx, ry, rz, 'YXZ');
+  _q.setFromEuler(_e);
+  return out.compose(_p.set(x, y, z), _q, _s.set(s, s, s));
+}
+
+/**
+ * Spider monkeys living in the canopy: sitting, walking along branches, climbing trunks,
+ * hanging and swinging, and leaping between trees that are close enough to reach.
+ * Troops of 2–5 move together loosely, never in lockstep.
+ */
+export class Monkeys {
+  readonly group = new THREE.Group();
+  list: Monkey[] = [];
+  private trees: CanopyTree[] = [];
+  private links: number[][] = [];
+  private troops: Troop[] = [];
+  private rng: RNG;
+  private meshes: Record<string, THREE.InstancedMesh> = {};
+  private time = 0;
+  private frame = 0;
+
+  constructor(private world: World, trees: CanopyTree[], private treeAlive: (id: number) => boolean) {
+    this.rng = new RNG(world.seed * 173 + 3);
+    this.trees = trees;
+    this.link();
+    this.spawn();
+    const mat = peopleMaterial();
+    const mk = (key: string, g: THREE.BufferGeometry, n: number) => {
+      const m = new THREE.InstancedMesh(g, mat, Math.max(1, n));
+      m.castShadow = true;
+      m.frustumCulled = false;
+      m.count = 0;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.meshes[key] = m;
+      this.group.add(m);
+    };
+    const n = this.list.length;
+    mk('torso', models.monkeyTorso(), n);
+    mk('head', models.monkeyHead(), n);
+    mk('arm', models.monkeyLimb(0.13), n * 2);
+    mk('leg', models.monkeyLimb(0.11), n * 2);
+    mk('tail', models.monkeyTail(), n);
+  }
+
+  /** Trees are linked when the gap between canopies is a believable leap. */
+  private link(): void {
+    const T = this.trees;
+    this.links = T.map(() => []);
+    for (let i = 0; i < T.length; i++) {
+      for (let j = i + 1; j < T.length; j++) {
+        const d = Math.hypot(T[i].x - T[j].x, T[i].z - T[j].z);
+        const gap = d - (T[i].r + T[j].r) * 0.7;
+        if (gap < FAUNA.monkeyJump && d > 1 && Math.abs(T[i].y + T[i].mid - T[j].y - T[j].mid) < 2.2) {
+          this.links[i].push(j);
+          this.links[j].push(i);
+        }
+      }
+    }
+  }
+
+  private spawn(): void {
+    // Troops start in well-connected jungle trees.
+    const good = this.trees.map((_, i) => i).filter((i) => this.links[i].length >= 2);
+    if (!good.length) return;
+    const want = this.rng.int(FAUNA.monkeys[0], FAUNA.monkeys[1]);
+    const used = new Set<number>();
+    while (this.list.length < want) {
+      let home = -1;
+      for (let k = 0; k < 30; k++) {
+        const c = good[Math.floor(this.rng.next() * good.length)];
+        if ([...used].every((u) => Math.hypot(this.trees[u].x - this.trees[c].x, this.trees[u].z - this.trees[c].z) > 18)) {
+          home = c;
+          break;
+        }
+      }
+      if (home < 0) home = good[Math.floor(this.rng.next() * good.length)];
+      used.add(home);
+      const g = this.troops.length;
+      this.troops.push({ tree: home, timer: 20 + this.rng.next() * 30 });
+      const size = Math.min(want - this.list.length, this.rng.int(FAUNA.monkeyGroup[0], FAUNA.monkeyGroup[1]));
+      for (let k = 0; k < size; k++) {
+        const tree = k === 0 ? home : this.rng.chance(0.5) ? home : this.links[home][Math.floor(this.rng.next() * this.links[home].length)];
+        const m: Monkey = {
+          group: g, tree, a: this.rng.range(0, TAU), rf: this.rng.range(0.3, 0.75), hf: this.rng.range(0.55, 0.9), x: 0, y: 0, z: 0,
+          heading: this.rng.range(0, TAU), state: 'sit', timer: this.rng.range(1, 6), from: new THREE.Vector3(), to: new THREE.Vector3(),
+          toTree: tree, toA: 0, toRf: 0, toHf: 0, t: 0, dur: 1, phase: this.rng.range(0, 10), look: 0,
+          scale: k === size - 1 && size > 2 && this.rng.chance(0.6) ? 0.65 : this.rng.range(0.92, 1.08), lod: 0,
+        };
+        this.spot(tree, m.a, m.rf, m.hf, _p);
+        m.x = _p.x;
+        m.y = _p.y;
+        m.z = _p.z;
+        this.list.push(m);
+      }
+    }
+  }
+
+  /** World position of a spot on a tree. */
+  private spot(tree: number, a: number, rf: number, hf: number, out: THREE.Vector3): THREE.Vector3 {
+    const t = this.trees[tree];
+    // Branches under the canopy (visible from the tilted camera), reaching further out higher up.
+    const bottom = Math.max(1.1, t.mid - t.r * 0.62);
+    const reach = t.r * rf * 0.85 * Math.min(1, 0.2 + hf);
+    return out.set(t.x + Math.cos(a) * reach, t.y + bottom * (0.45 + 0.55 * Math.min(1, hf)), t.z + Math.sin(a) * reach);
+  }
+
+  get count(): number {
+    return this.list.length;
+  }
+
+  update(dt: number, camTarget: THREE.Vector3, people: SpatialHash<Islander>): void {
+    this.time += dt;
+    this.frame++;
+    if (dt > 0) {
+      for (const tr of this.troops) {
+        tr.timer -= dt;
+        if (tr.timer <= 0) {
+          // The troop drifts to a neighbouring tree; members follow one by one.
+          tr.timer = 25 + this.rng.next() * 40;
+          const n = this.links[tr.tree].filter((j) => this.treeAlive(this.trees[j].id));
+          if (n.length) tr.tree = n[Math.floor(this.rng.next() * n.length)];
+        }
+      }
+      for (const m of this.list) {
+        const far = Math.hypot(m.x - camTarget.x, m.z - camTarget.z) > FAUNA.lodDistance;
+        m.lod += dt;
+        // Far monkeys think every few frames (animation continues smoothly).
+        if (far && (this.frame + m.group) % 4 !== 0 && m.state !== 'jump' && m.state !== 'climb' && m.state !== 'walk') continue;
+        this.think(m, m.lod, people);
+        m.lod = 0;
+      }
+    }
+    this.render();
+  }
+
+  private startMove(m: Monkey, tree: number, a: number, rf: number, hf: number, state: MState): void {
+    m.from.set(m.x, m.y, m.z);
+    this.spot(tree, a, rf, hf, m.to);
+    m.toTree = tree;
+    m.toA = a;
+    m.toRf = rf;
+    m.toHf = hf;
+    m.t = 0;
+    const d = m.from.distanceTo(m.to);
+    m.state = state;
+    if (state === 'crouch') {
+      m.dur = 0.5 + this.rng.next() * 0.3;
+    } else if (state === 'climb') m.dur = Math.max(0.6, Math.abs(m.to.y - m.from.y) / 0.9);
+    else m.dur = Math.max(0.5, d / (0.75 * m.scale + 0.25));
+    const dx = m.to.x - m.from.x, dz = m.to.z - m.from.z;
+    if (Math.hypot(dx, dz) > 0.05) m.heading = Math.atan2(dx, dz);
+  }
+
+  private think(m: Monkey, dt: number, people: SpatialHash<Islander>): void {
+    const tr = this.troops[m.group];
+    // Tree felled underneath: leap to a neighbour (or drop and vanish into the jungle).
+    if (!this.treeAlive(this.trees[m.tree].id) && m.state !== 'jump' && m.state !== 'crouch') {
+      const n = this.links[m.tree].filter((j) => this.treeAlive(this.trees[j].id));
+      if (n.length) this.startMove(m, n[0], this.rng.range(0, TAU), 0.5, 0.75, 'crouch');
+      else {
+        const alt = this.trees.findIndex((t) => this.treeAlive(t.id));
+        if (alt >= 0) {
+          m.tree = alt;
+          this.spot(alt, m.a, m.rf, m.hf, _p);
+          m.x = _p.x;
+          m.y = _p.y;
+          m.z = _p.z;
+        }
+      }
+      return;
+    }
+    // Somebody close below: look at them, or climb higher out of reach.
+    let near: Islander | null = null;
+    let nd = 6;
+    people.query(m.x, m.z, 6, (p) => {
+      const d = Math.hypot(p.x - m.x, p.z - m.z);
+      if (d < nd) {
+        nd = d;
+        near = p;
+      }
+    });
+    switch (m.state) {
+      case 'walk':
+      case 'climb': {
+        m.t += dt / m.dur;
+        const k = Math.min(1, m.t);
+        const e = k * k * (3 - 2 * k);
+        m.x = m.from.x + (m.to.x - m.from.x) * e;
+        m.y = m.from.y + (m.to.y - m.from.y) * (m.state === 'climb' ? k : e);
+        m.z = m.from.z + (m.to.z - m.from.z) * e;
+        if (m.state === 'climb') {
+          // Face the trunk while climbing.
+          const t = this.trees[m.tree];
+          m.heading = Math.atan2(t.x - m.x, t.z - m.z);
+        }
+        if (k >= 1) this.arrive(m);
+        return;
+      }
+      case 'crouch':
+        m.t += dt / m.dur;
+        if (m.t >= 1) {
+          m.state = 'jump';
+          m.t = 0;
+          m.from.set(m.x, m.y, m.z);
+          const d = m.from.distanceTo(m.to);
+          m.dur = 0.45 + d * 0.09;
+        }
+        return;
+      case 'jump': {
+        m.t += dt / m.dur;
+        const k = Math.min(1, m.t);
+        const d = Math.hypot(m.to.x - m.from.x, m.to.z - m.from.z);
+        m.x = m.from.x + (m.to.x - m.from.x) * k;
+        m.z = m.from.z + (m.to.z - m.from.z) * k;
+        m.y = m.from.y + (m.to.y - m.from.y) * k + Math.sin(k * Math.PI) * (0.35 + d * 0.16);
+        if (k >= 1) {
+          m.state = 'land';
+          m.timer = 0.35;
+          this.arrive(m, true);
+        }
+        return;
+      }
+      case 'land':
+        m.timer -= dt;
+        if (m.timer <= 0) {
+          m.state = 'sit';
+          m.timer = 1 + this.rng.next() * 3;
+        }
+        return;
+    }
+    if (near && m.state !== 'hang') {
+      const p = near as Islander;
+      m.look = Math.atan2(p.x - m.x, p.z - m.z) - m.heading;
+      if (m.state !== 'watch' && m.state !== 'eat') {
+        m.state = 'watch';
+        m.timer = 2 + this.rng.next() * 3;
+      }
+      // Too low with a person right below: climb higher.
+      if (m.hf < 0.6 && nd < 3) {
+        this.startMove(m, m.tree, m.a, m.rf * 0.4, 0.8 + this.rng.next() * 0.15, 'climb');
+        return;
+      }
+    } else if (m.state === 'watch') m.look *= 0.95;
+    m.timer -= dt;
+    if (m.timer > 0) return;
+    // Follow the troop when it has moved on (each at their own moment).
+    if (m.tree !== tr.tree && this.rng.chance(0.55)) {
+      const path = this.links[m.tree].includes(tr.tree) ? tr.tree : this.links[m.tree].find((j) => this.links[j].includes(tr.tree));
+      if (path !== undefined && this.treeAlive(this.trees[path].id)) {
+        const t = this.trees[path];
+        // Aim for the side of the next tree facing us.
+        const a = Math.atan2(m.z - t.z, m.x - t.x) + this.rng.range(-0.6, 0.6);
+        this.startMove(m, path, a, this.rng.range(0.5, 0.8), this.rng.range(0.6, 0.85), 'crouch');
+        return;
+      }
+    }
+    const r = this.rng.next();
+    if (r < 0.28) {
+      // Walk along the branch to another spot in the same tree.
+      this.startMove(m, m.tree, m.a + this.rng.range(-1.4, 1.4), this.rng.range(0.35, 0.85), Math.max(0.55, Math.min(0.92, m.hf + this.rng.range(-0.12, 0.12))), 'walk');
+    } else if (r < 0.38) {
+      // Down the trunk a little, or back up.
+      const hf = m.hf > 0.7 ? this.rng.range(0.42, 0.55) : this.rng.range(0.72, 0.9);
+      this.startMove(m, m.tree, m.a, 0.12, hf, 'climb');
+    } else if (r < 0.5) {
+      m.state = 'hang';
+      m.timer = 3 + this.rng.next() * 4;
+    } else if (r < 0.62) {
+      m.state = 'eat';
+      m.timer = 3 + this.rng.next() * 3;
+    } else if (r < 0.72 && this.links[m.tree].length) {
+      // Explore a neighbouring tree.
+      const n = this.links[m.tree].filter((j) => this.treeAlive(this.trees[j].id) && (j === tr.tree || this.links[j].includes(tr.tree) || this.links[tr.tree].includes(j)));
+      if (n.length) {
+        const j = n[Math.floor(this.rng.next() * n.length)];
+        const t = this.trees[j];
+        this.startMove(m, j, Math.atan2(m.z - t.z, m.x - t.x) + this.rng.range(-0.8, 0.8), this.rng.range(0.5, 0.8), this.rng.range(0.6, 0.85), 'crouch');
+        return;
+      }
+      m.state = 'sit';
+      m.timer = 2 + this.rng.next() * 4;
+    } else {
+      m.state = 'sit';
+      m.look = this.rng.range(-1, 1);
+      m.timer = 2 + this.rng.next() * 5;
+    }
+  }
+
+  private arrive(m: Monkey, jumped = false): void {
+    m.tree = m.toTree;
+    m.a = m.toA;
+    m.rf = m.toRf;
+    m.hf = m.toHf;
+    m.x = m.to.x;
+    m.y = m.to.y;
+    m.z = m.to.z;
+    if (!jumped) {
+      m.state = 'sit';
+      m.timer = 0.8 + this.rng.next() * 3;
+    }
+    // Sit facing outward from the trunk.
+    if (m.state === 'sit' || jumped) m.heading = m.a > -99 ? Math.atan2(Math.cos(m.a), Math.sin(m.a)) : m.heading;
+  }
+
+  // ---------------- Rendering ----------------
+
+  private render(): void {
+    const ms = this.meshes;
+    const cnt: Record<string, number> = { torso: 0, head: 0, arm: 0, leg: 0, tail: 0 };
+    const put = (key: string, parent: THREE.Matrix4, l: THREE.Matrix4) => {
+      _m.multiplyMatrices(parent, l);
+      ms[key].setMatrixAt(cnt[key]++, _m);
+    };
+    const L = new THREE.Matrix4();
+    for (const m of this.list) {
+      const t = this.time + m.phase;
+      let pitch = 0, roll = 0, bodyY = 0;
+      let armL = -0.25, armR = -0.25, armLz = 0.25, armRz = -0.25;
+      let legL = -1.4, legR = -1.4, legSpread = 0.35;
+      let tailX = -1.25, tailY = Math.sin(t * 0.8) * 0.25;
+      let headX = 0, headY = m.look;
+      let yaw = m.heading;
+      let hangSwing = 0;
+      switch (m.state) {
+        case 'sit':
+        case 'watch':
+          headY = m.look + Math.sin(t * 0.6) * 0.5;
+          headX = Math.sin(t * 0.37) * 0.15;
+          armL = -0.4 + Math.sin(t * 0.3) * 0.05;
+          break;
+        case 'eat':
+          armR = -2.4 + Math.sin(t * 5) * 0.15;
+          armRz = 0.3;
+          headX = 0.2 + Math.sin(t * 5) * 0.05;
+          break;
+        case 'walk': {
+          const g = t * 9;
+          pitch = 1.2;
+          bodyY = 0.1;
+          armL = -pitch + Math.sin(g) * 0.55;
+          armR = -pitch - Math.sin(g) * 0.55;
+          legL = -pitch - Math.sin(g) * 0.55;
+          legR = -pitch + Math.sin(g) * 0.55;
+          legSpread = 0.1;
+          armLz = 0.1;
+          armRz = -0.1;
+          headX = -1.0;
+          // Tail up in an S curve for balance.
+          tailX = -pitch + 0.9 + Math.sin(g * 0.5) * 0.1;
+          break;
+        }
+        case 'climb': {
+          const g = t * 7;
+          armL = -2.6 + Math.sin(g) * 0.4;
+          armR = -2.6 - Math.sin(g) * 0.4;
+          legL = -1.0 - Math.sin(g) * 0.35;
+          legR = -1.0 + Math.sin(g) * 0.35;
+          pitch = 0.15;
+          headX = -0.3;
+          tailX = -1.4;
+          break;
+        }
+        case 'hang': {
+          // Hanging from the branch by the arms (tail wrapped above), swinging.
+          hangSwing = Math.sin(t * 1.6) * 0.35;
+          armL = armR = Math.PI;
+          armLz = -0.15;
+          armRz = 0.15;
+          legL = Math.sin(t * 1.6 + 0.6) * 0.25;
+          legR = Math.sin(t * 1.6 + 0.9) * 0.25;
+          legSpread = 0.2;
+          tailX = 1.1;
+          headX = -0.25;
+          break;
+        }
+        case 'crouch': {
+          const k = Math.min(1, m.t * 1.5);
+          bodyY = -0.05 * k;
+          pitch = 0.6 * k;
+          legL = legR = -1.9 * k;
+          armL = armR = -1.2 * k;
+          headX = -0.5 * k;
+          const dx = m.to.x - m.x, dz = m.to.z - m.z;
+          yaw = Math.atan2(dx, dz);
+          break;
+        }
+        case 'jump': {
+          // Stretched out mid-air: arms reaching forward, legs trailing, tail streaming.
+          const k = Math.min(1, m.t);
+          pitch = 1.0 + (k - 0.5) * 0.6;
+          armL = armR = -pitch - 1.4 + k * 0.4;
+          armLz = 0.25;
+          armRz = -0.25;
+          legL = legR = -pitch + 0.9 - k * 0.8;
+          legSpread = 0.25;
+          tailX = -pitch + 0.2;
+          tailY = Math.sin(t * 6) * 0.15;
+          headX = -0.8;
+          break;
+        }
+        case 'land': {
+          const k = m.timer / 0.35;
+          bodyY = -0.06 * k;
+          pitch = 0.6 * k;
+          legL = legR = -1.4 - 0.5 * k;
+          armL = armR = -0.8 * k - 0.3;
+          break;
+        }
+      }
+      const s = m.scale;
+      if (m.state === 'hang') {
+        // Pivot at the hands on the branch.
+        local(_b, m.x, m.y + 0.02, m.z, 0, yaw, 0, s);
+        L.copy(_b);
+        _b.multiply(local(new THREE.Matrix4(), 0, 0, 0, hangSwing, 0, 0));
+        _b.multiply(local(new THREE.Matrix4(), 0, -0.28, 0, 0, 0, 0));
+      } else {
+        local(_b, m.x, m.y + bodyY * s, m.z, pitch, yaw, roll, s);
+      }
+      put('torso', _b, local(L, 0, 0, 0, 0, 0, 0));
+      put('head', _b, local(L, 0, 0.17, 0.01, headX, headY, 0));
+      put('arm', _b, local(L, 0.055, 0.145, 0, armL, 0, armLz));
+      put('arm', _b, local(L, -0.055, 0.145, 0, armR, 0, armRz));
+      put('leg', _b, local(L, 0.035, 0.03, 0.01, legL, 0, legSpread * 0.4));
+      put('leg', _b, local(L, -0.035, 0.03, 0.01, legR, 0, -legSpread * 0.4));
+      put('tail', _b, local(L, 0, 0.035, -0.04, tailX, tailY, 0));
+      void roll;
+    }
+    for (const [k, mesh] of Object.entries(ms)) {
+      mesh.count = cnt[k];
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Nearest monkey to a ground point (for info taps). */
+  near(x: number, z: number, r: number): Monkey | null {
+    let best: Monkey | null = null, bd = r;
+    for (const m of this.list) {
+      const d = Math.hypot(m.x - x, m.z - z);
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  /** Screen-space pick for tapping a monkey. */
+  pick(camera: THREE.Camera, sx: number, sy: number, rect: DOMRect, radius = 22): Monkey | null {
+    const v = new THREE.Vector3();
+    let best: Monkey | null = null, bd = radius * radius;
+    for (const m of this.list) {
+      v.set(m.x, m.y + 0.1, m.z).project(camera);
+      if (v.z > 1) continue;
+      const px = (v.x * 0.5 + 0.5) * rect.width + rect.left, py = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
+      const d = (px - sx) ** 2 + (py - sy) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  describe(m: Monkey): string {
+    const map: Record<MState, string> = { sit: 'Sitting on a branch', walk: 'Walking along a branch', climb: 'Climbing', hang: 'Hanging and swinging', crouch: 'Getting ready to leap', jump: 'Leaping between trees', land: 'Landing', eat: 'Eating fruit', watch: 'Watching the islanders' };
+    return map[m.state];
+  }
+}
