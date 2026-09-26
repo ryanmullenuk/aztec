@@ -1,5 +1,5 @@
 import { WORLD } from '../config';
-import { clamp, smootherstep } from './noise';
+import { clamp, smootherstep, smoothstep } from './noise';
 
 /** Surface kind per cell, used for colouring, vegetation and AI. */
 export const enum Ground {
@@ -188,7 +188,10 @@ export class World {
     // Below sea level the seabed slopes smoothly (no underwater steps showing through the water).
     if (v < 0) return (v - 0.5) * this.H;
     const fl = Math.floor(v);
-    const t = fl + smootherstep(0.2, 0.8, v - fl);
+    const stepped = fl + smootherstep(0.2, 0.8, v - fl);
+    // Lowlands keep gentle flat terraces (for building); hills and mountains are smooth slopes.
+    const k = smoothstep(2.5, 5, v);
+    const t = stepped + (v - stepped) * k;
     return (t - 0.5) * this.H;
   }
 

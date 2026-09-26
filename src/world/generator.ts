@@ -25,43 +25,34 @@ export function generateIsland(world: World, seed: number): void {
   const sB = new Simplex2(rng);
   const sC = new Simplex2(rng);
 
-  const rot = rng.range(0, Math.PI * 2);
+  // ---- The island's hand-designed layout (the same for everyone), in map units -1..1. ----
+  const rot = 0;
   const cr = Math.cos(rot), sr = Math.sin(rot);
-
-  // Lobes of the main island: a big central body and several peninsulas.
+  // Main body plus peninsulas: north-west, south-west, south, east and north-east.
+  const S = 1.15; // overall island scale
   const lobes: { x: number; z: number; rx: number; rz: number; a: number }[] = [
-    { x: 0, z: 0, rx: rng.range(0.4, 0.47), rz: rng.range(0.32, 0.38), a: rng.range(0, Math.PI) },
-  ];
-  const nLobes = rng.int(3, 5);
-  for (let k = 0; k < nLobes; k++) {
-    const ang = (k / nLobes) * Math.PI * 2 + rng.range(-0.5, 0.5);
-    const d = rng.range(0.27, 0.4);
-    lobes.push({ x: Math.cos(ang) * d, z: Math.sin(ang) * d, rx: rng.range(0.16, 0.26), rz: rng.range(0.1, 0.17), a: ang + rng.range(-0.6, 0.6) });
-  }
-  // Mountain massif: a ridge of peaks set to one side of the island.
-  const ma = rng.range(0, Math.PI * 2);
-  const mc = { x: Math.cos(ma) * 0.2, z: Math.sin(ma) * 0.2 };
-  const mDir = ma + Math.PI / 2 + rng.range(-0.5, 0.5);
+    { x: -0.05, z: 0.02, rx: 0.45, rz: 0.35, a: 0.2 },
+    { x: -0.37, z: -0.27, rx: 0.2, rz: 0.13, a: -0.7 },
+    { x: -0.4, z: 0.28, rx: 0.21, rz: 0.13, a: 0.6 },
+    { x: 0.0, z: 0.42, rx: 0.2, rz: 0.12, a: 1.45 },
+    { x: 0.38, z: 0.08, rx: 0.24, rz: 0.17, a: 0.15 },
+    { x: 0.22, z: -0.36, rx: 0.2, rz: 0.13, a: -1.0 },
+  ].map((l) => ({ x: l.x * S, z: l.z * S, rx: l.rx * S, rz: l.rz * S, a: l.a }));
+  // Mountain range along the eastern side, running roughly north–south.
+  const mc = { x: 0.24 * S, z: -0.06 * S };
+  const mDir = 1.35;
   const mcs = Math.cos(mDir), msn = Math.sin(mDir);
-  // Rocky knolls elsewhere on the island.
-  const knolls: { x: number; z: number; r: number; h: number }[] = [];
-  for (let k = 0; k < 40 && knolls.length < rng.int(3, 5); k++) {
-    const a2 = rng.range(0, Math.PI * 2), d = rng.range(0.12, 0.42);
-    const x = Math.cos(a2) * d, z = Math.sin(a2) * d;
-    if (Math.hypot(x - mc.x, z - mc.z) < 0.3 || knolls.some((q) => Math.hypot(q.x - x, q.z - z) < 0.18)) continue;
-    knolls.push({ x, z, r: rng.range(0.05, 0.085), h: rng.range(0.22, 0.4) });
-  }
-  // Islets out on the reef shelf.
+  // Rocky knolls around the rest of the island.
+  const knolls = [
+    { x: -0.32, z: 0.12, r: 0.07, h: 0.32 },
+    { x: -0.06, z: 0.33, r: 0.065, h: 0.3 },
+    { x: -0.22, z: -0.3, r: 0.06, h: 0.28 },
+  ].map((k) => ({ ...k, x: k.x * S, z: k.z * S }));
+  // Islets around the reef shelf.
   world.islets = [];
-  const isletCount = rng.int(WORLD.isletCount[0], WORLD.isletCount[1]);
-  const islets: { x: number; z: number; r: number; h: number }[] = [];
-  for (let k = 0; k < 200 && islets.length < isletCount; k++) {
-    const a2 = rng.range(0, Math.PI * 2);
-    const d = rng.range(0.62, 0.84);
-    const x = Math.cos(a2) * d, z = Math.sin(a2) * d;
-    if (islets.some((q) => Math.hypot(q.x - x, q.z - z) < 0.2)) continue;
-    islets.push({ x, z, r: rng.range(0.035, 0.065), h: rng.range(0.2, 0.42) });
-  }
+  const islets = [
+    [-2.45, 0.84, 0.05], [-1.75, 0.83, 0.045], [-0.85, 0.85, 0.055], [0.25, 0.84, 0.05], [1.05, 0.83, 0.045], [1.9, 0.84, 0.055], [2.75, 0.85, 0.045],
+  ].map(([ang, d, r], k) => ({ x: Math.cos(ang) * d, z: Math.sin(ang) * d, r, h: 0.28 + (k % 3) * 0.06 }));
 
   const v = new Float32Array(N * N);
   const massif = new Float32Array(N * N);
@@ -98,7 +89,7 @@ export function generateIsland(world: World, seed: number): void {
       // Mountain massif: ridged peaks, only on land.
       const mx = nx - mc.x, mz = nz - mc.z;
       const mu = mx * mcs + mz * msn, mw = -mx * msn + mz * mcs;
-      const md = Math.sqrt((mu / 0.4) ** 2 + (mw / 0.21) ** 2) + sC.fbm(nx * 3.5 + 1, nz * 3.5 - 1, 3) * 0.2;
+      const md = Math.sqrt((mu / (0.4 * S)) ** 2 + (mw / (0.21 * S)) ** 2) + sC.fbm(nx * 3.5 + 1, nz * 3.5 - 1, 3) * 0.2;
       const mm = (1 - smoothstep(0.25, 1.0, md)) * smoothstep(0.04, 0.26, m);
       massif[i] = mm;
       // Tall, jagged peaks along the ridge.
