@@ -12,6 +12,7 @@ import { Birds } from './Birds';
 import { Critters } from './Critters';
 import { Monkeys } from './Monkeys';
 import { ReefFish } from './ReefFish';
+import { Coral } from './Coral';
 import { fishGeometry } from './animalModels';
 
 /** A deep-water fish school: the fishing boats' resource. */
@@ -64,6 +65,7 @@ export class Wildlife {
   readonly monkeys: Monkeys;
   readonly critters: Critters;
   readonly reef: ReefFish;
+  readonly coral: Coral;
   /** Deep schools only: reef fish are decorative. */
   schools: School[] = [];
   private fish: Fish[] = [];
@@ -92,8 +94,11 @@ export class Wildlife {
     const alive = (id: number) => veg.plants[id]?.state === PlantState.Alive;
     this.monkeys = new Monkeys(world, veg.canopyTrees(), alive);
     this.critters = new Critters(world);
-    this.reef = new ReefFish(world, veg.plants.filter((p) => p.kind === 'reef' || p.kind === 'searock').map((p) => ({ x: p.x, z: p.z })));
-    this.group.add(this.animals.group, this.birds.group, this.monkeys.group, this.critters.group, this.reef.group);
+    // Coral reefs first: the reef fish gather over them.
+    this.coral = new Coral(world);
+    const reefPts = [...this.coral.patches.map((p) => ({ x: p.x, z: p.z })), ...veg.plants.filter((p) => p.kind === 'reef' || p.kind === 'searock').map((p) => ({ x: p.x, z: p.z }))];
+    this.reef = new ReefFish(world, reefPts);
+    this.group.add(this.animals.group, this.birds.group, this.monkeys.group, this.critters.group, this.reef.group, this.coral.group);
     this.fishMesh = new THREE.InstancedMesh(fishGeometry('silver'), stylisedMaterial(), Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool));
     this.fishMesh.castShadow = false;
     this.fishMesh.frustumCulled = false;
@@ -163,8 +168,16 @@ export class Wildlife {
         }
       }
       const d = Math.hypot(s.tx - s.x, s.tz - s.z) || 1;
-      s.x += ((s.tx - s.x) / d) * 0.9 * dt;
-      s.z += ((s.tz - s.z) / d) * 0.9 * dt;
+      const nx = s.x + ((s.tx - s.x) / d) * 0.9 * dt, nz = s.z + ((s.tz - s.z) / d) * 0.9 * dt;
+      if (w.heightAt(nx, nz) < -1.8) {
+        s.x = nx;
+        s.z = nz;
+      } else {
+        // Heading into shallower water: pick a new target further out to sea instead.
+        const out = Math.atan2(s.x, s.z) + (this.rng.next() - 0.5) * 1.2;
+        s.tx = s.x + Math.sin(out) * 12;
+        s.tz = s.z + Math.cos(out) * 12;
+      }
     }
     this.fishHash.clear();
     for (const f of this.fish) this.fishHash.insert(f);
@@ -219,8 +232,14 @@ export class Wildlife {
         f.x = nx;
         f.z = nz;
       } else {
-        f.vx *= -0.5;
-        f.vz *= -0.5;
+        // Blocked by the shore: swim back toward the school rather than bouncing in place.
+        const bx = s.x - f.x, bz = s.z - f.z, bl = Math.hypot(bx, bz) || 1;
+        f.vx = (bx / bl) * 1.2;
+        f.vz = (bz / bl) * 1.2;
+        if (w.heightAt(f.x, f.z) >= -0.3) {
+          f.x += (bx / bl) * dt * 1.5;
+          f.z += (bz / bl) * dt * 1.5;
+        }
       }
       const wy = -0.18 - (f.phase % 1) * 0.55 + Math.sin(this.time * 0.9 + f.phase) * 0.06;
       f.y += (wy - f.y) * Math.min(1, dt * 2);

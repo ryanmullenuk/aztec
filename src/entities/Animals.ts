@@ -175,9 +175,10 @@ export class Animals {
     const dm = Math.hypot(x - m.x, z - m.z);
     switch (SPECIES[sp].habitat) {
       case 'settlement': {
+        // Around the village, not on top of it: a ring roughly 5–9 units out from the buildings.
         let d = dm;
         for (const p of this.settlement()) d = Math.min(d, Math.hypot(p.x - x, p.z - z));
-        return -d * 0.4 - f * 3 - w.sandy[i] * 1.5;
+        return -Math.max(0, Math.abs(d - 7) - 2) * 0.5 - (d < 3.5 ? 6 : 0) - f * 3 - w.sandy[i] * 1.5;
       }
       case 'jungleEdge':
         return -Math.abs(f - 0.45) * 5 - (dm < m.r + 4 ? 4 : 0) - w.sandy[i] * 3;
@@ -222,12 +223,12 @@ export class Animals {
       for (let tries = 0; made < total && tries < 60; tries++) {
         // Find a good habitat spot for the group.
         const m = this.world.meadow;
-        const far = def.habitat === 'settlement' ? 10 : def.habitat === 'jungle' ? 70 : 45;
+        const far = def.habitat === 'settlement' ? 14 : def.habitat === 'jungle' ? 70 : 45;
         const spot = this.pickSpot(sp, m.x, m.z, far, 40);
         if (!spot) continue;
         const size = Math.min(total - made, this.rng.int(def.group[0], def.group[1]));
         const gi = this.groups.length;
-        this.groups.push({ sp, x: spot[0], z: spot[1], homeX: spot[0], homeZ: spot[1], r: sp === 'chicken' ? 3.5 : sp === 'tapir' ? 7 : 5 });
+        this.groups.push({ sp, x: spot[0], z: spot[1], homeX: spot[0], homeZ: spot[1], r: sp === 'chicken' ? 5 : sp === 'tapir' ? 7 : 5 });
         for (let k = 0; k < size; k++) {
           const p = this.pickSpot(sp, spot[0], spot[1], 2) ?? spot;
           this.list.push(this.makeAnimal(sp, p[0], p[1], gi, k === 1 && sp === 'tapir' && size > 1));
@@ -427,7 +428,8 @@ export class Animals {
     const w = this.world;
     const i = w.cellIndexAt(x, z);
     if (i < 0 || w.layer[i] < 1 || !Number.isNaN(w.riverY[i])) return false;
-    if (w.occ[i] && !w.passable(w.occ[i] - 1)) return false;
+    // Wild animals keep out of building footprints (the fire, huts, fields); penned ones stay in their pen.
+    if (w.occ[i] && (a.pen < 0 || !w.passable(w.occ[i] - 1))) return false;
     return Math.abs(w.heightAt(x, z) - a.y) < SPECIES[a.sp].maxSlope;
   }
 
@@ -443,10 +445,26 @@ export class Animals {
     const target = speed * (1 - Math.min(0.7, Math.abs(dh) * 0.4));
     a.speed += (target - a.speed) * Math.min(1, dt * 4);
     const nx = a.x + Math.sin(a.heading) * a.speed * dt, nz = a.z + Math.cos(a.heading) * a.speed * dt;
-    if (this.walkable(a, nx, nz)) {
+    // Standing somewhere it shouldn't be (e.g. a building went up around it): always let it walk out.
+    if (this.walkable(a, nx, nz) || !this.walkable(a, a.x, a.z)) {
       a.x = nx;
       a.z = nz;
     } else {
+      // Blocked (a building, water, a steep step): sidestep around it, keeping the goal.
+      const step = Math.max(0.02, a.speed * dt);
+      for (const off of [0.7, -0.7, 1.4, -1.4, 2.1, -2.1]) {
+        const h = a.heading + off;
+        const sx = a.x + Math.sin(h) * step, sz = a.z + Math.cos(h) * step;
+        if (this.walkable(a, sx, sz)) {
+          a.x = sx;
+          a.z = sz;
+          a.heading += off * Math.min(1, dt * 6);
+          return false;
+        }
+      }
+      // Boxed in: back off and pick somewhere else next time.
+      a.tx = a.x - Math.sin(a.heading) * 2;
+      a.tz = a.z - Math.cos(a.heading) * 2;
       a.speed = 0;
       a.timer = 0;
       a.state = 'idle';

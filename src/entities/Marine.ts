@@ -282,7 +282,7 @@ function whaleFluke(): THREE.BufferGeometry {
 }
 
 function dolphinGeometry(): THREE.BufferGeometry {
-  const top = new THREE.Color(0x6f8394), belly = new THREE.Color(0xe3e9ec), mid = new THREE.Color(0x9aabb8);
+  const top = new THREE.Color(0x5f7688), belly = new THREE.Color(0xf0f4f6), mid = new THREE.Color(0x96abbb);
   const k: [number, number][] = [[0, 0.015], [0.2, 0.05], [0.5, 0.1], [0.72, 0.095], [0.86, 0.06], [0.9, 0.03], [1, 0.02]];
   const rad = (t: number) => {
     for (let i = 0; i < k.length - 1; i++) if (t <= k[i + 1][0]) return k[i][1] + (k[i + 1][1] - k[i][1]) * ((t - k[i][0]) / (k[i + 1][0] - k[i][0]));
@@ -609,10 +609,13 @@ export class Marine {
           .replace('#include <begin_vertex>', `#include <begin_vertex>
             {
               // Travelling wave: still at the head, strongest at the tail (flukes drive the swim).
+              // Whole-body undulation: a gentle nod at the head, building to big strokes at the tail stock,
+              // with the head end slightly out of phase so the body flexes like a real whale.
               float zz = transformed.z;
-              float wgt = smoothstep(0.3, -0.5, zz);
-              transformed.y += uAmp * wgt * wgt * sin(uPhase - zz * 5.0);
-              transformed.x += uTurn * zz * zz;
+              float wgt = smoothstep(0.35, -0.5, zz);
+              transformed.y += uAmp * (wgt * wgt * 1.1 + 0.1) * sin(uPhase - zz * 4.2);
+              // Turning curves the whole body sideways (head and tail both bend into the turn).
+              transformed.x += uTurn * (zz * zz * 1.6 - 0.08);
             }`);
       };
       underwater(bodyMat, 'whale-body');
@@ -675,7 +678,7 @@ export class Marine {
     this.dolphinMesh.frustumCulled = false;
     this.dolphinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.group.add(this.dolphinMesh);
-    const podSpots = this.deepSpots(MARINE.pods, -1.4, 0.45, 0.8);
+    const podSpots = this.deepSpots(MARINE.pods, -2.6, 0.45, 0.85);
     podSpots.forEach((s, k) => {
       const pod: Pod = { x: s.x, z: s.z, cx: s.x, cz: s.z, a: this.rng.range(0, 6.28), r: 12 + this.rng.next() * 12, dir: k % 2 ? 1 : -1, speed: MARINE.dolphinSpeed, ids: [] };
       for (let d = 0; d < MARINE.dolphinsPerPod; d++) {
@@ -830,17 +833,21 @@ export class Marine {
   private animateBody(w: Whale, dt: number, strength: number): void {
     const B = w.bend;
     B.uPhase.value += dt * (1.6 + strength * 0.8);
-    B.uAmp.value += (0.035 * strength - B.uAmp.value) * Math.min(1, dt * 2);
-    B.uTurn.value += (-w.turnRate * 0.25 - B.uTurn.value) * Math.min(1, dt * 2);
-    // Fluke rides the tail of the wave: position and slope at z = -0.5.
+    B.uAmp.value += (0.055 * strength - B.uAmp.value) * Math.min(1, dt * 2);
+    B.uTurn.value += (-w.turnRate * 0.45 - B.uTurn.value) * Math.min(1, dt * 2);
+    // Fluke rides the tail of the wave: position and slope at z = -0.5 (matches the body shader).
     const ph = B.uPhase.value;
-    const dy = B.uAmp.value * Math.sin(ph + 2.5);
-    const slope = -5 * B.uAmp.value * Math.cos(ph + 2.5);
-    w.fluke.position.set(B.uTurn.value * 0.25, dy, -0.5);
-    w.fluke.rotation.set(Math.atan(slope) * 1.6, B.uTurn.value, 0);
+    const amp = B.uAmp.value * 1.2;
+    const dy = amp * Math.sin(ph + 2.1);
+    const slope = -4.2 * amp * Math.cos(ph + 2.1);
+    w.fluke.position.set(B.uTurn.value * 0.32, dy, -0.5);
+    // The fluke lags the stock a little, like a flexible tail.
+    w.fluke.rotation.set(Math.atan(slope) * 1.5 + Math.sin(ph + 1.2) * 0.12 * strength, B.uTurn.value * 1.3, 0);
+    // Flippers swept back and held close along the flanks, with slow small strokes and steering.
     const st = Math.sin(ph * 0.5);
-    w.finL.rotation.set(0, 0.35, -0.3 - st * 0.18 * strength);
-    w.finR.rotation.set(0, -0.35, 0.3 + st * 0.18 * strength);
+    const steer = THREE.MathUtils.clamp(w.turnRate * 0.8, -0.3, 0.3);
+    w.finL.rotation.set(0, -1.2 + steer, 0.4 + st * 0.08 * strength);
+    w.finR.rotation.set(0, 1.2 + steer, -0.4 - st * 0.08 * strength);
   }
 
   private updateWhale(w: Whale, dt: number, camTarget: THREE.Vector3): void {
@@ -1072,7 +1079,7 @@ export class Marine {
     for (const pod of this.pods) {
       pod.a += (dt * pod.speed * pod.dir) / pod.r;
       const nx = pod.cx + Math.cos(pod.a) * pod.r, nz = pod.cz + Math.sin(pod.a) * pod.r;
-      if (!this.deepEnough(nx, nz, -1.0)) {
+      if (!this.deepEnough(nx, nz, -2.0)) {
         pod.dir *= -1;
         pod.a += pod.dir * 0.3;
       } else {

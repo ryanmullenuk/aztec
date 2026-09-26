@@ -4,7 +4,7 @@ import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Colony } from '../ai/Colony';
 import { Economy } from '../economy/Economy';
 import { GeoBuilder, M, P } from '../render/GeoBuilder';
-import { stylisedMaterial } from '../render/materials';
+import { patchStylised, stylisedMaterial } from '../render/materials';
 import { Vegetation } from '../vegetation/Vegetation';
 import { Water } from '../water/Water';
 import { World } from '../world/World';
@@ -31,6 +31,9 @@ interface Boat {
   paddlePhase: number;
   sail: boolean;
   wakeTimer: number;
+  /** Seconds of fishing left on this trip (counts down once the boat reaches the fishing grounds). */
+  fishTime: number;
+  onTrip: boolean;
 }
 
 /** Particle pool with per-particle alpha, used for wakes and splashes. */
@@ -172,6 +175,8 @@ export class Boats {
   private splash = new Particles(240, 0xe8fbff);
   private geos = [boatGeometry(false), boatGeometry(true)];
   private rowerGeo = rowerGeometry();
+  /** Boats' own double-sided material (never modify the shared stylised one). */
+  private hullMat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, side: THREE.DoubleSide }));
   private netMat = new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true });
   private blocked: Uint8Array;
   /** Number of boats ever launched (milestone). */
@@ -191,6 +196,11 @@ export class Boats {
     }
   }
 
+  /** Extra obstacle cells (coral reefs) that boats steer around. */
+  blockCells(cells: number[]): void {
+    for (const i of cells) this.blocked[i] = 1;
+  }
+
   /** Start building a boat at a jetty (pays the cost). */
   order(j: Building): boolean {
     if (!j.complete || j.boatBuild > 0 || j.boats.length >= JETTY.maxBoats) return false;
@@ -201,8 +211,7 @@ export class Boats {
 
   private spawn(j: Building, sail: boolean): Boat {
     const mesh = new THREE.Group();
-    const hullMat = stylisedMaterial();
-    hullMat.side = THREE.DoubleSide;
+    const hullMat = this.hullMat;
     const hull = new THREE.Mesh(this.geos[sail ? 1 : 0], hullMat);
     hull.castShadow = true;
     const rower = new THREE.Mesh(this.rowerGeo, stylisedMaterial());
@@ -218,7 +227,7 @@ export class Boats {
     const slot = j.boats.length;
     const b: Boat = {
       id: this.nextId++, jetty: j.id, x: j.dockX + dz * (slot - 1) * 0.9, z: j.dockZ - dx * (slot - 1) * 0.9, heading: Math.atan2(dx, dz), speed: 0,
-      state: 'docked', crew: null, path: null, idx: 0, timer: 0, catch: 0, school: null, mesh, net, rower, paddlePhase: Math.random() * 6, sail, wakeTimer: 0,
+      state: 'docked', crew: null, path: null, idx: 0, timer: 0, catch: 0, school: null, mesh, net, rower, paddlePhase: Math.random() * 6, sail, wakeTimer: 0, fishTime: 0, onTrip: false,
     };
     j.boats.push(b.id);
     this.list.push(b);
@@ -326,9 +335,14 @@ export class Boats {
 
   private step(b: Boat, dt: number, time: number): void {
     const j = this.bld.byId(b.jetty)!;
+    if (b.onTrip) b.fishTime -= dt;
     if (b.state === 'out' || b.state === 'return') {
       if (!b.path || b.idx >= b.path.length) {
         if (b.state === 'out') {
+          if (!b.onTrip) {
+            b.onTrip = true;
+            b.fishTime = JETTY.fishingSeconds;
+          }
           b.state = 'netting';
           b.timer = JETTY.netSeconds;
           this.sfx('splash', b.x, b.z);
@@ -372,27 +386,47 @@ export class Boats {
       }
     } else if (b.state === 'netting') {
       b.speed *= 1 - dt * 2;
+      // Drift gently with the school while the net is out.
+      if (b.school) {
+        b.x += (b.school.x - b.x) * Math.min(1, dt * 0.05);
+        b.z += (b.school.z - b.z) * Math.min(1, dt * 0.05);
+      }
       b.timer -= dt;
       if (b.timer <= 0) {
         const s = b.school;
-        const n = s ? Math.max(0, Math.min(JETTY.catchPerTrip, Math.floor(s.stock) - 2)) : 0;
+        const room = JETTY.catchPerTrip - b.catch;
+        const n = s ? Math.max(0, Math.min(JETTY.catchPerCast, room, Math.floor(s.stock) - 2)) : 0;
         if (s) s.stock -= n;
-        b.catch = n;
+        b.catch += n;
         this.sfx('splash', b.x, b.z);
-        const path = this.waterPath(b.x, b.z, j.dockX, j.dockZ);
-        b.path = path ?? [{ x: j.dockX, z: j.dockZ }];
-        b.idx = 0;
-        b.state = 'return';
+        // Keep fishing until the trip is over or the hold is full, following the school between casts.
+        const next = b.fishTime > 0 && b.catch < JETTY.catchPerTrip ? this.wildlife.nearestSchool(b.x, b.z) : null;
+        const hop = next ? this.waterPath(b.x, b.z, next.x + (Math.random() - 0.5) * 4, next.z + (Math.random() - 0.5) * 4) : null;
+        if (next && hop) {
+          b.school = next;
+          b.path = hop;
+          b.idx = 0;
+          b.state = 'out';
+        } else {
+          b.onTrip = false;
+          b.fishTime = 0;
+          const path = this.waterPath(b.x, b.z, j.dockX, j.dockZ);
+          b.path = path ?? [{ x: j.dockX, z: j.dockZ }];
+          b.idx = 0;
+          b.state = 'return';
+        }
       }
     } else {
       b.speed = 0;
     }
     // Bob on the waves.
+    // The sea surface is drawn flat (waves are in the shading), so the hull rides at y = 0 with only a
+    // gentle bob, and pitches and rolls with the swell.
     const y = this.water.waveHeight(b.x, b.z, time);
     const yF = this.water.waveHeight(b.x + Math.sin(b.heading) * 0.6, b.z + Math.cos(b.heading) * 0.6, time);
     const yS = this.water.waveHeight(b.x + Math.cos(b.heading) * 0.3, b.z - Math.sin(b.heading) * 0.3, time);
-    b.mesh.position.set(b.x, y + 0.01, b.z);
-    b.mesh.rotation.set((y - yF) * 1.2, b.heading, (yS - y) * 1.5, 'YXZ');
+    b.mesh.position.set(b.x, 0.03 + y * 0.12, b.z);
+    b.mesh.rotation.set((y - yF) * 0.8, b.heading, (yS - y) * 1.0, 'YXZ');
     b.paddlePhase += dt * (b.state === 'docked' || b.state === 'netting' ? 0 : 3);
     b.rower.rotation.z = Math.sin(b.paddlePhase) * 0.25;
     // Net: spreads out beside the boat while netting, hauled in at the end.

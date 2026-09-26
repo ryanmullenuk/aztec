@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FAUNA, WILDLIFE } from '../config';
-import { stylisedMaterial } from '../render/materials';
+import { patchStylised } from '../render/materials';
 import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { FishType, fishGeometry } from './animalModels';
@@ -76,7 +76,8 @@ export class ReefFish {
     this.findReefs(reefPoints);
     this.spawn();
     // Drawn after the water, softly blended, so their colours read through the surface.
-    const mat = stylisedMaterial();
+    // Its own material: the shared stylised one is used by boats, buildings and dolphins.
+    const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }));
     mat.transparent = true;
     mat.opacity = 0.5;
     mat.depthWrite = false;
@@ -104,7 +105,7 @@ export class ReefFish {
   private findReefs(points: { x: number; z: number }[]): void {
     const w = this.world;
     const cand: Reef[] = [];
-    for (const p of points) if (this.shallow(p.x, p.z)) cand.push({ x: p.x, z: p.z, r: 2.5 });
+    for (const p of points) if (this.shallow(p.x, p.z)) cand.push({ x: p.x, z: p.z, r: 3.2 });
     if (w.lagoon && this.shallow(w.lagoon.x, w.lagoon.z)) cand.unshift({ x: w.lagoon.x, z: w.lagoon.z, r: 4 });
     for (let k = 0; k < 3000 && cand.length < 30; k++) {
       const cx = this.rng.int(2, w.N - 3), cz = this.rng.int(2, w.N - 3);
@@ -217,10 +218,24 @@ export class ReefFish {
         }
         const nx = f.x + Math.sin(f.heading) * f.speed * dt, nz = f.z + Math.cos(f.heading) * f.speed * dt;
         const bed = w.heightAt(nx, nz);
+        const R = this.reefs[s.reef];
         if (bed < -0.5) {
           f.x = nx;
           f.z = nz;
-        } else f.heading += Math.PI * 0.5 * dt * 4;
+        } else {
+          // Too shallow ahead: turn back toward the middle of the reef (and swim, don't spin in place).
+          const back = Math.atan2(R.x - f.x, R.z - f.z);
+          let dh2 = back - f.heading;
+          while (dh2 > Math.PI) dh2 -= Math.PI * 2;
+          while (dh2 < -Math.PI) dh2 += Math.PI * 2;
+          f.heading += dh2 * Math.min(1, dt * 6);
+          if (w.heightAt(f.x, f.z) >= -0.5) {
+            // Already stranded in the shallows (e.g. the land was raised): slip back out.
+            f.x += Math.sin(back) * dt * 1.2;
+            f.z += Math.cos(back) * dt * 1.2;
+          }
+          s.timer = Math.min(s.timer, 0.5);
+        }
         // Hover above the bed, a little deeper on excursions.
         const wantY = Math.min(-0.2, Math.max(bed + 0.16, (s.excursion ? -0.8 : -0.38) + f.oy + Math.sin(this.time * 0.7 + f.phase) * 0.04));
         f.y += (wantY - f.y) * Math.min(1, dt * 1.5);
