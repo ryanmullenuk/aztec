@@ -73,8 +73,8 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
   - GTAO, subtle bloom, warm/teal colour grading, vignette and SMAA/FXAA.
 - ACES tone mapping; a low golden sun with long soft shadows fitted to the view; a cool sky bounce light.
 - Sunlight glows through fronds, with warm rim light on treetops and roofs, and contact shadows under objects.
-- Water shader: depth colour from turquoise to azure to cobalt, Fresnel sky reflection, scrolling normals, sun sparkle, caustics on the seabed, and shoreline and rock foam.
-- A 10-minute day/night cycle where golden hour lasts longest, moonlit blue nights and village torches with real point lights.
+- Ocean shader: sixteen layered directional waves (swell to fine chop) with analytic normals that fade with distance, Fresnel sky reflection, a sun or moon glitter path with sparkling glints, whitecap flecks, turquoise shallows fading to deep navy, light absorbed with depth, caustics on the seabed, and shoreline and rock foam.
+- A 10-minute day/night cycle where golden hour lasts longest; the light hands over smoothly to a bright silvery moon with a glitter path on the sea, and village torches light up with real point lights.
 
 **Vegetation**
 - A tree catalogue: palms (straight, leaning, curved), eight broadleaf varieties (round, tall and narrow, spreading, jungle giants, vine-hung, pink blossom) and orange fruit trees, plus ferns, flowering bushes, apple bushes and banana trees, all with a wind-sway shader.
@@ -118,9 +118,9 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Population limits per species, habitat-aware spawning and respawning, lower update rates far from the camera, and animals (including penned livestock) are saved with the island.
 
 **Whales and dolphins**
-- Humpback whales cruise the deep ocean, surfacing and spouting, and breach every so often (or when tapped). The breach follows a reference clip:
+- Smooth-shaded humpbacks (dark slate backs, white pleated throats and bellies, knobbly heads, long white flippers, serrated flukes) glide underwater with a travelling body wave, leaving faint fluke prints on the surface, and never touch the seabed. They breach every so often in deep water (or when tapped), following a reference clip:
   - An underwater glow as it rises, then a near-vertical lift out of the water while it spins, fins spread, with a foam ring at the waterline.
-  - It topples onto its back into a huge swirling foam splash, then the fluke flips up as it dives and the foam spreads and fades.
+  - It topples onto its back into a huge splash: a crown of water tongues, fine spray and clumps, white-water mist drifting downwind, and lacy foam that spreads and fades. Then the fluke lifts, streaming water, as it dives.
 - Dolphin pods porpoise in staggered leaping arcs, with the odd spinning jump, splashes and ripples.
 
 **Boats**
