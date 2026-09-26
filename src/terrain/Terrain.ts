@@ -333,8 +333,11 @@ export class Terrain {
             diffuseColor.rgb += vec3(0.85, 1.0, 0.95) * c * 0.45;
             // Light is absorbed with depth: the seabed fades to deep navy-teal, so deep water reads as
             // dark open ocean and seabed terraces vanish below a couple of metres.
-            float absorb = 1.0 - exp(-max(depth - 0.25, 0.0) * 0.85);
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.16, 0.24), absorb);
+            // Red light goes first, so sand turns turquoise in the shallows, then teal, then navy.
+            diffuseColor.rgb *= mix(vec3(1.0), vec3(0.45, 0.86, 0.92), smoothstep(0.0, 0.7, depth));
+            float absorb = 1.0 - exp(-max(depth - 0.1, 0.0) * 0.8);
+            vec3 tint = mix(vec3(0.1, 0.56, 0.62), vec3(0.03, 0.15, 0.24), smoothstep(0.9, 3.6, depth));
+            diffuseColor.rgb = mix(diffuseColor.rgb, tint, absorb);
           }
         }`
       );
