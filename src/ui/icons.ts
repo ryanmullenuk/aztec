@@ -1,0 +1,59 @@
+/** Small inline SVG icons (24x24), drawn to share one warm, rounded style. */
+const svg = (body: string, vb = '0 0 24 24') =>
+  `<svg viewBox="${vb}" width="1em" height="1em" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+
+export const ICONS: Record<string, string> = {
+  wood: svg('<rect x="3" y="9" width="15" height="7" rx="3.5" fill="#a8744a"/><ellipse cx="18" cy="12.5" rx="3" ry="3.5" fill="#e3c08e"/><ellipse cx="18" cy="12.5" rx="1.3" ry="1.6" fill="#b88a58"/><path d="M6 9.5v6M10 9.5v6" stroke="#7a5234" stroke-width="1"/>'),
+  stone: svg('<path d="M4 17c-1-4 2-8 6-9 3-1 7 0 9 3s1 7-3 8H7c-2 0-3-1-3-2z" fill="#a89a90"/><path d="M8 11c2-1 5-1 7 1" stroke="#d6cac0" stroke-width="1.5"/>'),
+  grain: svg('<path d="M12 21V8" stroke="#8a6a2a" stroke-width="1.6"/><ellipse cx="12" cy="7" rx="3" ry="5" fill="#f2c94c"/><path d="M12 14c-3-1-5-3-5-6M12 14c3-1 5-3 5-6" stroke="#6fae3a" stroke-width="1.6"/>'),
+  fruit: svg('<circle cx="12" cy="14" r="7" fill="#e0452e"/><path d="M12 7c0-2 1-3 3-4" stroke="#6b4a26" stroke-width="1.6"/><path d="M13 6c2-2 5-2 6 0-2 1-4 1-6 0z" fill="#6fae3a"/><circle cx="9.5" cy="12" r="1.6" fill="#ff9a80"/>'),
+  meat: svg('<path d="M5 13c0-5 5-8 9-7s6 5 4 9-7 6-10 4-3-4-3-6z" fill="#c0503a"/><path d="M8 13c1-2 4-3 6-2" stroke="#f2a08a" stroke-width="1.5"/><circle cx="17" cy="17" r="2.2" fill="#f4ecd8"/>'),
+  fish: svg('<path d="M3 12c3-4 8-5 12-3l5-3-1.5 6L20 18l-5-3c-4 2-9 1-12-3z" fill="#5fb3d9"/><circle cx="7.5" cy="11" r="1" fill="#1b2a38"/><path d="M10 9c1 2 1 4 0 6" stroke="#bfe6f5" stroke-width="1.2"/>'),
+  belief: svg('<path d="M12 3c2 3 5 5 5 9a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3-1-3 0-6 1-8z" fill="#f2b441"/><path d="M12 11c1 1.5 2 2.5 2 4a2 2 0 0 1-4 0c0-1.5 1-2.5 2-4z" fill="#fff0b8"/>'),
+  people: svg('<circle cx="9" cy="7" r="3" fill="#e9c8a0"/><path d="M3.5 20c0-4 2.5-7 5.5-7s5.5 3 5.5 7z" fill="#e9dcc0"/><circle cx="16.5" cy="8" r="2.5" fill="#d9b48a"/><path d="M13 20c.3-3.5 1.8-6 3.5-6 2.5 0 4 2.5 4 6z" fill="#b8452f"/>'),
+  sun: svg('<circle cx="12" cy="12" r="4.5" fill="#ffc86a"/><g stroke="#ffc86a" stroke-width="2"><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2 7 7M17 17l1.8 1.8M5.2 18.8 7 17M17 7l1.8-1.8"/></g>'),
+  sunset: svg('<path d="M4 17h16" stroke="#ffb35a" stroke-width="2"/><path d="M7 17a5 5 0 0 1 10 0z" fill="#ff9a4a"/><g stroke="#ffb35a" stroke-width="2"><path d="M12 6v2.5M5.5 9.5l1.6 1.6M18.5 9.5l-1.6 1.6"/></g><path d="M6 20.5h12" stroke="#ffb35a" stroke-width="1.5" opacity=".6"/>'),
+  moon: svg('<path d="M15.5 3.5a8.5 8.5 0 1 0 5 13.5A7 7 0 0 1 15.5 3.5z" fill="#cfe0ff"/><circle cx="10" cy="11" r="1.2" fill="#a8bce6"/><circle cx="13" cy="16" r="0.9" fill="#a8bce6"/>'),
+  pause: svg('<rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor"/>'),
+  play: svg('<path d="M8 5l11 7-11 7z" fill="currentColor"/>'),
+  gear: svg('<circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="2"/>'),
+  help: svg('<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7v.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="17.2" r="1.1" fill="currentColor"/>'),
+  sound: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke="currentColor" stroke-width="2"/>'),
+  mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="currentColor" stroke-width="2"/>'),
+  close: svg('<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4"/>'),
+  select: svg('<path d="M6 3l12 8-5.5 1.3 3.2 6.2-2.4 1.2-3.2-6.2L6 17.5z" fill="#fbf3e4"/>'),
+  build: svg('<path d="M3 20h18l-3-4H6zM6.5 15.5h11L15 12H9zM9.5 11.5h5L13 9h-2z" fill="#e8b84a"/><rect x="10.5" y="5" width="3" height="3.5" fill="#b8452f"/>'),
+  raise: svg('<path d="M3 19h18M5 19v-4h5v-4h4v4h5v4" fill="#9cc23a" stroke="#6e9a2e" stroke-width="1.2"/><path d="M12 9V3M9 6l3-3 3 3" stroke="#fbf3e4" stroke-width="2"/>'),
+  lower: svg('<path d="M3 13h5v4h8v-4h5v6H3z" fill="#9cc23a" stroke="#6e9a2e" stroke-width="1.2"/><path d="M12 3v7M9 7l3 3 3-3" stroke="#fbf3e4" stroke-width="2"/>'),
+  flatten: svg('<path d="M3 17h18v3H3z" fill="#9cc23a"/><path d="M5 13h14" stroke="#fbf3e4" stroke-width="2"/><path d="M8 9l4-4 4 4" stroke="#fbf3e4" stroke-width="2" opacity=".5"/>'),
+  harvest: svg('<path d="M6 20L16 8" stroke="#a8744a" stroke-width="2.4"/><path d="M13.5 4.5c3-1 6 1 6.5 4l-4.5 1.5z" fill="#c9ccd4"/><path d="M4 7c1-2 3-3 5-3" stroke="#6fae3a" stroke-width="1.6"/>'),
+  bless: svg('<path d="M12 2l1.8 5.5L19.5 9l-5.7 1.6L12 16l-1.8-5.4L4.5 9l5.7-1.5z" fill="#ffe08a"/><path d="M18 15l.8 2.2 2.2.8-2.2.8L18 21l-.8-2.2-2.2-.8 2.2-.8zM6 15l.6 1.6 1.6.6-1.6.6L6 19.4l-.6-1.6-1.6-.6 1.6-.6z" fill="#fff4c8"/>'),
+  rain: svg('<path d="M6.5 14a4.5 4.5 0 0 1 .8-8.9A5.5 5.5 0 0 1 17.8 7 3.6 3.6 0 0 1 17.5 14z" fill="#cfe4f5"/><path d="M8 17l-1 3M12 17l-1 3M16 17l-1 3" stroke="#5fb3d9" stroke-width="2"/>'),
+  calm: svg('<path d="M4 9h11a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M5 17h6" stroke="#bfe6f5" stroke-width="2"/>'),
+  rotL: svg('<path d="M5 12a7 7 0 1 0 2.1-5" stroke="currentColor" stroke-width="2.2"/><path d="M3.5 3.5v5h5" stroke="currentColor" stroke-width="2.2"/>'),
+  rotR: svg('<path d="M19 12a7 7 0 1 1-2.1-5" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 3.5v5h-5" stroke="currentColor" stroke-width="2.2"/>'),
+  compass: svg('<circle cx="12" cy="12" r="9.5" stroke="rgba(255,255,255,0.35)" stroke-width="1.5"/><path d="M12 3.5l3 8.5h-6z" fill="#e4572e"/><path d="M12 20.5l-3-8.5h6z" fill="#fbf3e4"/>'),
+  follow: svg('<circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" stroke-width="2"/>'),
+  upgrade: svg('<path d="M12 4l7 8h-4v8H9v-8H5z" fill="currentColor"/>'),
+  demolish: svg('<path d="M5 7h14M9 7V4.5h6V7M7 7l1 13h8l1-13" stroke="currentColor" stroke-width="2"/>'),
+  boat: svg('<path d="M3 14h18l-3 5H6z" fill="#a8744a"/><path d="M11 3v10M11 3l6 8h-6" fill="#f4ecd8" stroke="#f4ecd8" stroke-width="1"/>'),
+  warrior: svg('<path d="M12 3c4 0 6 3 6 6 0 2-1 3-2 4v3H8v-3c-1-1-2-2-2-4 0-3 2-6 6-6z" fill="#e0a82e"/><circle cx="9.5" cy="9.5" r="1" fill="#3a2616"/><circle cx="14.5" cy="9.5" r="1" fill="#3a2616"/><path d="M8 18h8v3H8z" fill="#b8452f"/>'),
+  eagle: svg('<path d="M12 4c3.5 0 6 2.5 6 6 0 2-1 3.5-2 4.5V17H8v-2.5c-1-1-2-2.5-2-4.5 0-3.5 2.5-6 6-6z" fill="#f4eee0"/><path d="M11 11l5 1-5 2z" fill="#f2c230"/><circle cx="10" cy="9" r="1" fill="#3a2616"/><path d="M8 18h8v3H8z" fill="#7a4a2a"/>'),
+  seed: svg('<path d="M12 21c-5-3-7-7-7-11a7 7 0 0 1 14 0c0 4-2 8-7 11z" fill="#6fae3a"/><path d="M12 20V9" stroke="#2f6a2a" stroke-width="1.5"/>'),
+  island: svg('<path d="M2 17c3-1 5 1 10 1s7-2 10-1v3H2z" fill="#3fd6e0"/><path d="M5 17c1-3 4-5 7-5s6 2 7 5z" fill="#9cc23a"/><path d="M13 12V5M13 5c-2 0-4 1-5 3M13 5c2 0 4 1 5 3" stroke="#2f7a32" stroke-width="1.6"/>'),
+  link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" stroke-width="2"/>'),
+  // Building icons.
+  b_hut: svg('<path d="M3 13L12 4l9 9z" fill="#d9a95b"/><rect x="6" y="13" width="12" height="7" fill="#e2c79c"/><rect x="10.5" y="15" width="3" height="5" fill="#3a2a20"/>'),
+  b_home: svg('<path d="M2 11L12 4l10 7z" fill="#d9a95b"/><rect x="4" y="11" width="16" height="9" fill="#efe2c6"/><rect x="4" y="11" width="16" height="1.5" fill="#b8452f"/><rect x="10.5" y="14.5" width="3" height="5.5" fill="#3a2a20"/><rect x="6" y="14" width="2.5" height="2.5" fill="#3a2a20"/><rect x="15.5" y="14" width="2.5" height="2.5" fill="#3a2a20"/>'),
+  b_temple: svg('<path d="M2 21h20l-2-4H4zM4.5 16.5h15L18 13H6zM6.5 12.5h11L16 9H8z" fill="#bfb2a0"/><rect x="9" y="5" width="6" height="4" fill="#b8452f"/><rect x="8.5" y="4" width="7" height="1.5" fill="#d4a017"/><path d="M11 21v-8h2v8" fill="#b8452f"/>'),
+  b_farm: svg('<path d="M3 20h18" stroke="#7a4f30" stroke-width="2"/><g stroke="#6fae3a" stroke-width="2"><path d="M6 19v-8M10 19v-10M14 19v-9M18 19v-8"/></g><g fill="#f2c94c"><ellipse cx="6" cy="10" rx="1.4" ry="2.2"/><ellipse cx="10" cy="8" rx="1.4" ry="2.2"/><ellipse cx="14" cy="9" rx="1.4" ry="2.2"/><ellipse cx="18" cy="10" rx="1.4" ry="2.2"/></g>'),
+  b_butcher: svg('<rect x="3" y="12" width="9" height="8" fill="#e2c79c"/><path d="M2 12l5.5-5 5.5 5z" fill="#d9a95b"/><path d="M14 20v-7M18 20v-7M22 20v-7M13 15h9M13 18h9" stroke="#8b5a34" stroke-width="1.5"/><ellipse cx="18" cy="17" rx="2.5" ry="1.8" fill="#f2a0b0"/>'),
+  b_woodstore: svg('<path d="M3 9l18-3v2L3 11z" fill="#d9a95b"/><path d="M4 11v9M20 8v12" stroke="#8b5a34" stroke-width="1.6"/><g fill="#a8744a"><rect x="6" y="17" width="12" height="3" rx="1.5"/><rect x="7" y="14" width="10" height="3" rx="1.5"/></g><g fill="#e3c08e"><circle cx="18" cy="18.5" r="1.3"/><circle cx="17" cy="15.5" r="1.3"/></g>'),
+  b_grainstore: svg('<path d="M4 11L12 4l8 7z" fill="#d9a95b"/><rect x="6" y="11" width="12" height="6" rx="1" fill="#e2c79c"/><rect x="6" y="13.5" width="12" height="1.2" fill="#b8452f"/><path d="M8 17v4M16 17v4M12 17v4" stroke="#8b5a34" stroke-width="1.6"/>'),
+  b_warroom: svg('<rect x="4" y="9" width="16" height="11" fill="#bfb2a0"/><path d="M4 9V6h2.5v3M8.5 9V6H11v3M13 9V6h2.5v3M17.5 9V6H20v3" fill="#bfb2a0"/><rect x="4" y="9" width="16" height="1.6" fill="#c0392b"/><rect x="10" y="14" width="4" height="6" fill="#3a2a20"/><path d="M21 3v12" stroke="#5e3b22" stroke-width="1.3"/><path d="M21 3.5h-4v4h4" fill="#e0a82e"/>'),
+  b_jetty: svg('<path d="M2 17c3-1 5 1 10 1s7-2 10-1v4H2z" fill="#3fd6e0"/><rect x="3" y="12" width="17" height="2" fill="#a8784a"/><path d="M6 14v5M11 14v5M16 14v5" stroke="#5e3b22" stroke-width="1.5"/><rect x="14" y="9" width="3" height="3" fill="#8b5a34"/>'),
+};
+
+export function icon(name: string): string {
+  return `<span class="ic">${ICONS[name] ?? ''}</span>`;
+}
