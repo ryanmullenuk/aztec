@@ -10,7 +10,74 @@ export const FX = {
   uSunI: { value: 3 },
   /** 0..1 night factor, for emissive torch flames. */
   uNight: { value: 0 },
+  /** Camera and look-at point, and how zoomed in the view is (0 far → 1 close), for fading trees in the way. */
+  uCamPos: { value: new THREE.Vector3() },
+  uFocus: { value: new THREE.Vector3() },
+  uCut: { value: 0 },
 };
+
+/**
+ * Trees that stand between the camera and what it's looking at dither to semi-transparent,
+ * but only when zoomed in (fully solid when zoomed out).
+ */
+function patchSeeThrough(mat: THREE.MeshStandardMaterial, key: string): THREE.MeshStandardMaterial {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    prev.call(mat, shader, r);
+    shader.uniforms.uCamPos = FX.uCamPos;
+    shader.uniforms.uFocus = FX.uFocus;
+    shader.uniforms.uCut = FX.uCut;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSeeW;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        {
+          vec4 sw = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            sw = instanceMatrix * sw;
+          #endif
+          vSeeW = (modelMatrix * sw).xyz;
+        }`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform vec3 uCamPos; uniform vec3 uFocus; uniform float uCut; varying vec3 vSeeW;
+        float seeBayer(vec2 p) {
+          vec2 q = mod(floor(p), 4.0);
+          float a = mod(q.x + q.y * 2.0, 4.0), b = mod(q.x * 2.0 + q.y * 3.0, 4.0);
+          return (a * 4.0 + b + 0.5) / 16.0;
+        }`)
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+        if (uCut > 0.01) {
+          vec3 ab = uFocus - uCamPos;
+          float L = length(ab);
+          vec3 dir = ab / L;
+          vec3 ap = vSeeW - uCamPos;
+          float s = dot(ap, dir);
+          float r = length(ap - dir * s);
+          float inTube = (1.0 - smoothstep(2.6, 4.4, r)) * step(0.0, s) * (1.0 - smoothstep(L - 0.5, L + 1.5, s));
+          if (seeBayer(gl_FragCoord.xy) < inTube * uCut * 0.62) discard;
+        }`
+      );
+  };
+  mat.customProgramCacheKey = () => key;
+  return mat;
+}
+
+let tree: THREE.MeshStandardMaterial | null = null;
+/** Stylised material for trees, with the see-through effect when zoomed in. */
+export function treeMaterial(): THREE.MeshStandardMaterial {
+  if (!tree) tree = patchSeeThrough(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })), 'tree');
+  return tree;
+}
+let treeDouble: THREE.MeshStandardMaterial | null = null;
+export function treeMaterialDouble(): THREE.MeshStandardMaterial {
+  if (!treeDouble) treeDouble = patchSeeThrough(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, side: THREE.DoubleSide })), 'tree-double');
+  return treeDouble;
+}
 
 /**
  * Patches a MeshStandardMaterial with:
