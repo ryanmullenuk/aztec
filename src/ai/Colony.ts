@@ -392,17 +392,22 @@ export class Colony {
       }
       return best;
     };
-    // 0) Rebalance: a Home keeps one couple; extra adults move out once there is room elsewhere.
+    // Larger homes house several couples (and leave room for their children).
+    const couplesFor = (b: Building) => Math.max(1, Math.floor(b.housing / 3.5));
+    // 0) Rebalance: a Home keeps its couples; extra adults move out once there is room elsewhere.
     const spare = (except: Building) => this.bld.list.reduce((s, b) => (b === except ? s : s + Math.max(0, b.housing - b.residents.length)), 0);
     for (const b of this.bld.of('home')) {
       const adults = b.residents.map((r) => this.byId(r)).filter((r): r is Islander => !!r && !r.child);
-      if (adults.length <= 2 || spare(b) <= 0) continue;
+      const maxAdults = couplesFor(b) * 2;
+      if (adults.length <= maxAdults || spare(b) <= 0) continue;
       let room = spare(b);
       const keep: Islander[] = [];
-      const m = adults.find((x) => x.gender === 'm'), f = adults.find((x) => x.gender === 'f');
-      if (m) keep.push(m);
-      if (f) keep.push(f);
-      while (keep.length < 2) keep.push(adults.find((x) => !keep.includes(x))!);
+      const men = adults.filter((x) => x.gender === 'm'), women = adults.filter((x) => x.gender === 'f');
+      for (let k = 0; k < couplesFor(b); k++) {
+        if (men[k]) keep.push(men[k]);
+        if (women[k]) keep.push(women[k]);
+      }
+      while (keep.length < maxAdults) keep.push(adults.find((x) => !keep.includes(x))!);
       for (const x of adults) {
         if (keep.includes(x) || room <= 0) continue;
         room--;
@@ -410,12 +415,13 @@ export class Colony {
         b.residents = b.residents.filter((id) => id !== x.id);
       }
     }
-    // 1) Homes take one couple each (leaving room for children), and children follow their parents.
+    // 1) Homes take couples (leaving room for children), and children follow their parents.
     for (const b of this.bld.of('home')) {
       const adults = () => b.residents.map((r) => this.byId(r)).filter((r): r is Islander => !!r && !r.child);
-      while (adults().length < 2 && b.residents.length < b.housing) {
+      while (adults().length < couplesFor(b) * 2 && b.residents.length < b.housing) {
         const have = adults();
-        const want = have.length === 1 ? (have[0].gender === 'm' ? 'f' : 'm') : null;
+        const nm = have.filter((x) => x.gender === 'm').length, nf = have.length - nm;
+        const want = nm > nf ? 'f' : nf > nm ? 'm' : null;
         const pick = nearest(b, (i) => !i.child && (!want || i.gender === want));
         if (!pick) break;
         move(pick, b);
@@ -441,7 +447,7 @@ export class Colony {
       if (this.list.length >= ISLANDER.max) return;
       const res = b.residents.map((id) => this.byId(id)).filter((i): i is Islander => !!i);
       const adults = res.filter((i) => !i.child);
-      if (res.length >= (b.def.housing ?? 4)) continue;
+      if (res.length >= b.housing) continue;
       if (!adults.some((i) => i.gender === 'm') || !adults.some((i) => i.gender === 'f')) continue;
       if (this.eco.food < ISLANDER.birthFoodMin) continue;
       if (this.rnd() > ISLANDER.birthChancePerDay) continue;
@@ -848,6 +854,7 @@ export class Colony {
         }
         this.faceTo(isl, p.x - isl.x, p.z - isl.z, dt);
         isl.anim = t.kind === 'chop' ? 'chop' : t.kind === 'mine' ? 'mine' : 'harvest';
+        isl.reachHigh = p.kind === 'banana' || (p.kind === 'apple' && p.variant === 1);
         const before = t.timer;
         t.timer -= dt;
         // A chop / clink sound on each swing.
