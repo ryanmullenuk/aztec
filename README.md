@@ -62,8 +62,10 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 ## Features
 
 **World**
-- Procedural island from a seed: coves, beaches, rocky headlands, 3–6 offshore islets, jungle hills and a highland plateau with cliffs.
-- 1–3 rivers, a waterfall with mist falling into a turquoise pool, and a lagoon.
+- Procedural island from a seed, laid out like a tropical atoll: a multi-lobed main island with bays and peninsulas, wide sandy beaches, rocky headlands and knolls, large open grasslands between jungle, and 5–8 rocky wooded islets.
+- A tall mountain massif with jagged peaks, green lower slopes, rocky crags and clouds drifting around the summits.
+- 1–3 rivers springing high in the mountains; a waterfall drops off a mountain cliff into a turquoise pool with mist, and a lagoon.
+- A wide turquoise reef shelf around the island, with seagrass meadows, dark reef rock, seaweed beds and 18–26 coral reefs, dropping off into deep navy sea.
 - Godus-style stepped contour terrain with rounded, curving terraces. Sculpt it one layer at a time, paying Belief.
 - Paths wear into the grass where islanders walk often, and farms till the soil.
 
