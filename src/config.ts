@@ -24,11 +24,12 @@ export const WORLD = {
 };
 
 export const COLORS = {
-  deepOcean: 0x0b4f9c,
-  deepOcean2: 0x1570c4,
-  midWater: 0x1fa3e0,
-  shallow: 0x3fd6e0,
-  shallowBright: 0x7fe8e2,
+  // Open ocean: deep navy-teal like a real sea seen from above; tropical turquoise only in the shallows.
+  deepOcean: 0x0a2c48,
+  deepOcean2: 0x0f3d60,
+  midWater: 0x17698c,
+  shallow: 0x2cb8c8,
+  shallowBright: 0x72e2d8,
   reef1: 0x1c6e7a,
   reef2: 0x2a5f6e,
   foam: 0xf5fbff,
@@ -128,8 +129,9 @@ export const TIME = {
 
 /** Keyframes of the day cycle. `t` = real fraction of the day. Golden hour gets the widest span. */
 export const DAY_KEYS = [
-  { t: 0.0, elev: -30, sun: 0x9ab8ff, sunI: 1.25, hemiSky: 0x4a6cb0, hemiGround: 0x283250, hemiI: 1.0, amb: 0.2, fog: 0x1e2e52, exposure: 1.05, night: 1 },
-  { t: 0.14, elev: -8, sun: 0x9ab8ff, sunI: 1.15, hemiSky: 0x4f6cb0, hemiGround: 0x2a3050, hemiI: 0.95, amb: 0.2, fog: 0x283a60, exposure: 1.05, night: 1 },
+  // Night: bright silvery moonlight, blue sky bounce.
+  { t: 0.0, elev: -30, sun: 0xc4d6ff, sunI: 1.55, hemiSky: 0x44639f, hemiGround: 0x263150, hemiI: 1.05, amb: 0.22, fog: 0x1b2c50, exposure: 1.1, night: 1 },
+  { t: 0.14, elev: -8, sun: 0xc0d2ff, sunI: 1.45, hemiSky: 0x4a66a6, hemiGround: 0x283050, hemiI: 1.0, amb: 0.21, fog: 0x24385e, exposure: 1.08, night: 1 },
   { t: 0.2, elev: 4, sun: 0xffa36a, sunI: 1.6, hemiSky: 0xd3a5a8, hemiGround: 0x8a6b55, hemiI: 0.8, amb: 0.14, fog: 0xf0b890, exposure: 1.05, night: 0.1 },
   { t: 0.27, elev: 22, sun: 0xffe2b8, sunI: 2.6, hemiSky: 0x9fd4ff, hemiGround: 0xc9a46a, hemiI: 1.0, amb: 0.18, fog: 0xdde6ea, exposure: 1.05, night: 0 },
   { t: 0.4, elev: 48, sun: 0xfff0d8, sunI: 3.0, hemiSky: 0x9fd4ff, hemiGround: 0xc9a46a, hemiI: 1.05, amb: 0.2, fog: 0xe6ecee, exposure: 1.0, night: 0 },
@@ -138,8 +140,8 @@ export const DAY_KEYS = [
   { t: 0.56, elev: 31, sun: 0xffd9a0, sunI: 3.4, hemiSky: 0x9fd4ff, hemiGround: 0xc9a46a, hemiI: 0.95, amb: 0.16, fog: 0xf3d6b0, exposure: 1.1, night: 0 },
   { t: 0.74, elev: 19, sun: 0xffc680, sunI: 3.2, hemiSky: 0x9ccfff, hemiGround: 0xc99c62, hemiI: 0.9, amb: 0.15, fog: 0xf5c99a, exposure: 1.12, night: 0 },
   { t: 0.8, elev: 5, sun: 0xff9a5c, sunI: 1.9, hemiSky: 0x9b8fb8, hemiGround: 0x8a6048, hemiI: 0.75, amb: 0.13, fog: 0xe89c78, exposure: 1.08, night: 0.35 },
-  { t: 0.86, elev: -10, sun: 0x9ab8ff, sunI: 1.15, hemiSky: 0x4f6cb0, hemiGround: 0x2a3050, hemiI: 0.95, amb: 0.2, fog: 0x2d3e66, exposure: 1.05, night: 1 },
-  { t: 1.0, elev: -30, sun: 0x9ab8ff, sunI: 1.25, hemiSky: 0x4a6cb0, hemiGround: 0x283250, hemiI: 1.0, amb: 0.2, fog: 0x1e2e52, exposure: 1.05, night: 1 },
+  { t: 0.86, elev: -10, sun: 0xc0d2ff, sunI: 1.45, hemiSky: 0x4a66a6, hemiGround: 0x2a3050, hemiI: 1.0, amb: 0.21, fog: 0x2a3c64, exposure: 1.08, night: 1 },
+  { t: 1.0, elev: -30, sun: 0xc4d6ff, sunI: 1.55, hemiSky: 0x44639f, hemiGround: 0x263150, hemiI: 1.05, amb: 0.22, fog: 0x1b2c50, exposure: 1.1, night: 1 },
 ];
 /** Sun azimuth (radians, world space) at golden hour; sun sits upper-right of the default view so shadows fall lower-left. */
 export const SUN_AZIMUTH_EVENING = -1.55;
@@ -396,7 +398,7 @@ export const MARINE = {
   whaleLength: 5.2,
   whaleSpeed: 1.5,
   /** Cruising depth of the whale's body centre below the surface. */
-  swimDepth: 1.35,
+  swimDepth: 1.15,
   /** Seconds until the first breach, then a random gap between breaches per whale. */
   firstBreach: 12,
   breachEvery: [45, 95] as [number, number],
