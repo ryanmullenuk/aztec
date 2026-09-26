@@ -14,6 +14,8 @@ export interface LightState {
 }
 
 const cA = new THREE.Color();
+const _sun = new THREE.Vector3();
+const _moon = new THREE.Vector3();
 const cB = new THREE.Color();
 
 /**
@@ -89,14 +91,15 @@ export class Lighting {
     // Sun sweeps across the sky; in the evening it is upper-right of the default view.
     const az = this.eveningAzimuth + (0.66 - dayT) * 3.4;
     let el = (elev * Math.PI) / 180;
-    // At night the light becomes a moon, high and cool on the opposite side.
-    let azUse = az;
-    if (night > 0.5) {
-      el = (38 * Math.PI) / 180;
-      azUse = this.eveningAzimuth + 0.5;
-    }
     el = Math.max(el, (6 * Math.PI) / 180);
-    s.sunDir.set(Math.cos(azUse) * Math.cos(el), Math.sin(el), Math.sin(azUse) * Math.cos(el)).normalize();
+    _sun.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
+    // At night the light hands over smoothly to a high, silvery moon that drifts slowly across the sky
+    // (its glitter path on the sea points back toward the default view).
+    const mAz = this.eveningAzimuth + 0.35 + (dayT < 0.5 ? dayT + 1 : dayT) * 0.5 - 0.5;
+    const mEl = (40 * Math.PI) / 180;
+    _moon.set(Math.cos(mAz) * Math.cos(mEl), Math.sin(mEl), Math.sin(mAz) * Math.cos(mEl));
+    const m = clamp((night - 0.3) / 0.5, 0, 1);
+    s.sunDir.copy(_sun).lerp(_moon, m * m * (3 - 2 * m)).normalize();
 
     cA.setHex(a.sun);
     cB.setHex(b.sun);

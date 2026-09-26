@@ -191,7 +191,8 @@ const GradeShader = {
       vec3 warm = mix(vec3(1.0, 0.82, 0.58), vec3(0.75, 0.85, 1.0), uNight);
       c += (warm - 0.75) * uWarm * smoothstep(0.35, 1.0, l);
       c += mix(vec3(-0.05, 0.28, 0.32), vec3(-0.05, 0.05, 0.35), uNight) * uTeal * (1.0 - smoothstep(0.0, 0.45, l));
-      c = mix(vec3(l), c, uSat);
+      // Moonlight is cooler and less saturated.
+      c = mix(vec3(l), c, uSat * (1.0 - uNight * 0.3));
       c = (c - 0.5) * uContrast + 0.5;
       vec2 d = vUv - 0.5;
       c *= clamp(1.0 - dot(d, d) * uVig * 2.2, 0.0, 1.0);
