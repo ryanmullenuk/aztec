@@ -185,6 +185,8 @@ export class World {
 
   /** Turns a continuous layer value into a rounded Godus-style terrace height. */
   terrace(v: number): number {
+    // Below sea level the seabed slopes smoothly (no underwater steps showing through the water).
+    if (v < 0) return (v - 0.5) * this.H;
     const fl = Math.floor(v);
     const t = fl + smootherstep(0.2, 0.8, v - fl);
     return (t - 0.5) * this.H;
