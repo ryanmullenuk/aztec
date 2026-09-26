@@ -51,13 +51,14 @@ const waterFrag = /* glsl */ `
     float lam = 7.5;
     for (int i = 0; i < 16; i++) {
       float fi = float(i);
-      // Long waves follow the wind; short chop comes from all around.
-      float ang = 0.62 + sin(fi * 2.39 + 0.4) * (0.7 + fi * 0.09);
+      // Directions spread by golden-ratio steps (no two waves run parallel, so no regular hatching):
+      // long waves stay near the wind direction, short chop comes from all around.
+      float ang = 0.62 + (fract(fi * 0.6180339 + 0.13) - 0.5) * (1.1 + fi * 0.2);
       vec2 d = vec2(cos(ang), sin(ang));
       float k = TAU / lam;
       float w = sqrt(9.8 * k) * 0.55 * (1.0 + uFlow * 1.5);
       float ph = dot(d, p) * k + t * w + fi * 1.93;
-      float A = lam * 0.0135 * amp * (1.0 - smoothstep(lam * 0.12, lam * 0.45, fw));
+      float A = lam * 0.0135 * amp * (1.0 - smoothstep(lam * 0.18, lam * 0.6, fw));
       h += A * sin(ph);
       g += A * k * d * cos(ph);
       ampSum += A;
@@ -78,6 +79,8 @@ const waterFrag = /* glsl */ `
     float fw = length(fwidth(p)) * 1.5;
     vec2 grad; float ampSum;
     float h0 = waves(p, t, fw, grad, ampSum);
+    // Far away the chop reads as a smoother sheen (keeps distant water from looking hatched).
+    grad *= mix(1.0, 0.45, smoothstep(0.15, 0.7, fw));
     // Calm the surface in very shallow water (waves break into foam instead).
     grad *= mix(0.35, 1.0, smoothstep(0.05, 0.8, depth));
     vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
@@ -98,7 +101,10 @@ const waterFrag = /* glsl */ `
     col = mix(col, cMid, smoothstep(0.5, 2.4, cdepth));
     col = mix(col, cDeep2, smoothstep(1.8, 5.0, cdepth));
     float far = smoothstep(uWorld * 0.42, uWorld * 1.4, length(vW.xz));
-    col = mix(col, cDeep, clamp(max(smoothstep(4.5, 8.0, cdepth), far), 0.0, 1.0));
+    // Blend toward open-ocean colour approaching the map edge so its square outline never shows.
+    float edgeD = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    float edgeK = (1.0 - smoothstep(0.0, 0.22, edgeD)) * inside + (1.0 - inside);
+    col = mix(col, cDeep, clamp(max(max(smoothstep(4.5, 8.0, cdepth), far), edgeK), 0.0, 1.0));
 
     float dayK = mix(0.3, 1.0, uDay);
     float ndl = max(dot(n, L), 0.0);
@@ -153,11 +159,16 @@ const waterFrag = /* glsl */ `
     alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
     alpha = max(alpha, foam);
     // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
-    float edgeD = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    alpha = mix(1.0, alpha, inside * smoothstep(0.0, 0.07, edgeD));
+    alpha = mix(1.0, alpha, inside * smoothstep(0.0, 0.16, edgeD));
     gl_FragColor = vec4(lit, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    // Sea mist ring: the far ocean melts into the haze, hiding the edge of the water plane.
+    #ifdef USE_FOG
+      float rim = smoothstep(uWorld * 0.8, uWorld * 2.2, length(vW.xz));
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, rim);
+      gl_FragColor.a = mix(gl_FragColor.a, 1.0, rim);
+    #endif
     #include <fog_fragment>
   }
 `;
@@ -412,7 +423,7 @@ export class Water {
     const amp = 1 + this.shared.uStorm.value * 1.7;
     let h = 0, lam = 7.5;
     for (let i = 0; i < 4; i++) {
-      const ang = 0.62 + Math.sin(i * 2.39 + 0.4) * 0.95;
+      const ang = 0.62 + ((i * 0.6180339 + 0.13) % 1 - 0.5) * (1.1 + i * 0.2);
       const k = (Math.PI * 2) / lam;
       const w = Math.sqrt(9.8 * k) * 0.55;
       h += lam * 0.0125 * amp * Math.sin((Math.cos(ang) * x + Math.sin(ang) * z) * k + t * w + i * 1.93);
