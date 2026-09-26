@@ -114,6 +114,8 @@ export const CAMERA = {
   rotateSpeed: 1.6,
   /** Radians per pixel when rotating by dragging (middle mouse, Alt/Shift-drag, compass). */
   dragRotateSpeed: 0.008,
+  /** Degrees of tilt per pixel of two-finger (or right-button) vertical drag. */
+  tiltSpeed: 0.18,
   zoomSpeed: 0.0015,
   damping: 8,
 };
@@ -252,8 +254,8 @@ export interface BuildingDef {
 
 export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   campfire: { key: 'campfire', name: 'Tribal Fire', description: 'The heart of the tribe. Stores a little of everything.', size: [2, 2], cost: { wood: 0, stone: 0, belief: 0 }, buildTime: 1, builders: 1, workers: 0, placeable: false },
-  hut: { key: 'hut', name: 'Hut', description: 'Cheap thatched shelter for 2 islanders.', size: [2, 2], cost: { wood: 12, stone: 0, belief: 0 }, buildTime: 22, builders: 2, workers: 0, housing: 2, upgradeTo: 'home', placeable: true },
-  home: { key: 'home', name: 'Home', description: 'A sturdy family home for 4. Couples living here can have children.', size: [3, 3], cost: { wood: 26, stone: 14, belief: 0 }, buildTime: 45, builders: 3, workers: 0, housing: 4, placeable: true },
+  hut: { key: 'hut', name: 'Hut', description: 'Level 1 house: a small adobe home for 2 islanders.', size: [2, 2], cost: { wood: 12, stone: 0, belief: 0 }, buildTime: 22, builders: 2, workers: 0, housing: 2, upgradeTo: 'home', placeable: true },
+  home: { key: 'home', name: 'Home', description: 'Adobe family house (level 2, 4 people). Upgrade it up to level 5 for 16. Couples living here have children.', size: [3, 3], cost: { wood: 26, stone: 14, belief: 0 }, buildTime: 45, builders: 3, workers: 0, housing: 4, maxTier: 4, placeable: true },
   temple: { key: 'temple', name: 'Temple', description: 'Stepped pyramid that generates Belief. Upgrade twice to raise the Great Pyramid.', size: [4, 4], cost: { wood: 20, stone: 36, belief: 20 }, buildTime: 70, builders: 4, workers: 2, maxTier: 3, placeable: true },
   farm: { key: 'farm', name: 'Farm', description: 'Maize fields in neat rows. Farmers tend and harvest grain, and catch wild chickens to keep in the pen.', size: [4, 4], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 25, builders: 2, workers: 2, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
@@ -261,6 +263,20 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   grainstore: { key: 'grainstore', name: 'Grain Store', description: 'Stores grain, fruit, meat and fish. Baskets fill visibly.', size: [2, 2], cost: { wood: 18, stone: 4, belief: 0 }, buildTime: 24, builders: 2, workers: 0, foodCap: 140, placeable: true },
   warroom: { key: 'warroom', name: 'War Room', description: 'Trains Jaguar and Eagle warriors who patrol the island.', size: [3, 3], cost: { wood: 30, stone: 30, belief: 15 }, buildTime: 55, builders: 3, workers: 0, placeable: true },
   jetty: { key: 'jetty', name: 'Jetty', description: 'Wooden pier into the shallows. Builds canoes and fishing boats.', size: [2, 2], cost: { wood: 24, stone: 0, belief: 0 }, buildTime: 30, builders: 2, workers: 3, placeable: true },
+};
+
+/** Adobe homes grow in place: tier 1–4 are house levels 2–5. */
+export const HOMES = {
+  housing: [4, 7, 12, 16],
+  /** Cost to reach each tier (index = target tier). */
+  upgradeCost: [
+    { wood: 0, stone: 0, belief: 0 },
+    { wood: 0, stone: 0, belief: 0 },
+    { wood: 30, stone: 26, belief: 0 },
+    { wood: 45, stone: 45, belief: 10 },
+    { wood: 60, stone: 70, belief: 25 },
+  ],
+  upgradeTime: [0, 0, 40, 55, 70],
 };
 
 export const TEMPLE = {
@@ -405,7 +421,7 @@ export const MARINE = {
   whaleLength: 5.2,
   whaleSpeed: 1.5,
   /** Cruising depth of the whale's body centre below the surface. */
-  swimDepth: 1.15,
+  swimDepth: 1.7,
   /** Seconds until the first breach, then a random gap between breaches per whale. */
   firstBreach: 12,
   breachEvery: [45, 95] as [number, number],
@@ -414,7 +430,7 @@ export const MARINE = {
   dolphinLength: 1.15,
   dolphinSpeed: 3.2,
   /** Seconds per porpoising cycle (half leaping, half gliding under). */
-  leapPeriod: 1.7,
+  leapPeriod: 2.1,
   leapHeight: 0.85,
 };
 
