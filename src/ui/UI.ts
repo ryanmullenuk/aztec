@@ -287,11 +287,11 @@ export class UI {
       <label class="row">Volume <input type="range" min="0" max="1" step="0.05" data-k="volume"></label>
       <label class="row">Music <input type="range" min="0" max="1" step="0.05" data-k="music"></label>
       <label class="row">Show FPS <input type="checkbox" data-k="fps"></label>
-      <div class="row seedrow">Island seed <b class="seedval"></b>
+      <div class="row seedrow">Share the game
         <button class="btn small" data-a="copy">${ICONS.link} Copy link</button>
       </div>
       <div class="row btns">
-        <button class="btn" data-a="new">${ICONS.island} New Island</button>
+        <button class="btn" data-a="new">${ICONS.island} Restart island</button>
         <button class="btn" data-a="save">Save now</button>
         <button class="btn" data-a="tutorial">Restart tutorial</button>
       </div>
@@ -317,14 +317,14 @@ export class UI {
       };
     });
     card.querySelector<HTMLButtonElement>('[data-a="new"]')!.onclick = () => {
-      if (confirm('Start a new island? Your current island will be replaced.')) this.game.newIsland();
+      if (confirm('Start again from the beginning? Your progress on this island will be lost.')) this.game.newIsland();
     };
     card.querySelector<HTMLButtonElement>('[data-a="save"]')!.onclick = () => {
       this.game.save();
       this.toast('Island saved.');
     };
     card.querySelector<HTMLButtonElement>('[data-a="copy"]')!.onclick = async () => {
-      const url = `${location.origin}${location.pathname}?seed=${this.game.world.seed}`;
+      const url = `${location.origin}${location.pathname}`;
       try {
         await navigator.clipboard.writeText(url);
         this.toast('Link copied. Share it to play this island.');
@@ -336,7 +336,6 @@ export class UI {
       this.toggle(this.settings, false);
       this.startTutorial(true);
     };
-    (card.querySelector('.seedval') as HTMLElement).textContent = String(this.game.world.seed);
     this.settings.appendChild(card);
     this.settings.onclick = (e) => {
       if (e.target === this.settings) this.toggle(this.settings, false);
@@ -438,7 +437,6 @@ export class UI {
     const on = show ?? m.classList.contains('hidden');
     m.classList.toggle('hidden', !on);
     if (on && this.presetSelect) this.presetSelect.value = this.game.settings.preset;
-    if (on && m === this.settings) (this.settings.querySelector('.seedval') as HTMLElement).textContent = String(this.game.world.seed);
   }
 
   toggleHelp(): void {
