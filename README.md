@@ -6,7 +6,7 @@ The whole thing is rendered as a tilt-shift miniature diorama at golden hour. Ev
 
 **Play:** https://ryanmullenuk.github.io/aztec/ (after GitHub Pages is enabled, see [Deploy](#deploy))
 
-Add `?seed=1234` to the URL to play or share a specific island.
+Everyone plays the same hand-designed island; share the link to invite friends.
 
 ## Quick start
 
@@ -62,9 +62,9 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 ## Features
 
 **World**
-- Procedural island from a seed, laid out like a tropical atoll: a multi-lobed main island with bays and peninsulas, wide sandy beaches, rocky headlands and knolls, large open grasslands between jungle, and 5–8 rocky wooded islets.
+- One hand-designed island, laid out like a tropical atoll: a multi-lobed main island with bays and peninsulas, wide sandy beaches, rocky headlands and knolls, large open grasslands between jungle, and 5–8 rocky wooded islets.
 - A tall mountain massif with jagged peaks, green lower slopes, rocky crags and clouds drifting around the summits.
-- 1–3 rivers springing high in the mountains; a waterfall drops off a mountain cliff into a turquoise pool with mist, and a lagoon.
+- Rivers spring high in the mountains; a waterfall drops off a cliff into a turquoise pool with mist, and there's a lagoon. Hills and mountains are smooth slopes, while the lowlands keep gentle flat terraces for building.
 - A wide turquoise reef shelf around the island, with seagrass meadows, dark reef rock, seaweed beds and 18–26 coral reefs, dropping off into deep navy sea.
 - Godus-style stepped contour terrain with rounded, curving terraces. Sculpt it one layer at a time, paying Belief.
 - Paths wear into the grass where islanders walk often, and farms till the soil.
@@ -87,11 +87,11 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Chopped trees leave stumps that regrow as saplings. Fruit grows back; rocks give stone.
 
 **Islanders**
-- Faceted low-poly Aztec islanders, articulated with knees and elbows (pelvis, chest, head, upper arms, forearms, thighs and shins):
-  - Men: gold collar with a jade pendant, armbands and cuffs, a red belt, a step-fret loincloth panel with layered teal/red/cream flaps, greaves and sandals.
-  - Women: long hair, a crossed crop top and a layered skirt with a fret apron.
-  - Feather headdresses from a simple band up to the grand teal/red/gold fan (priests always wear the fan). Warriors wear jaguar or eagle helms and carry an obsidian spear.
-  - Per-person skin tones and accent colours.
+- Simple faceted low-poly islanders (white wrap cloth, red belt and front panel, red wristbands, brown boots, black bob or braided hair), articulated at the hips, back, shoulders, elbows and knees so they bend properly when building, hoeing or gathering:
+  - Men: a white wrap over one shoulder with a coloured stripe, and a knee-length white skirt.
+  - Women: a white top with a coloured trim, a longer white skirt with red and coloured hem bands, and a long braid.
+  - Priests wear a feather fan headdress; warriors wear jaguar or eagle helms and carry an obsidian spear.
+  - Per-person skin tones and trim colours.
 - Procedural animations: walk, run, carry, chop, mine, farm, harvest, fish, build, pray, eat, idle and sleep.
 - Needs (hunger, rest, happiness), a utility AI and automatic job assignment with player overrides.
 - Islanders decide for themselves when their own job has nothing to do: they pick fruit, spear fish from the shore, cut wood or quarry stone, whichever the tribe needs most.
@@ -101,6 +101,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 
 **Buildings**
 - Hut, Home, Temple (three tiers up to the Great Pyramid), Farm, Butcher, Wood Store, Grain Store, War Room and Jetty.
+- Adobe houses in five levels: the Hut (level 1, 2 people) and the Home, upgraded in place from level 2 to 5 (4, 7, 12, then 16 people), growing from a small cube with a thatched awning to a many-storey compound with stairs, courtyards, striped awnings and a rooftop pergola.
 - Ghost preview, then foundation, scaffolding and finished building.
 - Stores fill visibly and crops grow.
 
@@ -125,7 +126,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Smooth-shaded humpbacks (dark slate backs, white pleated throats and bellies, knobbly heads, long white flippers, serrated flukes) glide underwater with a travelling body wave, leaving faint fluke prints on the surface, and never touch the seabed. They breach every so often in deep water (or when tapped), following a reference clip:
   - An underwater glow as it rises, then a near-vertical lift out of the water while it spins, fins spread, with a foam ring at the waterline.
   - It topples onto its back into a huge splash: a crown of water tongues, fine spray and clumps, white-water mist drifting downwind, and lacy foam that spreads and fades. Then the fluke lifts, streaming water, as it dives.
-- Dolphin pods porpoise through open water in staggered leaping arcs, with the odd spinning jump, splashes and ripples.
+- Smooth, flexible dolphins (beak, swept dorsal fin, dark cape and white belly) swim in pods of six that leap together in a rippling line, arching through the air, with the odd high spinning jump, splashes and ripples.
 - Swimming whales flex along the whole body, with flippers swept back along the flanks and a supple fluke.
 
 **Boats**
@@ -137,7 +138,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Generative drum-and-flute music and synthesised effects, with mute and volume controls.
 
 **Everything else**
-- Autosaves to localStorage every minute and when the tab is hidden. "New Island" and shareable seed links.
+- Autosaves to localStorage every minute and when the tab is hidden. "Restart island" to start again.
 - High, Medium and Low graphics presets, with an automatic step-down if the frame rate is low. Phones default to Low.
 - Settings toggles for shadows, the day/night cycle (off keeps warm afternoon light), random weather, and a pixel-art style (low-resolution rendering with a dithered palette).
 - Minimap, pause and 1×/2×/3× speed, settings, a help overlay and a 5-step tutorial.
@@ -175,7 +176,6 @@ All tuning values live in `src/config.ts`.
 - Warriors patrol and scare animals, but there are no enemies to fight yet.
 - Islanders walk through each other; there is no crowd avoidance.
 - Boats path over sea cells, not rivers or the waterfall pool.
-- The waterfall is placed on the largest drop of the first river, so some seeds get only a modest waterfall.
 - Saves are per browser (localStorage) and keep one island at a time.
 - Tested in desktop Chromium. Safari, Firefox and real phones have not been tested on hardware.
 
