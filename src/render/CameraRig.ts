@@ -10,8 +10,8 @@ import { World } from '../world/World';
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   readonly target = new THREE.Vector3();
-  goal = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw };
-  cur = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw };
+  goal = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw, tilt: 0 };
+  cur = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw, tilt: 0 };
   private groundY = 0;
   boundRadius = 80;
 
@@ -20,7 +20,7 @@ export class CameraRig {
   }
 
   jumpTo(x: number, z: number, dist = this.goal.dist, yaw = this.goal.yaw): void {
-    this.goal = { x, z, dist, yaw };
+    this.goal = { x, z, dist, yaw, tilt: this.goal.tilt };
     this.cur = { ...this.goal };
     this.groundY = Math.max(0, this.world.heightAt(x, z));
     this.apply();
@@ -28,7 +28,13 @@ export class CameraRig {
 
   get pitch(): number {
     const t = smoothstep(CAMERA.minDistance, 70, this.cur.dist);
-    return (lerp(CAMERA.pitchClose, CAMERA.pitch, t) * Math.PI) / 180;
+    // Player tilt offsets the automatic zoom-based pitch (kept between a low view and straight down).
+    return (clamp(lerp(CAMERA.pitchClose, CAMERA.pitch, t) + this.cur.tilt, 16, 86) * Math.PI) / 180;
+  }
+
+  /** Tilt the view up or down (degrees). */
+  tilt(deg: number): void {
+    this.goal.tilt = clamp(this.goal.tilt + deg, -30, 32);
   }
 
   /** World units per screen pixel at the focus point. */
@@ -90,6 +96,7 @@ export class CameraRig {
     this.cur.z = lerp(this.cur.z, this.goal.z, k);
     this.cur.dist = lerp(this.cur.dist, this.goal.dist, k);
     this.cur.yaw = lerp(this.cur.yaw, this.goal.yaw, k);
+    this.cur.tilt = lerp(this.cur.tilt, this.goal.tilt, k);
     const gy = Math.max(0, this.world.heightAt(this.cur.x, this.cur.z));
     this.groundY = lerp(this.groundY, gy, 1 - Math.exp(-3 * dt));
     this.apply();
