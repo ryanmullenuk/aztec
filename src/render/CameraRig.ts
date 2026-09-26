@@ -1,0 +1,115 @@
+import * as THREE from 'three';
+import { CAMERA, RENDER } from '../config';
+import { clamp, lerp, smoothstep } from '../world/noise';
+import { World } from '../world/World';
+
+/**
+ * Miniature-diorama camera: narrow FOV, looking down ~53°, tilting lower when close.
+ * All inputs set goals; the actual camera eases toward them.
+ */
+export class CameraRig {
+  readonly camera: THREE.PerspectiveCamera;
+  readonly target = new THREE.Vector3();
+  goal = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw };
+  cur = { x: 0, z: 0, dist: CAMERA.startDistance, yaw: CAMERA.startYaw };
+  private groundY = 0;
+  boundRadius = 80;
+
+  constructor(aspect: number, private world: World) {
+    this.camera = new THREE.PerspectiveCamera(RENDER.fov, aspect, RENDER.near, RENDER.far);
+  }
+
+  jumpTo(x: number, z: number, dist = this.goal.dist, yaw = this.goal.yaw): void {
+    this.goal = { x, z, dist, yaw };
+    this.cur = { ...this.goal };
+    this.groundY = Math.max(0, this.world.heightAt(x, z));
+    this.apply();
+  }
+
+  get pitch(): number {
+    const t = smoothstep(CAMERA.minDistance, 70, this.cur.dist);
+    return (lerp(CAMERA.pitchClose, CAMERA.pitch, t) * Math.PI) / 180;
+  }
+
+  /** World units per screen pixel at the focus point. */
+  unitsPerPixel(screenH: number): number {
+    return (2 * this.cur.dist * Math.tan((RENDER.fov * Math.PI) / 360)) / screenH;
+  }
+
+  /** Pan by a screen-space pixel delta (drag). */
+  panPixels(dx: number, dy: number, screenH: number): void {
+    const u = this.unitsPerPixel(screenH) * CAMERA.panSpeed;
+    const yaw = this.cur.yaw;
+    const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const k = 1 / Math.max(0.5, Math.sin(this.pitch));
+    this.goal.x += -rx * dx * u + fx * dy * u * k;
+    this.goal.z += -rz * dx * u + fz * dy * u * k;
+    // Keep immediate response for drags.
+    this.cur.x = lerp(this.cur.x, this.goal.x, 0.6);
+    this.cur.z = lerp(this.cur.z, this.goal.z, 0.6);
+    this.clampGoal();
+  }
+
+  /** Pan with keyboard: forward/right in [-1,1], scaled per second. */
+  panKeys(fwd: number, right: number, dt: number): void {
+    const yaw = this.goal.yaw;
+    const speed = this.goal.dist * CAMERA.keyPanSpeed * dt;
+    this.goal.x += (Math.cos(yaw) * right - Math.sin(yaw) * fwd) * speed;
+    this.goal.z += (-Math.sin(yaw) * right - Math.cos(yaw) * fwd) * speed;
+    this.clampGoal();
+  }
+
+  /** Zoom by a factor, optionally toward a world point. */
+  zoom(factor: number, toward?: { x: number; z: number }): void {
+    const old = this.goal.dist;
+    this.goal.dist = clamp(old * factor, CAMERA.minDistance, CAMERA.maxDistance);
+    if (toward) {
+      const k = 1 - this.goal.dist / old;
+      this.goal.x += (toward.x - this.goal.x) * k;
+      this.goal.z += (toward.z - this.goal.z) * k;
+    }
+    this.clampGoal();
+  }
+
+  rotate(d: number): void {
+    this.goal.yaw += d;
+  }
+
+  private clampGoal(): void {
+    const r = Math.hypot(this.goal.x, this.goal.z);
+    if (r > this.boundRadius) {
+      this.goal.x *= this.boundRadius / r;
+      this.goal.z *= this.boundRadius / r;
+    }
+  }
+
+  update(dt: number): void {
+    const k = 1 - Math.exp(-CAMERA.damping * dt);
+    this.cur.x = lerp(this.cur.x, this.goal.x, k);
+    this.cur.z = lerp(this.cur.z, this.goal.z, k);
+    this.cur.dist = lerp(this.cur.dist, this.goal.dist, k);
+    this.cur.yaw = lerp(this.cur.yaw, this.goal.yaw, k);
+    const gy = Math.max(0, this.world.heightAt(this.cur.x, this.cur.z));
+    this.groundY = lerp(this.groundY, gy, 1 - Math.exp(-3 * dt));
+    this.apply();
+  }
+
+  private apply(): void {
+    const p = this.pitch;
+    const d = this.cur.dist;
+    this.target.set(this.cur.x, this.groundY, this.cur.z);
+    this.camera.position.set(
+      this.cur.x + Math.sin(this.cur.yaw) * Math.cos(p) * d,
+      this.groundY + Math.sin(p) * d,
+      this.cur.z + Math.cos(this.cur.yaw) * Math.cos(p) * d
+    );
+    this.camera.lookAt(this.target);
+    this.camera.updateMatrixWorld();
+  }
+
+  /** Radius of ground visible around the target (for shadow fitting and LOD). */
+  get viewRadius(): number {
+    return this.cur.dist * Math.tan((RENDER.fov * Math.PI) / 360) * 1.9 * Math.max(1, this.camera.aspect * 0.8);
+  }
+}
