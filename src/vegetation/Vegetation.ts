@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RENDER, VEG, PresetName } from '../config';
-import { stylisedMaterial, stylisedMaterialDouble } from '../render/materials';
+import { stylisedMaterial, stylisedMaterialDouble, treeMaterial, treeMaterialDouble } from '../render/materials';
 import { RNG } from '../world/rng';
 import { Simplex2, clamp } from '../world/noise';
 import { World } from '../world/World';
@@ -354,7 +354,9 @@ export class Vegetation {
     for (const [k, ids] of groups) {
       const [key, chunkS] = k.split('|');
       const def = this.defs.get(key)!;
-      const mat = def.double ? stylisedMaterialDouble() : stylisedMaterial();
+      // Tall trees get the see-through material (they fade when in the way at close zoom).
+      const tall = /^(palm|broadleaf|banana|apple1)/.test(key);
+      const mat = tall ? (def.double ? treeMaterialDouble() : treeMaterial()) : def.double ? stylisedMaterialDouble() : stylisedMaterial();
       const mesh = new THREE.InstancedMesh(def.hi, mat, ids.length);
       mesh.castShadow = def.shadow;
       mesh.receiveShadow = true;
