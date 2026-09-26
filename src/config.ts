@@ -295,8 +295,13 @@ export const JETTY = {
   boatBuildSeconds: 25,
   maxBoats: 3,
   boatSpeed: 2.6,
-  netSeconds: 7,
-  catchPerTrip: 8,
+  /** Seconds per net cast; boats cast again and again during a trip. */
+  netSeconds: 16,
+  /** A fishing trip lasts this long out at sea (5 minutes) before heading home. */
+  fishingSeconds: 300,
+  catchPerCast: 2,
+  /** Most fish a boat can bring home from one trip. */
+  catchPerTrip: 45,
 };
 
 export const POWERS = {
@@ -402,13 +407,13 @@ export const MARINE = {
   /** Seconds until the first breach, then a random gap between breaches per whale. */
   firstBreach: 12,
   breachEvery: [45, 95] as [number, number],
-  pods: 3,
-  dolphinsPerPod: 5,
-  dolphinLength: 1.0,
+  pods: 4,
+  dolphinsPerPod: 6,
+  dolphinLength: 1.15,
   dolphinSpeed: 3.2,
   /** Seconds per porpoising cycle (half leaping, half gliding under). */
   leapPeriod: 1.7,
-  leapHeight: 0.55,
+  leapHeight: 0.85,
 };
 
 export const AUDIO = {

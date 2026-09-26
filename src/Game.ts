@@ -183,6 +183,7 @@ export class Game {
     this.scene.add(this.wildlife.group);
     this.boats = new Boats(this.world, this.water, this.buildings, this.colony, this.eco, this.wildlife, this.veg);
     this.scene.add(this.boats.group);
+    this.boats.blockCells(this.wildlife.coral.cells());
     this.marine = new Marine(this.world, this.water);
     this.scene.add(this.marine.group);
     this.powers = new Powers(this.eco, this.buildings, this.lighting, this.water, this.time, () => this.rng.next());
@@ -867,6 +868,9 @@ export class Game {
     FX.uSunCol.value.copy(ls.sunColor);
     FX.uSunI.value = ls.sunIntensity;
     FX.uNight.value = ls.night;
+    FX.uCamPos.value.copy(this.rig.camera.position);
+    FX.uFocus.value.copy(this.rig.target);
+    FX.uCut.value = 1 - THREE.MathUtils.smoothstep(this.rig.cur.dist, 14, 30);
 
     const growth = [1.2, 1.0, 0.85, 0.5][this.time.seasonIndex] * (this.raining ? 1.6 : 1);
     this.veg.update(dt, this.rig.camera.position, this.rig.target, RENDER.presets[this.preset].lodDist, growth, t);
