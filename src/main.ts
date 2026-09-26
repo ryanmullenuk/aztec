@@ -1,19 +1,11 @@
 import './ui/style.css';
 import { Game } from './Game';
-import { randomSeed } from './world/rng';
-import { PresetName } from './config';
-import { savedSeed } from './world/Save';
+import { PresetName, WORLD } from './config';
 
-/** Read ?seed= from the URL, or create one and put it in the URL so the island can be shared. */
+/** Everyone plays the same hand-designed island; old ?seed= links are tidied away. */
 function resolveSeed(): number {
-  const params = new URLSearchParams(location.search);
-  const s = parseInt(params.get('seed') ?? '', 10);
-  if (Number.isFinite(s) && s > 0) return s;
-  // No seed in the link: continue the saved island if there is one.
-  const seed = savedSeed() ?? randomSeed();
-  params.set('seed', String(seed));
-  history.replaceState(null, '', `${location.pathname}?${params.toString()}${location.hash}`);
-  return seed;
+  if (location.search.includes('seed=')) history.replaceState(null, '', location.pathname + location.hash);
+  return WORLD.islandSeed;
 }
 
 function defaultPreset(): PresetName {

@@ -21,6 +21,8 @@ export const WORLD = {
   meadowRadius: 14,
   /** Size of the ocean plane that reaches the horizon. */
   oceanSize: 2400,
+  /** Everyone plays the same hand-designed island (this seed sets its trees, rocks and wildlife). */
+  islandSeed: 20260926,
 };
 
 export const COLORS = {
@@ -436,7 +438,7 @@ export const MILESTONES = [
 ];
 
 export const SAVE = {
-  key: 'aztlan-isle-save-v4',
+  key: 'aztlan-isle-save-v5',
   settingsKey: 'aztec-isle-settings-v1',
   tutorialKey: 'aztec-isle-tutorial-v1',
 };

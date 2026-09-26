@@ -3,7 +3,7 @@ import { BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetNam
 import { World } from './world/World';
 import { generateIsland } from './world/generator';
 import { GameTime } from './world/Time';
-import { RNG, randomSeed } from './world/rng';
+import { RNG } from './world/rng';
 import { Terrain } from './terrain/Terrain';
 import { Sculptor, SculptMode } from './terrain/Sculpt';
 import { Water } from './water/Water';
@@ -302,7 +302,7 @@ export class Game {
       acc += realDt;
       if (acc >= TIME.autosaveSeconds) {
         acc = 0;
-        writeSave(this);
+        if (!this.noSave) writeSave(this);
       }
     });
     const flush = () => !this.noSave && writeSave(this);
@@ -744,7 +744,7 @@ export class Game {
     } catch {
       /* storage unavailable */
     }
-    location.href = `${location.pathname}?seed=${randomSeed()}`;
+    location.href = location.pathname;
   }
 
   // ---------------- Picking ----------------
