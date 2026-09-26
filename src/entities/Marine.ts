@@ -281,19 +281,100 @@ function whaleFluke(): THREE.BufferGeometry {
   return b.build();
 }
 
+/** Smooth bottlenose dolphin: dark cape, pale flank blaze, white belly, beak, swept dorsal fin, flippers and flukes. */
 function dolphinGeometry(): THREE.BufferGeometry {
-  const top = new THREE.Color(0x5f7688), belly = new THREE.Color(0xf0f4f6), mid = new THREE.Color(0x96abbb);
-  const k: [number, number][] = [[0, 0.015], [0.2, 0.05], [0.5, 0.1], [0.72, 0.095], [0.86, 0.06], [0.9, 0.03], [1, 0.02]];
+  const TOP = new THREE.Color(0x3f505e), CAPE = new THREE.Color(0x34424e), FLANK = new THREE.Color(0x8e9eab), BLAZE = new THREE.Color(0xb7c3cc), BELLY = new THREE.Color(0xeef2f4);
+  const k: [number, number][] = [[0, 0.012], [0.1, 0.028], [0.3, 0.072], [0.5, 0.1], [0.66, 0.099], [0.78, 0.086], [0.86, 0.064], [0.9, 0.034], [0.94, 0.022], [1, 0.011]];
   const rad = (t: number) => {
-    for (let i = 0; i < k.length - 1; i++) if (t <= k[i + 1][0]) return k[i][1] + (k[i + 1][1] - k[i][1]) * ((t - k[i][0]) / (k[i + 1][0] - k[i][0]));
-    return 0.02;
+    for (let i = 0; i < k.length - 1; i++) if (t <= k[i + 1][0]) {
+      const f = (t - k[i][0]) / (k[i + 1][0] - k[i][0]);
+      return k[i][1] + (k[i + 1][1] - k[i][1]) * f * f * (3 - 2 * f);
+    }
+    return 0.011;
   };
-  const shell = bodyShell(rad, 12, 8, () => 0.95, (_t, _a, s) => (s < -0.35 ? belly : s < 0.1 ? mid : top));
-  const b = new GeoBuilder();
-  b.add(P.cone(0.05, 0.12, 4), { color: top }, M.t(0, 0.13, -0.02, -0.55, 0, 0, 0.35, 1, 1));
-  for (const x of [-1, 1]) b.add(P.box(0.13, 0.008, 0.05), { color: top }, M.t(x * 0.1, -0.05, 0.18, 0, x * -0.5, x * 0.4));
-  for (const x of [-1, 1]) b.add(P.box(0.12, 0.008, 0.05), { color: top }, M.t(x * 0.06, 0, -0.5, 0, x * -0.5, 0));
-  return mergeFlat([shell, b.build()]);
+  const RINGS = 40, SEG = 18;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= RINGS; i++) {
+    const t = i / RINGS;
+    const r = rad(t);
+    const xs = t < 0.26 ? 0.55 + (t / 0.26) * 0.45 : 1;
+    for (let j = 0; j < SEG; j++) {
+      const an = (j / SEG) * Math.PI * 2;
+      const sn = Math.sin(an);
+      // Melon bulge above the beak.
+      const melon = t > 0.8 && t < 0.9 && sn > 0 ? 1 + (1 - Math.abs(t - 0.85) / 0.05) * 0.12 * sn : 1;
+      pos.push(Math.cos(an) * r * xs, sn * r * (sn < 0 ? 0.88 : 0.97) * melon, t - 0.5);
+    }
+  }
+  for (let i = 0; i < RINGS; i++) for (let j = 0; j < SEG; j++) {
+    const p = i * SEG + j, q = i * SEG + ((j + 1) % SEG), u = p + SEG, v = q + SEG;
+    idx.push(p, q, u, q, v, u);
+  }
+  const tail = pos.length / 3;
+  pos.push(0, 0, -0.5);
+  const nose = tail + 1;
+  pos.push(0, 0, 0.5);
+  for (let j = 0; j < SEG; j++) {
+    idx.push(tail, (j + 1) % SEG, j);
+    idx.push(nose, RINGS * SEG + j, RINGS * SEG + ((j + 1) % SEG));
+  }
+  const shell = new THREE.BufferGeometry();
+  shell.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  shell.setIndex(idx);
+  shell.computeVertexNormals();
+  const colorAt = (p: THREE.Vector3) => {
+    const t = p.z + 0.5;
+    const sn = p.y / (Math.hypot(p.x, p.y) || 1);
+    const c = TOP.clone().lerp(FLANK, THREE.MathUtils.smoothstep(sn, 0.45, -0.1));
+    if (sn > 0.25 && t > 0.35 && t < 0.82) c.lerp(CAPE, 0.6);
+    // Pale blaze sweeping from the eye back along the flank.
+    const blaze = Math.abs(sn - (0.05 - (0.8 - t) * 0.35));
+    if (t > 0.3 && t < 0.8 && blaze < 0.12) c.lerp(BLAZE, 0.6 * (1 - blaze / 0.12));
+    if (sn < -0.3 && t > 0.2) c.lerp(BELLY, THREE.MathUtils.smoothstep(-sn, 0.3, 0.55));
+    return c;
+  };
+  const bld = new GeoBuilder();
+  bld.add(shell, { color: (p) => colorAt(p) });
+  // Swept-back dorsal fin.
+  const fin = new THREE.Shape();
+  fin.moveTo(0.03, 0);
+  fin.quadraticCurveTo(0.0, 0.07, -0.07, 0.12);
+  fin.quadraticCurveTo(-0.05, 0.05, -0.08, 0);
+  fin.lineTo(0.03, 0);
+  const fg = new THREE.ExtrudeGeometry(fin, { depth: 0.014, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 1, curveSegments: 6 });
+  fg.rotateY(Math.PI / 2);
+  fg.translate(0.007, rad(0.52) * 0.9, 0.02);
+  bld.add(fg, { color: CAPE });
+  // Flippers and flukes.
+  const flip = new THREE.Shape();
+  flip.moveTo(0, 0.02);
+  flip.quadraticCurveTo(0.08, 0.0, 0.12, -0.05);
+  flip.quadraticCurveTo(0.05, -0.03, 0, -0.02);
+  const pg = new THREE.ExtrudeGeometry(flip, { depth: 0.008, bevelEnabled: false, curveSegments: 5 });
+  pg.rotateX(Math.PI / 2);
+  for (const side of [-1, 1]) {
+    const g = pg.clone();
+    if (side < 0) g.scale(-1, 1, 1);
+    g.rotateZ(side * -0.5);
+    g.translate(side * rad(0.72) * 0.75, -rad(0.72) * 0.45, 0.22);
+    bld.add(g, { color: TOP });
+  }
+  const fluke = new THREE.Shape();
+  fluke.moveTo(0, 0.01);
+  fluke.quadraticCurveTo(0.1, -0.01, 0.15, -0.07);
+  fluke.quadraticCurveTo(0.07, -0.05, 0, -0.03);
+  const kg = new THREE.ExtrudeGeometry(fluke, { depth: 0.01, bevelEnabled: false, curveSegments: 6 });
+  kg.rotateX(Math.PI / 2);
+  for (const side of [-1, 1]) {
+    const g = kg.clone();
+    if (side < 0) g.scale(-1, 1, 1);
+    g.translate(0, 0, -0.49);
+    bld.add(g, { color: TOP });
+  }
+  // Eyes.
+  for (const x of [-1, 1]) bld.add(P.sphere(0.008, 1), { color: 0x0a0c0e }, M.t(x * rad(0.84) * 0.93, 0.008, 0.34));
+  return bld.build();
 }
 
 /** Tint a material toward deep sea-water colour the further below the surface it is (light absorption). */
@@ -496,6 +577,8 @@ interface Whale {
 }
 
 interface Pod {
+  /** Shared leap rhythm (radians). */
+  phase: number;
   x: number;
   z: number;
   a: number;
@@ -509,6 +592,10 @@ interface Pod {
 
 interface Dolphin {
   pod: number;
+  /** Lag behind the pod's leap rhythm (fraction of a cycle), so a pod leaps in a rippling line. */
+  lag: number;
+  leapH: number;
+  stroke: number;
   offX: number;
   offZ: number;
   phase: number;
@@ -533,6 +620,7 @@ export class Marine {
   private pods: Pod[] = [];
   private dolphins: Dolphin[] = [];
   private dolphinMesh: THREE.InstancedMesh;
+  private dolphinBend: THREE.InstancedBufferAttribute;
   private spray = new Particles(1500, 0xf2fcff);
   private mist = new Particles(420, 0xe8f8ff);
   /** Rising, flaring sheets of water thrown up around a splash. */
@@ -593,7 +681,8 @@ export class Marine {
       this.crowns.push({ mesh: cmesh, mat: cm, t: 1, life: 1, r0: 1, r1: 1, h: 1 });
     }
 
-    const spots = this.deepSpots(MARINE.whales);
+    // Whales live out in the open ocean, beyond the reef shelf.
+    const spots = this.deepSpots(MARINE.whales, -4.8, 0.78, 1.15);
     spots.forEach((s, k) => {
       const L = MARINE.whaleLength * (0.9 + this.rng.next() * 0.2);
       const root = new THREE.Group();
@@ -673,17 +762,40 @@ export class Marine {
     // Dolphin pods.
     const dgeo = dolphinGeometry();
     const total = MARINE.pods * MARINE.dolphinsPerPod;
-    this.dolphinMesh = new THREE.InstancedMesh(dgeo, mat, total);
+    this.dolphinBend = new THREE.InstancedBufferAttribute(new Float32Array(total * 3), 3);
+    this.dolphinBend.setUsage(THREE.DynamicDrawUsage);
+    dgeo.setAttribute('iBend', this.dolphinBend);
+    const dmat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0 }), 0.3);
+    const dBase = dmat.onBeforeCompile;
+    dmat.onBeforeCompile = (shader, r) => {
+      dBase.call(dmat, shader, r);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec3 iBend; varying float vWy;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          {
+            // Flexible body: tail strokes (x = phase, y = amplitude) and a leap arch (z).
+            float zz = transformed.z;
+            float wgt = smoothstep(0.3, -0.55, zz);
+            transformed.y += iBend.y * (wgt * wgt + 0.06) * sin(iBend.x - zz * 6.0);
+            transformed.y -= iBend.z * (zz * zz * 4.0 - 0.33);
+          }`)
+        .replace('#include <project_vertex>', '#include <project_vertex>\n  vWy = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vWy;')
+        .replace('#include <fog_fragment>', '{ float uwD = max(-vWy, 0.0); gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.035, 0.19, 0.26), (1.0 - exp(-uwD * 0.8)) * 0.55); }\n#include <fog_fragment>');
+    };
+    dmat.customProgramCacheKey = () => 'dolphin';
+    this.dolphinMesh = new THREE.InstancedMesh(dgeo, dmat, total);
     this.dolphinMesh.castShadow = true;
     this.dolphinMesh.frustumCulled = false;
     this.dolphinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.group.add(this.dolphinMesh);
     const podSpots = this.deepSpots(MARINE.pods, -2.6, 0.45, 0.85);
     podSpots.forEach((s, k) => {
-      const pod: Pod = { x: s.x, z: s.z, cx: s.x, cz: s.z, a: this.rng.range(0, 6.28), r: 12 + this.rng.next() * 12, dir: k % 2 ? 1 : -1, speed: MARINE.dolphinSpeed, ids: [] };
+      const pod: Pod = { phase: this.rng.next() * 6.28, x: s.x, z: s.z, cx: s.x, cz: s.z, a: this.rng.range(0, 6.28), r: 12 + this.rng.next() * 12, dir: k % 2 ? 1 : -1, speed: MARINE.dolphinSpeed, ids: [] };
       for (let d = 0; d < MARINE.dolphinsPerPod; d++) {
         pod.ids.push(this.dolphins.length);
-        this.dolphins.push({ pod: k, offX: (this.rng.next() - 0.5) * 3, offZ: (this.rng.next() - 0.5) * 3, phase: this.rng.next() * 6.28, x: s.x, y: -0.4, z: s.z, pitch: 0, yaw: 0, roll: 0, wasUp: false, spin: false });
+        this.dolphins.push({ pod: k, lag: d * 0.07 + this.rng.next() * 0.05, leapH: 0.85 + this.rng.next() * 0.3, stroke: this.rng.next() * 6.28, offX: (this.rng.next() - 0.5) * 3.2, offZ: (d - MARINE.dolphinsPerPod / 2) * 0.7 + (this.rng.next() - 0.5) * 0.6, phase: this.rng.next() * 6.28, x: s.x, y: -0.4, z: s.z, pitch: 0, yaw: 0, roll: 0, wasUp: false, spin: false });
       }
       this.pods.push(pod);
     });
@@ -696,7 +808,7 @@ export class Marine {
     for (let k = 0; k < 4000 && out.length < n; k++) {
       const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(w.half * rMin, w.half * rMax);
       const x = Math.cos(a) * d, z = Math.sin(a) * d;
-      if (w.heightAt(x, z) > maxBed) continue;
+      if (this.bedAt(x, z) > maxBed) continue;
       if (out.some((o) => Math.hypot(o.x - x, o.z - z) < 25)) continue;
       out.push({ x, z });
     }
@@ -824,6 +936,11 @@ export class Marine {
     const lowest = y - Math.abs(ax.y) * 0.5 * L - 0.2 * L;
     const floor = this.bedAt(x, z) + 0.3;
     if (lowest < floor) y += floor - lowest;
+    // Out of sight below the surface until it breaches.
+    if (w.state !== 'breach') {
+      const highest = y + Math.abs(ax.y) * 0.5 * L + 0.16 * L;
+      if (highest > -0.3) y -= highest + 0.3;
+    }
     w.root.position.set(x, y, z);
     w.root.quaternion.copy(q);
     return q;
@@ -857,13 +974,20 @@ export class Marine {
       // Wander in long, natural curves through deep water, fully submerged.
       const lookX = w.x + Math.sin(P.yaw) * 10, lookZ = w.z + Math.cos(P.yaw) * 10;
       let want = Math.sin(this.time * 0.07 + w.wanderSeed) * 0.35 + Math.sin(this.time * 0.023 + w.wanderSeed * 2) * 0.25;
-      if (!this.deepEnough(lookX, lookZ, -3)) {
+      if (!this.deepEnough(lookX, lookZ, -4.6)) {
         // Steer away from shallows: turn toward open sea (away from the island centre).
         const away = Math.atan2(w.x, w.z);
         let d = away - P.yaw;
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
         want = Math.sign(d) * 0.5;
+      }
+      // Don't wander off beyond the horizon: circle back toward the island's waters.
+      if (Math.hypot(w.x, w.z) > this.world.half * 1.3) {
+        let d = Math.atan2(-w.x, -w.z) - P.yaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        want = Math.sign(d) * 0.4;
       }
       w.turnRate += (want - w.turnRate) * Math.min(1, dt * 0.8);
       P.yaw += w.turnRate * dt;
@@ -1088,38 +1212,49 @@ export class Marine {
       }
     }
     const L = MARINE.dolphinLength;
+    const cycle = (2 * Math.PI) / MARINE.leapPeriod;
+    for (const pod of this.pods) pod.phase += dt * cycle;
+    const bend = this.dolphinBend.array as Float32Array;
     this.dolphins.forEach((d, i) => {
       const pod = this.pods[d.pod];
-      // Travel direction is the tangent of the pod's loop.
+      // Travel direction is the tangent of the pod's loop; the pod swims in a loose echelon.
       const yaw = Math.atan2(-Math.sin(pod.a) * pod.dir, Math.cos(pod.a) * pod.dir);
-      const tx = pod.x + d.offX, tz = pod.z + d.offZ;
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      const tx = pod.x + fz * d.offX - fx * d.offZ, tz = pod.z - fx * d.offX - fz * d.offZ;
       d.x += (tx - d.x) * Math.min(1, dt * 1.5);
       d.z += (tz - d.z) * Math.min(1, dt * 1.5);
-      // Porpoising: each dolphin leaps in a staggered rhythm (arc out of the water, then glide under).
-      d.phase += dt * (2 * Math.PI) / MARINE.leapPeriod;
-      const ph = d.phase % (Math.PI * 2);
-      const up = ph < Math.PI; // first half of the cycle is the leap
+      // Porpoising together: the pod's rhythm, each dolphin a little behind the one ahead.
+      const ph = (((pod.phase - d.lag * Math.PI * 2) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const up = ph < Math.PI;
       const u = ph / Math.PI;
-      const height = up ? Math.sin(u * Math.PI) * MARINE.leapHeight : -0.25 - Math.sin((u - 1) * Math.PI) * 0.15;
-      d.y = height;
-      d.pitch = up ? Math.cos(u * Math.PI) * 0.85 : Math.cos((u - 1) * Math.PI) * 0.15;
+      const big = d.spin ? 1.45 : 1;
+      d.y = up ? Math.sin(u * Math.PI) * MARINE.leapHeight * d.leapH * big : -0.32 - Math.sin((u - 1) * Math.PI) * 0.22;
+      d.pitch = up ? Math.cos(u * Math.PI) * 0.9 : Math.cos((u - 1) * Math.PI) * 0.18;
       if (up && !d.wasUp) {
-        d.spin = this.rng.chance(0.12);
-        this.dolphinSplash(d.x, d.z, 10);
+        d.spin = this.rng.chance(0.1);
+        this.dolphinSplash(d.x, d.z, 12);
       }
       if (!up && d.wasUp) {
-        this.dolphinSplash(d.x + Math.sin(yaw) * 0.6, d.z + Math.cos(yaw) * 0.6, 14);
-        this.ring(d.x + Math.sin(yaw) * 0.6, d.z + Math.cos(yaw) * 0.6, 0.15, 0.9, 1.1);
+        this.dolphinSplash(d.x + fx * 0.6, d.z + fz * 0.6, 16);
+        this.ring(d.x + fx * 0.6, d.z + fz * 0.6, 0.15, 0.9, 1.1, 0, 0.45);
       }
       d.wasUp = up;
-      d.roll = up && d.spin ? u * Math.PI * 2 : 0;
+      d.roll = up && d.spin ? u * Math.PI * 2 : Math.sin(pod.phase * 0.3 + d.lag * 9) * 0.15;
       d.yaw = yaw;
+      // Strong tail strokes under water, a gentle flex and an arched back in the air.
+      d.stroke += dt * (up ? 4 : 13);
+      bend[i * 3] = d.stroke;
+      bend[i * 3 + 1] = up ? 0.018 : 0.075;
+      bend[i * 3 + 2] = up ? Math.sin(u * Math.PI) * 0.05 : 0;
       e.set(-d.pitch, yaw, d.roll, 'YXZ');
       q.setFromEuler(e);
       p.set(d.x, d.y, d.z);
       s.setScalar(L);
       this.dolphinMesh.setMatrixAt(i, m.compose(p, q, s));
     });
+    this.dolphinBend.needsUpdate = true;
+    // Only as many instances as there are dolphins (spare slots would sit frozen at the map centre).
+    this.dolphinMesh.count = this.dolphins.length;
     this.dolphinMesh.instanceMatrix.needsUpdate = true;
   }
 

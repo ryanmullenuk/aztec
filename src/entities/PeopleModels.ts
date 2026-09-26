@@ -80,116 +80,104 @@ function chain(...ms: THREE.Matrix4[]): THREE.Matrix4 {
 
 // ---------------- Body parts ----------------
 
+// Simple low-poly islanders (after the character sheet): white wrap cloth, red belt and front
+// panel, red wristbands, brown boots, black hair. Few features, clean faceted shapes.
+const CL = {
+  white: 0xf3ecdc,
+  whiteShade: 0xe0d5bd,
+  red: 0xa8262b,
+  redDark: 0x7e1c20,
+  yellow: 0xe3b53c,
+  boot: 0x6a3d22,
+  bootDark: 0x4e2c18,
+  hair: 0x141010,
+  eye: 0x1a1210,
+  eyeWhite: 0xf6f0e6,
+};
+
 function pelvisM(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.cyl(0.155, 0.14, 0.16, 7), SKIN, M.t(0, -0.03, 0, 0, 0, 0, 1, 1, 0.72));
-  // Red sash belt with a gold and jade buckle.
-  b.add(P.cyl(0.168, 0.165, 0.08, 8), C(PAL.red), M.t(0, 0.04, 0, 0, Math.PI / 8, 0, 1, 1, 0.76));
-  b.add(P.box(0.11, 0.085, 0.03), C(PAL.gold), M.t(0, 0.04, 0.128));
-  b.add(P.box(0.055, 0.05, 0.03), C(PAL.jade), M.t(0, 0.04, 0.14));
-  // Layered side flaps: teal (accent), red and cream, flaring out.
-  const cols = [ACC, C(PAL.red), C(PAL.cream), ACC, C(PAL.red), ACC, C(PAL.cream)];
-  for (let k = 0; k < 7; k++) {
-    const a = 0.75 + (k / 6) * (Math.PI * 2 - 1.5);
-    b.add(P.box(0.12, 0.26, 0.014), cols[k], chain(M.t(Math.sin(a) * 0.15, -0.14, Math.cos(a) * 0.115), M.t(0, 0, 0, 0, a, 0), M.t(0, 0, 0, -0.18, 0, 0)));
-  }
-  // Front panel (maxtlatl): cream with a red step-fret and a fringe.
-  b.add(P.box(0.15, 0.36, 0.016), C(PAL.cream), M.t(0, -0.16, 0.13, -0.05, 0, 0));
-  const fret: [number, number, number, number][] = [[-0.05, -0.1, 0.028, 0.16], [0, -0.03, 0.1, 0.026], [0.05, -0.08, 0.028, 0.1], [0.015, -0.13, 0.07, 0.026], [-0.01, -0.19, 0.026, 0.1], [0.02, -0.25, 0.08, 0.026], [0, -0.32, 0.15, 0.03]];
-  for (const [x, y, w, h] of fret) b.add(P.box(w, h, 0.01), C(PAL.red), M.t(x, y, 0.14, -0.05, 0, 0));
-  for (let k = 0; k < 5; k++) b.add(P.box(0.026, 0.05, 0.01), k % 2 ? C(PAL.red) : ACC, M.t(-0.056 + k * 0.028, -0.36, 0.148, -0.05, 0, 0));
+  // Hips (skin shows only at the top, under the belt).
+  b.add(P.cyl(0.15, 0.145, 0.14, 6), SKIN, M.t(0, 0.0, 0, 0, Math.PI / 6, 0, 1, 1, 0.74));
+  // White knee-length wrap skirt, slightly flared, with a pale hem line.
+  b.add(P.cyl(0.162, 0.19, 0.44, 7), C(CL.white), M.t(0, -0.2, 0, 0, Math.PI / 7, 0, 1, 1, 0.78));
+  b.add(P.cyl(0.192, 0.194, 0.03, 7), C(CL.whiteShade), M.t(0, -0.41, 0, 0, Math.PI / 7, 0, 1, 1, 0.78));
+  // Red belt, knotted at the front, with the long front panel (maxtlatl) and a short back panel.
+  b.add(P.cyl(0.168, 0.168, 0.075, 7), C(CL.red), M.t(0, 0.035, 0, 0, Math.PI / 7, 0, 1, 1, 0.8));
+  b.add(P.box(0.1, 0.36, 0.02), C(CL.red), M.t(0, -0.16, 0.148, -0.08, 0, 0));
+  b.add(P.box(0.1, 0.03, 0.022), C(CL.redDark), M.t(0, -0.34, 0.165, -0.08, 0, 0));
+  b.add(P.box(0.09, 0.2, 0.02), C(CL.red), M.t(0, -0.06, -0.145, 0.06, 0, 0));
   return facet(b.build());
 }
 
 function pelvisF(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.cyl(0.14, 0.165, 0.16, 7), SKIN, M.t(0, -0.02, 0, 0, 0, 0, 1, 1, 0.74));
-  b.add(P.cyl(0.155, 0.16, 0.07, 8), C(PAL.red), M.t(0, 0.05, 0, 0, Math.PI / 8, 0, 1, 1, 0.76));
-  b.add(P.box(0.08, 0.065, 0.03), C(PAL.gold), M.t(0, 0.05, 0.12));
-  b.add(P.box(0.04, 0.04, 0.03), C(PAL.jade), M.t(0, 0.05, 0.132));
-  // Knee-length layered skirt: cream wrap with teal and red over-panels, flaring out.
-  const cols = [C(PAL.cream), ACC, C(PAL.cream), C(PAL.red), C(PAL.cream), ACC, C(PAL.cream), C(PAL.red), C(PAL.cream)];
-  for (let k = 0; k < 9; k++) {
-    const a = 0.45 + (k / 8) * (Math.PI * 2 - 0.9);
-    const long = k % 2 === 0 ? 0.44 : 0.36;
-    b.add(P.box(0.12, long, 0.014), cols[k], chain(M.t(Math.sin(a) * 0.16, -0.02 - long / 2, Math.cos(a) * 0.125), M.t(0, 0, 0, 0, a, 0), M.t(0, 0, 0, -0.2, 0, 0)));
-  }
-  // Red hem band on the cream wrap.
-  for (let k = 0; k < 9; k += 2) {
-    const a = 0.45 + (k / 8) * (Math.PI * 2 - 0.9);
-    b.add(P.box(0.122, 0.035, 0.016), C(PAL.red), chain(M.t(Math.sin(a) * 0.205, -0.42, Math.cos(a) * 0.16), M.t(0, 0, 0, 0, a, 0), M.t(0, 0, 0, -0.2, 0, 0)));
-  }
-  // Front apron with the step-fret.
-  b.add(P.box(0.13, 0.44, 0.016), C(PAL.cream), M.t(0, -0.2, 0.13, -0.12, 0, 0));
-  b.add(P.box(0.034, 0.44, 0.012), C(PAL.red), M.t(-0.048, -0.2, 0.139, -0.12, 0, 0));
-  const fret: [number, number, number, number][] = [[0.0, -0.06, 0.07, 0.024], [0.03, -0.11, 0.024, 0.1], [-0.005, -0.17, 0.07, 0.024], [0.02, -0.26, 0.05, 0.024]];
-  for (const [x, y, w, h] of fret) b.add(P.box(w, h, 0.01), C(PAL.red), M.t(x, y, 0.141, -0.12, 0, 0));
-  for (let k = 0; k < 4; k++) b.add(P.box(0.03, 0.05, 0.01), k % 2 ? C(PAL.red) : ACC, M.t(-0.045 + k * 0.03, -0.44, 0.19, -0.12, 0, 0));
+  b.add(P.cyl(0.14, 0.16, 0.14, 6), SKIN, M.t(0, 0.0, 0, 0, Math.PI / 6, 0, 1, 1, 0.76));
+  // White skirt to below the knee, red and yellow hem bands.
+  b.add(P.cyl(0.155, 0.2, 0.54, 8), C(CL.white), M.t(0, -0.24, 0, 0, Math.PI / 8, 0, 1, 1, 0.8));
+  b.add(P.cyl(0.2, 0.203, 0.05, 8), C(CL.red), M.t(0, -0.48, 0, 0, Math.PI / 8, 0, 1, 1, 0.8));
+  b.add(P.cyl(0.196, 0.199, 0.02, 8), ACC, M.t(0, -0.44, 0, 0, Math.PI / 8, 0, 1, 1, 0.8));
+  // Red sash belt and front panel.
+  b.add(P.cyl(0.158, 0.158, 0.08, 8), C(CL.red), M.t(0, 0.04, 0, 0, Math.PI / 8, 0, 1, 1, 0.8));
+  b.add(P.box(0.1, 0.44, 0.02), C(CL.red), M.t(0, -0.2, 0.15, -0.1, 0, 0));
+  b.add(P.box(0.1, 0.025, 0.022), ACC, M.t(0, -0.1, 0.162, -0.1, 0, 0));
   return facet(b.build());
 }
 
 function chestM(): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON.m;
-  b.add(P.cyl(0.15, 0.13, 0.22, 6), SKIN, M.t(0, 0.11, 0, 0, Math.PI / 6, 0, 1, 1, 0.72));
-  b.add(P.cyl(0.215, 0.155, 0.26, 6), SKIN, M.t(0, 0.34, 0, 0, Math.PI / 6, 0, 1, 1, 0.6));
-  // Pecs and abs for the muscular, faceted look.
-  for (const x of [-0.065, 0.065]) b.add(P.box(0.12, 0.09, 0.05), SKIN, M.t(x, 0.35, 0.095, 0.15, x * 1.5, 0));
-  for (const [x, y] of [[-0.035, 0.2], [0.035, 0.2], [-0.035, 0.13], [0.035, 0.13]]) b.add(P.box(0.06, 0.06, 0.03), SKIN, M.t(x, y, 0.09));
-  for (const x of [-s.shoulderX, s.shoulderX]) b.add(P.sphere(0.072, 0), SKIN, M.t(x, s.shoulderY, 0));
-  b.add(P.cyl(0.055, 0.06, 0.12, 6), SKIN, M.t(0, 0.53, 0));
-  collar(b, 0.105, 0.49, true);
+  // Simple broad torso.
+  b.add(P.cyl(0.15, 0.135, 0.24, 6), SKIN, M.t(0, 0.12, 0, 0, Math.PI / 6, 0, 1, 1, 0.72));
+  b.add(P.cyl(0.205, 0.155, 0.26, 6), SKIN, M.t(0, 0.35, 0, 0, Math.PI / 6, 0, 1, 1, 0.62));
+  for (const x of [-s.shoulderX, s.shoulderX]) b.add(P.sphere(0.07, 0), SKIN, M.t(x, s.shoulderY, 0));
+  // White wrap over the left shoulder, crossing the chest diagonally, with an accent stripe.
+  b.add(P.box(0.14, 0.52, 0.27), C(CL.white), M.t(-0.035, 0.28, 0, 0, 0, -0.62, 1, 1, 1));
+  b.add(P.box(0.03, 0.5, 0.275), ACC, M.t(0.015, 0.3, 0, 0, 0, -0.62, 1, 1, 1));
+  b.add(P.sphere(0.078, 0), C(CL.white), M.t(-s.shoulderX + 0.01, s.shoulderY + 0.01, 0, 0, 0, 0, 1, 0.8, 1));
+  // Neck.
+  b.add(P.cyl(0.055, 0.062, 0.12, 6), SKIN, M.t(0, 0.53, 0));
   return facet(b.build());
 }
 
 function chestF(): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON.f;
-  // Bare waist.
-  b.add(P.cyl(0.12, 0.13, 0.2, 6), SKIN, M.t(0, 0.1, 0, 0, Math.PI / 6, 0, 1, 1, 0.72));
-  // Cream crop top with crossing red bands and a teal hem.
-  b.add(P.cyl(0.16, 0.135, 0.2, 7), C(PAL.cream), M.t(0, 0.31, 0, 0, 0, 0, 1, 1, 0.68));
-  for (const x of [-0.055, 0.055]) b.add(P.sphere(0.065, 0), C(PAL.cream), M.t(x, 0.33, 0.07, 0, 0, 0, 1, 0.85, 0.9));
-  b.add(P.cyl(0.14, 0.14, 0.03, 7), C(PAL.red), M.t(0, 0.215, 0, 0, 0, 0, 1, 1, 0.7));
-  for (const r of [-0.5, 0.5]) b.add(P.box(0.03, 0.2, 0.012), C(PAL.red), M.t(0, 0.31, 0.118, 0, 0, r));
-  b.add(P.box(0.2, 0.02, 0.01), ACC, M.t(0, 0.4, 0.105));
-  // Shoulders, neck.
-  b.add(P.cyl(0.12, 0.155, 0.1, 6), SKIN, M.t(0, 0.44, 0, 0, Math.PI / 6, 0, 1, 1, 0.6));
-  for (const x of [-s.shoulderX, s.shoulderX]) b.add(P.sphere(0.055, 0), SKIN, M.t(x, s.shoulderY, 0));
+  b.add(P.cyl(0.125, 0.13, 0.2, 6), SKIN, M.t(0, 0.1, 0, 0, Math.PI / 6, 0, 1, 1, 0.74));
+  // White top over one shoulder with a yellow (accent) trim, bare shoulders.
+  b.add(P.cyl(0.16, 0.135, 0.22, 7), C(CL.white), M.t(0, 0.3, 0, 0, 0, 0, 1, 1, 0.7));
+  for (const x of [-0.055, 0.055]) b.add(P.sphere(0.06, 0), C(CL.white), M.t(x, 0.33, 0.07, 0, 0, 0, 1, 0.85, 0.85));
+  b.add(P.cyl(0.162, 0.162, 0.025, 7), ACC, M.t(0, 0.41, 0, 0, 0, 0, 1, 1, 0.72));
+  b.add(P.box(0.07, 0.2, 0.2), C(CL.white), M.t(-0.1, 0.46, 0, 0, 0, -0.3));
+  b.add(P.cyl(0.14, 0.14, 0.03, 7), C(CL.red), M.t(0, 0.2, 0, 0, 0, 0, 1, 1, 0.72));
+  b.add(P.cyl(0.12, 0.15, 0.08, 6), SKIN, M.t(0, 0.45, 0, 0, Math.PI / 6, 0, 1, 1, 0.6));
+  for (const x of [-s.shoulderX, s.shoulderX]) b.add(P.sphere(0.052, 0), SKIN, M.t(x, s.shoulderY, 0));
   b.add(P.cyl(0.045, 0.05, 0.1, 6), SKIN, M.t(0, 0.5, 0));
-  collar(b, 0.085, 0.465, false);
   return facet(b.build());
-}
-
-/** Gold plate collar with jade insets and a pendant. */
-function collar(b: GeoBuilder, r: number, y: number, big: boolean): void {
-  const n = big ? 9 : 7;
-  for (let k = 0; k < n; k++) {
-    const a = -1.35 + (k / (n - 1)) * 2.7;
-    const x = Math.sin(a) * r, z = Math.cos(a) * r * 0.9;
-    b.add(P.box(0.05, 0.04, 0.016), C(PAL.gold), M.t(x, y - Math.cos(a) * 0.035, z, 0.5, a, 0));
-    if (k % 2 === 0) b.add(P.box(0.026, 0.022, 0.01), C(PAL.jade), M.t(x * 1.04, y - Math.cos(a) * 0.035, z * 1.04 + 0.006, 0.5, a, 0));
-  }
-  const py = y - (big ? 0.085 : 0.07);
-  b.add(P.box(big ? 0.07 : 0.05, big ? 0.07 : 0.05, 0.02), C(PAL.gold), M.t(0, py, r * 0.95 + 0.01, 0.2, 0, Math.PI / 4));
-  b.add(P.box(big ? 0.042 : 0.03, big ? 0.042 : 0.03, 0.02), C(PAL.jade), M.t(0, py, r * 0.95 + 0.02, 0.2, 0, Math.PI / 4));
 }
 
 function headBase(g: 'm' | 'f'): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  // Faceless faceted head.
-  b.add(P.sphere(0.115, 1), SKIN, M.t(0, 0.12, 0.005, 0, 0, 0, 0.9, 1.1, 0.96));
-  b.add(P.box(0.02, 0.04, 0.03), SKIN, M.t(0, 0.1, 0.11));
-  // Hair: cap and long hair down the back (longer for women).
-  b.add(P.sphere(0.12, 1), C(PAL.hair), M.t(0, 0.15, -0.025, 0, 0, 0, 0.95, 1.0, 1.0));
-  const len = g === 'f' ? 0.56 : 0.36;
-  b.add(P.cyl(0.1, g === 'f' ? 0.13 : 0.09, len, 5), C(PAL.hair), M.t(0, 0.14 - len / 2, -0.07, 0.08, 0, 0, 1, 1, 0.38));
-  if (g === 'f') for (const x of [-0.1, 0.1]) b.add(P.cyl(0.03, 0.04, 0.3, 4), C(PAL.hair), M.t(x, 0.0, -0.01, 0, 0, x > 0 ? -0.08 : 0.08));
-  // Square gold earrings with jade.
-  for (const x of [-0.108, 0.108]) {
-    b.add(P.box(0.012, 0.05, 0.05), C(PAL.gold), M.t(x, 0.06, 0.005));
-    b.add(P.box(0.014, 0.026, 0.026), C(PAL.jade), M.t(x * 1.02, 0.06, 0.005));
-    if (g === 'f') b.add(P.cone(0.012, 0.04, 4), C(PAL.jade), M.t(x, 0.02, 0.005, Math.PI, 0, 0));
+  // Blocky low-poly head with a simple face: two eyes and a nose.
+  b.add(P.box(0.19, 0.22, 0.2), SKIN, M.t(0, 0.12, 0.005));
+  b.add(P.box(0.03, 0.045, 0.03), SKIN, M.t(0, 0.1, 0.112));
+  for (const x of [-0.045, 0.045]) {
+    b.add(P.box(0.034, 0.03, 0.01), C(CL.eyeWhite), M.t(x, 0.14, 0.104));
+    b.add(P.box(0.016, 0.022, 0.012), C(CL.eye), M.t(x, 0.14, 0.108));
+  }
+  if (g === 'm') {
+    // Straight black bob: cap, sides and back to the jaw, fringe across the forehead.
+    b.add(P.box(0.215, 0.09, 0.225), C(CL.hair), M.t(0, 0.245, -0.005));
+    b.add(P.box(0.215, 0.2, 0.08), C(CL.hair), M.t(0, 0.13, -0.08));
+    for (const x of [-0.105, 0.105]) b.add(P.box(0.03, 0.17, 0.17), C(CL.hair), M.t(x, 0.15, -0.02));
+    b.add(P.box(0.2, 0.05, 0.03), C(CL.hair), M.t(0, 0.215, 0.1));
+  } else {
+    // Long hair, centre parting, a braid down the back.
+    b.add(P.box(0.21, 0.08, 0.22), C(CL.hair), M.t(0, 0.245, -0.005));
+    b.add(P.box(0.21, 0.26, 0.08), C(CL.hair), M.t(0, 0.1, -0.085));
+    for (const x of [-0.1, 0.1]) b.add(P.box(0.03, 0.24, 0.16), C(CL.hair), M.t(x, 0.1, -0.02));
+    for (let k = 0; k < 6; k++) b.add(P.sphere(0.04 - k * 0.003, 0), C(CL.hair), M.t(0, -0.03 - k * 0.065, -0.13 - k * 0.006));
+    b.add(P.box(0.03, 0.025, 0.03), C(CL.red), M.t(0, -0.4, -0.16));
   }
   return facet(b.build());
 }
@@ -197,21 +185,19 @@ function headBase(g: 'm' | 'f'): THREE.BufferGeometry {
 function upperArm(g: 'm' | 'f'): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON[g];
-  const r = g === 'm' ? 0.065 : 0.048;
-  limb(b, r, r * 0.8, s.upper);
-  band(b, r * 1.12, -0.09, 0.055);
+  const r = g === 'm' ? 0.062 : 0.047;
+  limb(b, r, r * 0.82, s.upper);
   return facet(b.build());
 }
 
 function foreArm(g: 'm' | 'f'): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON[g];
-  const r = g === 'm' ? 0.052 : 0.04;
-  limb(b, r, r * 0.78, s.fore);
-  // Wrist cuff: gold with an accent inset (like the reference's teal cuffs).
-  b.add(P.cyl(r * 1.05, r * 0.95, 0.07, 8), C(PAL.gold), M.t(0, -s.fore + 0.06, 0, 0, Math.PI / 8, 0));
-  b.add(P.box(r * 1.2, 0.035, 0.02), ACC, M.t(0, -s.fore + 0.06, r * 0.95));
-  // Hand with thumb.
+  const r = g === 'm' ? 0.05 : 0.04;
+  limb(b, r, r * 0.8, s.fore);
+  // Red wristband.
+  b.add(P.cyl(r * 1.12, r * 1.05, 0.07, 6), C(CL.red), M.t(0, -s.fore + 0.05, 0));
+  // Mitten hand with a thumb.
   b.add(P.box(0.06, 0.085, 0.035), SKIN, M.t(0, -s.fore - 0.04, 0.005));
   b.add(P.box(0.02, 0.045, 0.02), SKIN, M.t(0.03, -s.fore - 0.02, 0.025, 0, 0, -0.4));
   return facet(b.build());
@@ -220,32 +206,21 @@ function foreArm(g: 'm' | 'f'): THREE.BufferGeometry {
 function thigh(g: 'm' | 'f'): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON[g];
-  const r = g === 'm' ? 0.085 : 0.075;
-  limb(b, r, r * 0.74, s.thigh);
+  const r = g === 'm' ? 0.082 : 0.074;
+  limb(b, r, r * 0.76, s.thigh);
   return facet(b.build());
 }
 
 function shin(g: 'm' | 'f'): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const s = SKELETON[g];
-  const r = g === 'm' ? 0.062 : 0.052;
-  limb(b, r, r * 0.72, s.shin);
-  if (g === 'm') {
-    // Leather greaves with gold bands, jade studs and a feather tuft behind the calf.
-    b.add(P.cyl(r * 1.08, r * 0.9, 0.22, 7), C(PAL.leather), M.t(0, -s.shin + 0.16, 0));
-    band(b, r * 1.12, -s.shin + 0.24, 0.045);
-    band(b, r * 0.95, -s.shin + 0.07, 0.03, false);
-    for (const [a, col] of [[-0.35, PAL.red], [0.05, -1], [0.4, PAL.red]] as [number, number][]) {
-      b.add(feather(0.13, 0.04), col < 0 ? ACC : C(col), chain(M.t(0, -s.shin + 0.25, -r * 0.9), M.t(0, 0, 0, -0.5, 0, a)));
-    }
-  } else {
-    band(b, r * 0.98, -s.shin + 0.07, 0.035);
-  }
-  // Foot with a leather sandal and straps.
-  b.add(P.box(0.08, 0.05, 0.18), SKIN, M.t(0, -s.shin - 0.025, 0.04));
-  b.add(P.box(0.09, 0.018, 0.2), C(PAL.sole), M.t(0, -s.shin - 0.058, 0.042));
-  b.add(P.box(0.085, 0.015, 0.02), C(PAL.leather), M.t(0, -s.shin - 0.01, 0.07));
-  b.add(P.box(0.085, 0.015, 0.02), C(PAL.leather), M.t(0, -s.shin - 0.015, 0.0));
+  const r = g === 'm' ? 0.06 : 0.052;
+  limb(b, r, r * 0.74, s.shin);
+  // Tall brown boots with a turned-down cuff.
+  b.add(P.cyl(r * 1.12, r * 1.02, s.shin * 0.58, 6), C(CL.boot), M.t(0, -s.shin * 0.71, 0));
+  b.add(P.cyl(r * 1.22, r * 1.18, 0.05, 6), C(CL.bootDark), M.t(0, -s.shin * 0.43, 0));
+  b.add(P.box(0.1, 0.07, 0.19), C(CL.boot), M.t(0, -s.shin - 0.03, 0.035));
+  b.add(P.box(0.105, 0.02, 0.2), C(CL.bootDark), M.t(0, -s.shin - 0.065, 0.037));
   return facet(b.build());
 }
 

@@ -109,25 +109,42 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
       break;
     }
     case 'farm': {
+      // Hoeing: bent forward from the back, knees flexed, arms chopping down.
       const ph = t * 3.2;
-      p.uaLx = p.uaRx = -0.95 + Math.sin(ph) * 0.45;
+      const k = Math.sin(ph) * 0.5 + 0.5;
+      p.uaLx = p.uaRx = -1.5 + k * 0.9;
       p.uaLz = p.uaRz = -0.2;
-      p.faL = p.faR = -0.55;
-      p.lean = 0.4 + Math.sin(ph) * 0.08;
-      p.thL = -0.35;
-      p.shL = 0.45;
-      p.thR = 0.25;
-      p.shR = 0.2;
-      p.drop = 0.05;
+      p.faL = p.faR = -0.5 - (1 - k) * 0.4;
+      p.lean = 0.62 + k * 0.12;
+      p.headX = -0.35;
+      p.thL = -0.55;
+      p.shL = 0.7;
+      p.thR = 0.1;
+      p.shR = 0.35;
+      p.drop = 0.1;
       break;
     }
     case 'harvest': {
       const ph = t * 4;
-      p.uaLx = -2.7 + Math.sin(ph) * 0.15;
-      p.uaRx = -2.5 + Math.cos(ph) * 0.2;
-      p.faL = p.faR = -0.25;
-      p.headX = -0.4;
-      p.bob = Math.max(0, Math.sin(ph * 0.5)) * 0.025;
+      if (isl.reachHigh) {
+        p.uaLx = -2.7 + Math.sin(ph) * 0.15;
+        p.uaRx = -2.5 + Math.cos(ph) * 0.2;
+        p.faL = p.faR = -0.25;
+        p.headX = -0.4;
+        p.bob = Math.max(0, Math.sin(ph * 0.5)) * 0.025;
+      } else {
+        // Bend from the back and knees, hands reaching down and in to pick.
+        const k = Math.sin(ph * 0.6) * 0.5 + 0.5;
+        p.lean = 0.7 + k * 0.15;
+        p.drop = 0.1 + k * 0.05;
+        p.thL = p.thR = -0.6 - k * 0.2;
+        p.shL = p.shR = 0.75 + k * 0.25;
+        p.uaLx = -1.05 + Math.sin(ph) * 0.25;
+        p.uaRx = -1.05 - Math.sin(ph) * 0.25;
+        p.uaLz = p.uaRz = 0.1;
+        p.faL = p.faR = -0.6;
+        p.headX = -0.2;
+      }
       break;
     }
     case 'fish': {
@@ -309,7 +326,7 @@ export class IslanderRig {
       M.head.multiplyMatrices(M.chest, this.rot(this.tmp, 0, sk.neckY, 0, p.headX, p.headY, 0, 'YXZ', hs));
       this.put(`head_${g}`, M.head);
       // Headdress: warriors wear jaguar or eagle helms, priests the grand feather fan.
-      const hd = isl.warrior ? isl.warrior : isl.role === 'priest' && !isl.child ? 'hd_fan' : isl.child ? (isl.headdress === 2 ? 'hd_band' : null) : [null, 'hd_band', 'hd_fan', 'hd_plume'][isl.headdress];
+      const hd = isl.warrior ? isl.warrior : isl.role === 'priest' && !isl.child ? 'hd_fan' : null;
       if (hd) this.put(hd as PartKey, M.head);
       // Arms.
       for (const [side, uax, uaz, fa] of [[-1, p.uaLx, p.uaLz, p.faL], [1, p.uaRx, p.uaRz, p.faR]] as [number, number, number, number][]) {

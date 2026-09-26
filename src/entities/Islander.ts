@@ -78,6 +78,8 @@ export interface Islander {
   workplace: number;
   home: number;
   carry: { kind: CarryKind; res: ResourceKey; n: number } | null;
+  /** Gathering from a tall plant (reach up) or a bush (bend down). */
+  reachHigh?: boolean;
   task: Task | null;
   anim: Anim;
   animT: number;
@@ -105,7 +107,8 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
   const clothsM = [0xf1e6cf, 0xe9dcc0, 0xd8c9a8, 0xf4ecd8];
   const clothsF = [0xf6efe0, 0xefe5d2, 0xf2e4d6, 0xe6efe4];
   // Accent cloth colour (teal in the reference; a few families wear blue, green or purple).
-  const cloaks = [0x1f8f86, 0x1f8f86, 0x23877e, 0x2a9d8f, 0x2a6fb0, 0x3a8a3a, 0x6a4a8a];
+  // Trim colour on the white cloth (sash stripe / hem): mostly yellow, some variety.
+  const cloaks = [0xe3b53c, 0xe3b53c, 0xe3b53c, 0xd99a2b, 0xe07a2a, 0x2fa58f, 0x4a8fc8];
   const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
   return {
     id,
