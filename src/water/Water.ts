@@ -127,13 +127,15 @@ const waterFrag = /* glsl */ `
     float nh = max(dot(n, H), 0.0);
     float glare = pow(nh, 1400.0) * 16.0 + pow(nh, 200.0) * 1.8 + pow(nh, 40.0) * 0.12 + pow(nh, 8.0) * 0.012;
     vec2 cell = floor(p * 16.0);
-    float r1 = hsh(cell + floor(t * 2.5) * 0.37);
+    // Each glint twinkles smoothly on its own timing (no sea-wide blinking).
+    float r1 = hsh(cell);
+    float twinkle = pow(0.5 + 0.5 * sin(t * (1.1 + r1 * 1.4) + r1 * 40.0), 4.0);
     vec3 nn = normalize(n + vec3(hsh(cell + 3.1) - 0.5, 0.0, hsh(cell + 7.7) - 0.5) * 0.8);
     // Round glints inside each cell (not square), only on crests facing the light.
     // Glints sit at a random spot and size inside each cell, so no grid shows.
     vec2 fc = fract(p * 16.0) - 0.5 - (vec2(hsh(cell + 11.3), hsh(cell + 5.9)) - 0.5) * 0.5;
     float dot1 = smoothstep(0.1 + 0.18 * hsh(cell + 2.2), 0.02, length(fc));
-    float spark = step(0.84, r1) * dot1 * pow(max(dot(nn, H), 0.0), 500.0) * 10.0 * (1.0 - smoothstep(0.04, 0.16, fw)) * smoothstep(-0.2, 0.3, crest);
+    float spark = step(0.8, hsh(cell + 9.1)) * twinkle * dot1 * pow(max(dot(nn, H), 0.0), 500.0) * 10.0 * (1.0 - smoothstep(0.04, 0.16, fw)) * smoothstep(-0.2, 0.3, crest);
     float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y);
     lit += uSunCol * (glare + spark) * uSunI * 0.32 * sunVis;
 
