@@ -37,14 +37,14 @@ interface PointerInfo {
 export class Input {
   private pointers = new Map<number, PointerInfo>();
   private keys = new Set<string>();
-  private dragging: 'none' | 'pan' | 'tool' | 'rotate' = 'none';
+  private dragging: 'none' | 'pan' | 'tool' | 'rotate' | 'orbit' = 'none';
   private gesture: { dist: number; angle: number; mx: number; my: number } | null = null;
   private moved = false;
   /** Latest pointer screen position (for cursor-reactive wildlife). */
   hover: { x: number; y: number; active: boolean } = { x: 0, y: 0, active: false };
   /** True while the camera is being panned, rotated or pinched (wildlife ignores the pointer then). */
   get navigating(): boolean {
-    return (this.moved && (this.dragging === 'pan' || this.dragging === 'rotate')) || !!this.gesture;
+    return (this.moved && (this.dragging === 'pan' || this.dragging === 'rotate' || this.dragging === 'orbit')) || !!this.gesture;
   }
 
   constructor(private el: HTMLElement, private rig: CameraRig, private h: InputHandlers) {
@@ -82,9 +82,9 @@ export class Input {
       this.dragging = 'none';
       this.gesture = this.gestureState();
     } else if (this.pointers.size === 1) {
-      // Middle-drag, or Alt/Shift + left-drag, rotates the view; right-drag pans.
+      // Middle-drag, or Alt/Shift + left-drag, rotates the view; right-drag rotates and tilts.
       if (e.button === 1 || (e.button === 0 && (e.altKey || e.shiftKey))) this.dragging = 'rotate';
-      else if (e.button === 2) this.dragging = 'pan';
+      else if (e.button === 2) this.dragging = 'orbit';
       else if (this.h.wantsToolDrag()) {
         this.dragging = 'tool';
         this.h.onToolDragStart(e.clientX, e.clientY);
@@ -122,12 +122,19 @@ export class Input {
       if (da > Math.PI) da -= Math.PI * 2;
       if (da < -Math.PI) da += Math.PI * 2;
       this.rig.rotate(-da);
-      this.rig.panPixels(g.mx - this.gesture.mx, g.my - this.gesture.my, this.el.clientHeight);
+      // Two-finger drag: up/down tilts the view, sideways pans.
+      const dmx = g.mx - this.gesture.mx, dmy = g.my - this.gesture.my;
+      this.rig.tilt(-dmy * CAMERA.tiltSpeed);
+      this.rig.panPixels(dmx, 0, this.el.clientHeight);
       this.gesture = g;
       return;
     }
     if (this.dragging === 'pan' && this.moved) this.rig.panPixels(dx, dy, this.el.clientHeight);
     else if (this.dragging === 'rotate' && this.moved) this.rig.rotate(-dx * CAMERA.dragRotateSpeed);
+    else if (this.dragging === 'orbit' && this.moved) {
+      this.rig.rotate(-dx * CAMERA.dragRotateSpeed);
+      this.rig.tilt(-dy * CAMERA.tiltSpeed);
+    }
     else if (this.dragging === 'tool') this.h.onToolDrag(e.clientX, e.clientY);
   };
 
@@ -173,5 +180,7 @@ export class Input {
     if (k.has('e')) this.rig.rotate(-CAMERA.rotateSpeed * dt);
     if (k.has('+') || k.has('=')) this.rig.zoom(Math.exp(-1.2 * dt));
     if (k.has('-') || k.has('_')) this.rig.zoom(Math.exp(1.2 * dt));
+    if (k.has('pageup')) this.rig.tilt(40 * dt);
+    if (k.has('pagedown')) this.rig.tilt(-40 * dt);
   }
 }

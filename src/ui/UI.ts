@@ -621,7 +621,7 @@ export class UI {
     let body = '';
     if (!b.complete) body += `${this.bar(`Building ${Math.round(b.progress * 100)}%`, b.progress, 'good')}<div class="kv"><span>Builders</span><b>${b.builders.size} / ${b.def.builders}</b></div>`;
     else if (b.upgrading) body += `${this.bar(`Upgrading ${Math.round(b.progress * 100)}%`, b.progress, 'good')}`;
-    if (b.complete && b.def.housing) body += `<div class="kv"><span>Residents</span><b>${b.residents.map((id) => g.colony.byId(id)?.name).filter(Boolean).join(', ') || 'Empty'} (${b.residents.length}/${b.def.housing})</b></div>`;
+    if (b.complete && b.def.housing) body += `<div class="kv"><span>Residents</span><b>${b.residents.map((id) => g.colony.byId(id)?.name).filter(Boolean).join(', ') || 'Empty'} (${b.residents.length}/${b.housing})</b></div>`;
     const workers = g.colony.list.filter((i) => i.workplace === b.id && b.complete);
     if (b.complete && b.def.workers) body += `<div class="kv"><span>Workers</span><b>${workers.map((w) => w.name).join(', ') || 'None yet'}</b></div>`;
     if (b.key === 'farm' && b.complete) body += this.bar(b.growth >= 1 ? 'Ready to harvest' : `Maize growing ${Math.round(b.growth * 100)}%`, b.growth, 'good') + (b.blessTimer > 0 ? '<div class="kv"><span>Blessed</span><b>Growing faster</b></div>' : '');
@@ -632,9 +632,10 @@ export class UI {
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
     let actions = '';
     const up = g.buildings.canUpgrade(b);
-    if (b.complete && !b.upgrading && (b.key === 'hut' || (b.key === 'temple' && b.tier < 3))) {
+    if (b.complete && !b.upgrading && (b.key === 'hut' || (b.key === 'home' && b.tier < (b.def.maxTier ?? 1)) || (b.key === 'temple' && b.tier < 3))) {
       const c = up.cost;
-      const label = b.key === 'hut' ? 'Upgrade to Home' : b.tier === 2 ? 'Raise the Great Pyramid' : 'Upgrade temple';
+      const next = [4, 7, 12, 16][b.key === 'hut' ? 0 : b.tier];
+      const label = b.key === 'hut' ? 'Upgrade to level 2 (4 people)' : b.key === 'home' ? `Upgrade to level ${b.tier + 2} (${next} people)` : b.tier === 2 ? 'Raise the Great Pyramid' : 'Upgrade temple';
       actions += `<button class="btn small" data-a="upgrade" ${up.ok ? '' : 'disabled'} title="${up.reason}">${ICONS.upgrade} ${label} <span class="c">${c.wood ? icon('wood') + c.wood : ''} ${c.stone ? icon('stone') + c.stone : ''} ${c.belief ? icon('belief') + c.belief : ''}</span></button>`;
     }
     if (b.key === 'jetty' && b.complete) {
@@ -670,7 +671,7 @@ export class UI {
       if (a === 'upgrade') {
         const nb = g.buildings.upgrade(b);
         if (nb) {
-          this.toast(b.key === 'hut' ? 'The hut will be rebuilt as a Home.' : 'Temple upgrade started.');
+          this.toast(b.key === 'hut' ? 'The hut will be rebuilt as a level 2 Home.' : b.key === 'home' ? `The house is being extended to level ${b.tier + 2}.` : 'Temple upgrade started.');
           if (nb !== b) g.select({ building: nb.id });
         }
       }
