@@ -230,6 +230,10 @@ export class PostFX {
     this.gtao = new GTAOPass(scene, camera, size.x, size.y);
     this.gtao.updateGtaoMaterial({ radius: RENDER.ssao.radius, thickness: RENDER.ssao.thickness, scale: RENDER.ssao.scale, samples: 12 });
     this.gtao.blendIntensity = RENDER.ssao.blend;
+    // Use the scene pass's own depth (normals reconstructed from it): it already has the dithered
+    // see-through trees cut out and leaves out clouds and spray, so AO never draws their silhouettes.
+    // It also saves rendering the whole scene a second time.
+    if (this.scenePass.depth) this.gtao.setGBuffer(this.scenePass.depth);
     this.dof = new DofPass(this.scenePass, RENDER.presets.high.dofSamples);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), RENDER.bloom.strength, RENDER.bloom.radius, RENDER.bloom.threshold);
     this.output = new OutputPass();

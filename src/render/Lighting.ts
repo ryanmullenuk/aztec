@@ -44,8 +44,9 @@ export class Lighting {
     this.sun = new THREE.DirectionalLight(COLORS.sunWarm, 3.2);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
-    this.sun.shadow.bias = -0.00035;
-    this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.bias = -0.0006;
+    // Larger normal offset: no shadow acne patterns on smooth hillsides.
+    this.sun.shadow.normalBias = 0.07;
     const sc = this.sun.shadow.camera;
     sc.near = 1;
     sc.far = 400;
