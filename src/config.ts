@@ -12,13 +12,13 @@ export const WORLD = {
   /** Height of one sculpted contour layer. */
   layerHeight: 0.55,
   minLayer: -9,
-  maxLayer: 13,
+  maxLayer: 18,
   /** Terrain mesh vertices per cell side (2 = smooth rounded terraces). */
   meshSubdiv: 3,
-  isletCount: [3, 6] as [number, number],
+  isletCount: [5, 8] as [number, number],
   riverCount: [1, 3] as [number, number],
   /** Radius (cells) of the open starting meadow. */
-  meadowRadius: 11,
+  meadowRadius: 14,
   /** Size of the ocean plane that reaches the horizon. */
   oceanSize: 2400,
 };
@@ -28,8 +28,8 @@ export const COLORS = {
   deepOcean: 0x0a2c48,
   deepOcean2: 0x0f3d60,
   midWater: 0x17698c,
-  shallow: 0x2cb8c8,
-  shallowBright: 0x72e2d8,
+  shallow: 0x19b8cb,
+  shallowBright: 0x52dcd6,
   reef1: 0x1c6e7a,
   reef2: 0x2a5f6e,
   foam: 0xf5fbff,
@@ -383,7 +383,7 @@ export const FAUNA = {
   gullNotice: 11,
   gullBank: 6.5,
   gullScatter: 3,
-  reefSchools: [7, 10] as [number, number],
+  reefSchools: [11, 15] as [number, number],
   reefSchoolSize: [5, 20] as [number, number],
   /** Beyond this distance from the camera target, animals think less often. */
   lodDistance: 70,
@@ -436,7 +436,7 @@ export const MILESTONES = [
 ];
 
 export const SAVE = {
-  key: 'aztlan-isle-save-v3',
+  key: 'aztlan-isle-save-v4',
   settingsKey: 'aztec-isle-settings-v1',
   tutorialKey: 'aztec-isle-tutorial-v1',
 };

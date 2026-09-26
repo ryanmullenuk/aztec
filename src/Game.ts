@@ -16,6 +16,7 @@ import { UI } from './ui/UI';
 import { TOOLS, ToolId } from './ui/tools';
 import { Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
+import { PeakClouds } from './render/PeakClouds';
 import { Economy } from './economy/Economy';
 import { BuildingSystem, Building } from './buildings/Buildings';
 import { Pathfinder } from './ai/Pathfinder';
@@ -72,6 +73,7 @@ export class Game {
   water: Water;
   veg: Vegetation;
   tufts: GrassTufts;
+  clouds: PeakClouds;
   buildings: BuildingSystem;
   pathfinder: Pathfinder;
   colony: Colony;
@@ -155,6 +157,8 @@ export class Game {
     this.scene.add(this.veg.group);
     this.tufts = new GrassTufts(this.world, cfg.vegDensity);
     this.scene.add(this.tufts.group);
+    this.clouds = new PeakClouds(this.world);
+    this.scene.add(this.clouds.group);
     this.water = new Water(this.world);
     this.scene.add(this.water.group);
 
@@ -879,6 +883,7 @@ export class Game {
     this.eco.update(dt);
     this.sculptor.update(realDt);
     this.tufts.update(realDt);
+    this.clouds.update(realDt, ls.day, this.rig.cur.dist);
     for (const s of this.systems) s(realDt, dt);
     this.rig3d.update(this.colony.list, this.selectedIslander, realDt);
 
