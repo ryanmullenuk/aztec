@@ -155,7 +155,7 @@ const waterFrag = /* glsl */ `
     lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
 
     // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
-    float alpha = mix(0.2, 0.52, smoothstep(0.0, 0.9, cdepth));
+    float alpha = mix(0.22, 0.6, smoothstep(0.0, 0.9, cdepth));
     alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
     alpha = max(alpha, foam);
     // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
