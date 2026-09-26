@@ -321,6 +321,10 @@ export class Terrain {
             float depth = -vWPos.y;
             float c = caustic(vWPos.xz, uTime) * exp(-depth * 0.7) * smoothstep(0.0, 0.25, depth) * uCaustic;
             diffuseColor.rgb += vec3(0.85, 1.0, 0.95) * c * 0.45;
+            // Light is absorbed with depth: the seabed fades to deep navy-teal, so deep water reads as
+            // dark open ocean and seabed terraces vanish below a couple of metres.
+            float absorb = 1.0 - exp(-max(depth - 0.25, 0.0) * 0.85);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.16, 0.24), absorb);
           }
         }`
       );
