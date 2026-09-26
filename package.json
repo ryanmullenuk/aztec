@@ -1,0 +1,24 @@
+{
+  "name": "aztec-isle",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A calm, tactile god game: Aztec tribes settling a lush tropical island.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

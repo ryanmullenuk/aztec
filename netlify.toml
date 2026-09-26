@@ -1,0 +1,9 @@
+# Netlify: connect the repo (or `npx netlify deploy --prod --dir=dist` after `npm run build`).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
