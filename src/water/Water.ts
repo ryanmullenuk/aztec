@@ -125,7 +125,7 @@ const waterFrag = /* glsl */ `
     // Sun (or moon) glitter: a tight core, a wider sheen, and scattered sparkles on the chop.
     vec3 H = normalize(L + V);
     float nh = max(dot(n, H), 0.0);
-    float glare = pow(nh, 1400.0) * 16.0 + pow(nh, 200.0) * 1.8 + pow(nh, 40.0) * 0.22 + pow(nh, 8.0) * 0.03;
+    float glare = pow(nh, 1400.0) * 16.0 + pow(nh, 200.0) * 1.8 + pow(nh, 40.0) * 0.12 + pow(nh, 8.0) * 0.012;
     vec2 cell = floor(p * 16.0);
     float r1 = hsh(cell + floor(t * 2.5) * 0.37);
     vec3 nn = normalize(n + vec3(hsh(cell + 3.1) - 0.5, 0.0, hsh(cell + 7.7) - 0.5) * 0.8);
@@ -165,7 +165,7 @@ const waterFrag = /* glsl */ `
     #include <colorspace_fragment>
     // Sea mist ring: the far ocean melts into the haze, hiding the edge of the water plane.
     #ifdef USE_FOG
-      float rim = smoothstep(uWorld * 0.8, uWorld * 2.2, length(vW.xz));
+      float rim = smoothstep(uWorld * 1.35, uWorld * 3.2, length(vW.xz)) * 0.92;
       gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, rim);
       gl_FragColor.a = mix(gl_FragColor.a, 1.0, rim);
     #endif
