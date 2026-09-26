@@ -80,6 +80,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - A tree catalogue: palms (straight, leaning, curved), eight broadleaf varieties (round, tall and narrow, spreading, jungle giants, vine-hung, pink blossom) and orange fruit trees, plus ferns, flowering bushes, apple bushes and banana trees, all with a wind-sway shader.
 - Biome weighting and clustering noise: palms on beaches, mixed coast, open grassland with small groves, dense mixed jungle, hardy trees on hills and larger trees along rivers. Nothing grows on buildings, paths or steep slopes.
 - Swaying grass clumps over the meadows, hidden automatically under buildings, fields and worn paths.
+- Zoomed in, trees standing between the camera and what you're looking at turn semi-transparent; zoomed out they are fully solid.
 - Chunked for frustum culling, with LOD for distant chunks. Only visible instances are drawn.
 - Chopped trees leave stumps that regrow as saplings. Fruit grows back; rocks give stone.
 
@@ -114,6 +115,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Spider monkeys live in the canopy in troops of 2–5: they sit, walk along branches, climb, hang and swing by their arms with their tails up, eat and watch passers-by, and leap only between trees within reach.
 - Toucans perch, look about, hop and fly curved paths between trees. Gulls fly in boids flocks of 3–8 and land on rocks and beaches; the pointer makes them notice, bank away, then scatter with staggered reactions before regrouping. Panning or pinching the camera never disturbs wildlife.
 - Crabs scuttle sideways on the beaches and burrow when startled; stingrays glide over the shallow seabed with soft shadows.
+- Coral reefs in the shallows: branching staghorn, brain and table corals, swaying sea fans, tube sponges and soft corals in bright colours, with reef fish schooling over them (boats steer around the reefs).
 - Decorative reef fish (six varieties) school around reefs, rocks and the lagoon. Big swirling schools in deep water are what the fishing boats track down, and over-fished stocks regrow slowly.
 - Population limits per species, habitat-aware spawning and respawning, lower update rates far from the camera, and animals (including penned livestock) are saved with the island.
 
@@ -121,11 +123,12 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Smooth-shaded humpbacks (dark slate backs, white pleated throats and bellies, knobbly heads, long white flippers, serrated flukes) glide underwater with a travelling body wave, leaving faint fluke prints on the surface, and never touch the seabed. They breach every so often in deep water (or when tapped), following a reference clip:
   - An underwater glow as it rises, then a near-vertical lift out of the water while it spins, fins spread, with a foam ring at the waterline.
   - It topples onto its back into a huge splash: a crown of water tongues, fine spray and clumps, white-water mist drifting downwind, and lacy foam that spreads and fades. Then the fluke lifts, streaming water, as it dives.
-- Dolphin pods porpoise in staggered leaping arcs, with the odd spinning jump, splashes and ripples.
+- Dolphin pods porpoise through open water in staggered leaping arcs, with the odd spinning jump, splashes and ripples.
+- Swimming whales flex along the whole body, with flippers swept back along the flanks and a supple fluke.
 
 **Boats**
 - The Jetty builds canoes and fishing boats, crewed by fishers.
-- Boats sail a water A* route around rocks and reefs, cast a net with a splash, bob on the waves, leave a wake and carry the catch home.
+- Boats sail a water A* route around rocks and reefs, then fish for five minutes, casting the net again and again as they follow the school, before carrying the catch home. They ride on the water, bobbing and rocking with the swell, and leave a wake.
 
 **Audio**
 - Procedural Web Audio: waves, wind, insects, bird calls, and a positional waterfall roar.
