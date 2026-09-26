@@ -156,13 +156,14 @@ export class Powers {
     if (this.stormAmt > 0.5) {
       this.flashTimer -= realDt;
       if (this.flashTimer <= 0) {
-        this.flashTimer = 4 + this.rnd() * 9;
+        this.flashTimer = 9 + this.rnd() * 14;
         this.flash = 1;
         setTimeout(() => this.onThunder(), 300 + this.rnd() * 900);
       }
     }
-    this.flash = Math.max(0, this.flash - realDt * 3);
-    this.lighting.ambient.intensity += this.flash * 2.5;
+    this.flash = Math.max(0, this.flash - realDt * 4);
+    // A soft brightening, not a full-screen white flash.
+    this.lighting.ambient.intensity += this.flash * 0.9;
 
     // Rain streaks follow the camera.
     const mat = this.rain.material as THREE.LineBasicMaterial;
