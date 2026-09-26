@@ -17,6 +17,8 @@ const C = {
   wetSand: col(COLORS.wetSand),
   seabed: col(0xe6d3a2),
   seabedDeep: col(0x9fb7a8),
+  seagrass: col(0x2f5d3e),
+  reefRock: col(0x5d4e60),
   grass: col(COLORS.grass),
   grassBright: col(COLORS.grassBright),
   olive: col(COLORS.grassOlive),
@@ -196,6 +198,14 @@ export class Terrain {
     if (y < -0.04) {
       const depth = -y;
       out.copy(C.seabed).lerp(C.seabedDeep, smoothstep(0.3, 3.5, depth));
+      // Seagrass meadows and dark coral-rock patches scattered across the reef shelf.
+      const shelfK = smoothstep(0.25, 0.6, depth) * (1 - smoothstep(2.6, 4, depth));
+      if (shelfK > 0) {
+        const sg = this.noise.noise(x * 0.11 + 17, z * 0.11 - 9) * 0.7 + this.noise.noise(x * 0.37, z * 0.37) * 0.3;
+        const rk = this.noise.noise(x * 0.23 - 40, z * 0.23 + 12) * 0.75 + this.noise.noise(x * 0.8 + 3, z * 0.8) * 0.25;
+        out.lerp(C.seagrass, smoothstep(0.25, 0.5, sg) * 0.85 * shelfK);
+        out.lerp(C.reefRock, smoothstep(0.42, 0.62, rk) * 0.8 * shelfK);
+      }
       out.multiplyScalar(0.95 + nz2 * 0.06);
       return { grass: 0, flat: 0 };
     }
