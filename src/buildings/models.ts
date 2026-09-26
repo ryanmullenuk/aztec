@@ -72,41 +72,176 @@ export function campfireModel(): BuildingModel {
   return { finished: b.build(), torches: [new THREE.Vector3(0, 0.2, 0)], height: 1.6 };
 }
 
-/** Round thatched hut. */
-export function hutModel(): BuildingModel {
-  const b = new GeoBuilder();
-  b.add(P.cyl(0.78, 0.82, 0.12, 14), { color: K.stoneDark }, M.t(0, 0.06, 0));
-  b.add(P.cyl(0.66, 0.7, 0.6, 14), { color: (p) => (Math.abs(Math.atan2(p.x, p.z) * 5) % 1 < 0.15 ? K.timber : K.adobe) }, M.t(0, 0.42, 0));
-  b.add(P.cone(1.0, 1.0, 14), { color: thatchColor, leaf: 0.2 }, M.t(0, 1.2, 0));
-  b.add(P.cone(0.18, 0.22, 8), { color: K.thatchDark }, M.t(0, 1.78, 0));
-  b.add(P.box(0.3, 0.44, 0.1), { color: K.door }, M.t(0, 0.34, 0.66));
-  b.add(P.box(0.4, 0.06, 0.12), { color: K.timber }, M.t(0, 0.58, 0.68));
-  // Clay pot and firewood beside the door.
-  b.add(P.uvSphere(0.1, 8, 6), { color: K.terracotta }, M.t(0.45, 0.1, 0.62));
-  for (let k = 0; k < 3; k++) b.add(P.cyl(0.035, 0.035, 0.35, 5), { color: K.timberDark }, M.t(-0.5, 0.06 + k * 0.05, 0.55, 0, 0.3, Math.PI / 2));
-  const t = torchPole(b, 0.55, 0.85);
-  return { finished: b.build(), torches: [t], height: 1.9 };
+// ---------------- Adobe houses (levels 1–5) ----------------
+
+const AD = {
+  wall: c(0xf2a164),
+  wallLight: c(0xf9bd82),
+  roof: c(0xe08f55),
+  band: c(0xd9673f),
+  door: c(0x1b8a9b),
+  win: c(0x3a2721),
+  red: c(0xc8342c),
+  cream: c(0xf3e3c6),
+  post: c(0x7a4a2a),
+  pot: c(0xc4643a),
+  leaf: c(0x4f9a3a),
+  leafLight: c(0x7cc04a),
+};
+
+/** A plastered adobe block, lighter toward the top, with a low parapet around a flat roof. */
+function adobeBlock(b: GeoBuilder, w: number, h: number, d: number, x: number, y: number, z: number, parapet = true): void {
+  b.add(P.rbox(w, h, d, 0.035), { color: (p) => AD.wall.clone().lerp(AD.wallLight, Math.min(1, Math.max(0, (p.y - y) / h)) * 0.55) }, M.t(x, y + h / 2, z));
+  if (!parapet) return;
+  const t = 0.07, ph = 0.09;
+  b.add(P.box(w, ph, t), { color: AD.wallLight }, M.t(x, y + h + ph / 2, z + d / 2 - t / 2));
+  b.add(P.box(w, ph, t), { color: AD.wallLight }, M.t(x, y + h + ph / 2, z - d / 2 + t / 2));
+  b.add(P.box(t, ph, d), { color: AD.wallLight }, M.t(x + w / 2 - t / 2, y + h + ph / 2, z));
+  b.add(P.box(t, ph, d), { color: AD.wallLight }, M.t(x - w / 2 + t / 2, y + h + ph / 2, z));
+  b.add(P.box(w - t * 2, 0.02, d - t * 2), { color: AD.roof }, M.t(x, y + h + 0.01, z));
+}
+/** Terracotta band around the foot of a wall. */
+function baseBand(b: GeoBuilder, w: number, d: number, x: number, z: number, h = 0.16): void {
+  b.add(P.box(w + 0.02, h, d + 0.02), { color: AD.band }, M.t(x, h / 2, z));
+}
+function tealDoor(b: GeoBuilder, x: number, y: number, z: number, w = 0.26, h = 0.46): void {
+  b.add(P.box(w + 0.06, h + 0.04, 0.03), { color: AD.wallLight }, M.t(x, y + h / 2, z));
+  b.add(P.box(w, h, 0.04), { color: AD.door }, M.t(x, y + h / 2, z + 0.01));
+}
+function adobeWindow(b: GeoBuilder, x: number, y: number, z: number, side = false, w = 0.12, h = 0.18): void {
+  b.add(P.box(side ? 0.04 : w, h, side ? w : 0.04), { color: AD.win }, M.t(x, y, z));
+}
+/** Sloping cloth awning on two posts; striped red and cream, or plain red. */
+function awning(b: GeoBuilder, x: number, y: number, z: number, w: number, d: number, striped: boolean): void {
+  const n = striped ? 6 : 1;
+  for (let k = 0; k < n; k++) {
+    const sw = w / n;
+    const col = striped ? (k % 2 ? AD.cream : AD.red) : AD.red;
+    b.add(P.box(sw, 0.025, d), { color: col }, M.t(x - w / 2 + sw * (k + 0.5), y, z + d / 2, 0.22, 0, 0));
+  }
+  // Valance along the front edge.
+  b.add(P.box(w, 0.07, 0.02), { color: AD.red }, M.t(x, y - 0.1, z + d * 0.97));
+  for (const sx of [-1, 1]) b.add(P.cyl(0.025, 0.03, y, 5), { color: AD.post }, M.t(x + sx * (w / 2 - 0.03), y / 2, z + d * 0.95));
+  b.add(P.box(w, 0.04, 0.04), { color: AD.post }, M.t(x, y - 0.03, z + d * 0.95));
+}
+function pottedPlant(b: GeoBuilder, x: number, y: number, z: number, s = 1): void {
+  b.add(P.cyl(0.07 * s, 0.05 * s, 0.1 * s, 7), { color: AD.pot }, M.t(x, y + 0.05 * s, z));
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    b.add(P.cone(0.035 * s, 0.2 * s, 4), { color: k % 2 ? AD.leaf : AD.leafLight, sway: 0.4, leaf: 1 }, M.t(x + Math.cos(a) * 0.03 * s, y + 0.18 * s, z + Math.sin(a) * 0.03 * s, Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5));
+  }
+}
+function stairs(b: GeoBuilder, x: number, z: number, n: number, stepH: number, stepD: number, width: number, dirX: number): void {
+  for (let k = 0; k < n; k++) {
+    const h = stepH * (k + 1);
+    b.add(P.box(stepD, h, width), { color: AD.wallLight }, M.t(x + dirX * k * stepD, h / 2, z));
+  }
 }
 
-/** Rectangular family home: plastered walls, terracotta band, pitched thatch roof, porch. */
-export function homeModel(): BuildingModel {
+/** Level 1 house: a small adobe hut with a thatched awning (2 people). */
+export function hutModel(): BuildingModel {
   const b = new GeoBuilder();
-  b.add(P.rbox(2.5, 0.14, 2.2, 0.04), { color: K.stoneDark }, M.t(0, 0.07, 0));
-  b.add(P.rbox(2.2, 0.85, 1.8, 0.06), { color: K.plaster }, M.t(0, 0.56, -0.1));
-  b.add(P.box(2.24, 0.1, 1.84), { color: K.terracotta }, M.t(0, 0.95, -0.1));
-  // Triangular prism roof (3-sided cylinder on its side).
-  const roof = new THREE.CylinderGeometry(0.95, 0.95, 2.6, 3, 1);
-  b.add(roof, { color: thatchColor, leaf: 0.2 }, M.t(0, 1.33, -0.1, 0, 0, Math.PI / 2, 1, 1, 1.25));
-  b.add(P.box(0.08, 0.08, 2.1), { color: K.timberDark }, M.t(0, 1.8, -0.1));
-  // Door, windows, porch posts.
-  b.add(P.box(0.36, 0.55, 0.06), { color: K.door }, M.t(0, 0.42, 0.81));
-  for (const x of [-0.65, 0.65]) b.add(P.box(0.26, 0.22, 0.06), { color: K.door }, M.t(x, 0.62, 0.81));
-  b.add(P.box(1.2, 0.05, 0.5), { color: K.thatch }, M.t(0, 0.98, 1.02, -0.25, 0, 0));
-  for (const x of [-0.55, 0.55]) b.add(P.cyl(0.035, 0.035, 0.9, 6), { color: K.timber }, M.t(x, 0.5, 1.2));
-  b.add(P.uvSphere(0.12, 8, 6), { color: K.terracotta }, M.t(0.9, 0.12, 0.95));
-  b.add(P.uvSphere(0.09, 8, 6), { color: K.jade }, M.t(1.05, 0.1, 0.8));
-  const t1 = torchPole(b, -1.05, 1.1), t2 = torchPole(b, 1.05, 1.1);
-  return { finished: b.build(), torches: [t1, t2], height: 2.0 };
+  baseBand(b, 1.2, 1.1, 0, 0, 0.12);
+  adobeBlock(b, 1.2, 0.72, 1.1, 0, 0, 0);
+  adobeBlock(b, 0.55, 0.36, 0.55, -0.26, 0.72, -0.2);
+  tealDoor(b, 0.1, 0.02, 0.56);
+  adobeWindow(b, -0.36, 0.9, -0.2 + 0.28);
+  adobeWindow(b, 0.61, 0.46, -0.1, true);
+  // Thatched lean-to over the door.
+  b.add(P.box(1.1, 0.05, 0.42), { color: thatchColor, leaf: 0.2 }, M.t(0.05, 0.66, 0.74, 0.3, 0, 0));
+  for (const x of [-0.4, 0.5]) b.add(P.cyl(0.025, 0.03, 0.6, 5), { color: AD.post }, M.t(x, 0.3, 0.9));
+  pottedPlant(b, 0.62, 0, 0.72, 0.9);
+  const t = torchPole(b, -0.62, 0.78, 0.7);
+  return { finished: b.build(), torches: [t], height: 1.4 };
+}
+
+/**
+ * Home, levels 2–5 (tier 1–4): the adobe house grows with each upgrade.
+ *  2: family home, two stacked blocks and a red awning (4 people)
+ *  3: larger home, two wings and an upper room (7)
+ *  4: village home, three storeys, outside stairs, courtyard wall (12)
+ *  5: large house compound with a rooftop pergola (16)
+ */
+export function homeModel(tier = 1): BuildingModel {
+  const b = new GeoBuilder();
+  let height = 2;
+  const torches: THREE.Vector3[] = [];
+  if (tier <= 1) {
+    baseBand(b, 1.9, 1.6, 0, -0.1);
+    adobeBlock(b, 1.9, 1.0, 1.6, 0, 0, -0.1);
+    adobeBlock(b, 1.0, 0.8, 0.95, -0.25, 1.0, -0.35);
+    tealDoor(b, -0.35, 0.02, 0.71, 0.3, 0.55);
+    adobeWindow(b, -0.45, 1.45, 0.14);
+    adobeWindow(b, -0.05, 1.45, 0.14);
+    adobeWindow(b, 0.96, 0.6, -0.2, true);
+    awning(b, 0.45, 0.78, 0.7, 0.8, 0.5, false);
+    pottedPlant(b, 0.2, 0, 0.95);
+    pottedPlant(b, 0.8, 0, 1.0, 0.8);
+    torches.push(torchPole(b, -1.05, 1.05));
+    height = 2.2;
+  } else if (tier === 2) {
+    baseBand(b, 2.4, 1.7, 0, -0.1);
+    adobeBlock(b, 1.4, 1.05, 1.7, -0.5, 0, -0.1);
+    adobeBlock(b, 1.1, 1.3, 1.4, 0.65, 0, -0.25);
+    adobeBlock(b, 0.9, 0.8, 0.9, -0.6, 1.05, -0.4);
+    tealDoor(b, -0.45, 0.02, 0.76, 0.3, 0.55);
+    for (const x of [-0.8, -0.4]) adobeWindow(b, x, 1.5, 0.06);
+    adobeWindow(b, 0.9, 0.95, 0.46);
+    adobeWindow(b, 0.4, 0.95, 0.46);
+    awning(b, -0.45, 0.8, 0.76, 0.9, 0.5, false);
+    pottedPlant(b, 0.3, 0, 0.8);
+    pottedPlant(b, 1.1, 0, 0.75, 1.2);
+    pottedPlant(b, -1.1, 0, 0.9, 0.9);
+    torches.push(torchPole(b, -1.2, 1.1), torchPole(b, 1.2, 1.0));
+    height = 2.3;
+  } else if (tier === 3) {
+    baseBand(b, 2.6, 2.0, 0, -0.15);
+    adobeBlock(b, 1.5, 1.1, 1.8, -0.55, 0, -0.25);
+    adobeBlock(b, 1.1, 1.1, 1.2, 0.75, 0, -0.45);
+    adobeBlock(b, 1.0, 0.9, 1.0, -0.65, 1.1, -0.5);
+    adobeBlock(b, 0.75, 0.8, 0.75, -0.65, 2.0, -0.55);
+    // Outside stairs up to the first roof.
+    stairs(b, 0.3, 0.4, 6, 0.18, 0.13, 0.36, 1);
+    tealDoor(b, -0.7, 0.02, 0.66, 0.3, 0.55);
+    for (const x of [-0.95, -0.4]) adobeWindow(b, x, 1.55, 0.01);
+    adobeWindow(b, -0.65, 2.45, -0.17);
+    adobeWindow(b, 0.8, 0.7, 0.16);
+    awning(b, 0.55, 1.12, 0.15, 1.0, 0.6, true);
+    // Courtyard wall.
+    b.add(P.box(1.25, 0.35, 0.1), { color: AD.wallLight }, M.t(0.6, 0.18, 1.25));
+    b.add(P.box(0.1, 0.35, 0.65), { color: AD.wallLight }, M.t(1.2, 0.18, 0.95));
+    pottedPlant(b, 0.45, 0, 1.0);
+    pottedPlant(b, 0.95, 0, 0.95, 1.2);
+    pottedPlant(b, -0.95, 1.1, 0.25, 0.9);
+    torches.push(torchPole(b, -1.25, 1.2), torchPole(b, 1.25, 1.3));
+    height = 3.0;
+  } else {
+    baseBand(b, 2.8, 2.4, 0, -0.1);
+    adobeBlock(b, 2.8, 1.0, 2.4, 0, 0, -0.1);
+    adobeBlock(b, 1.9, 1.0, 1.6, -0.35, 1.0, -0.45);
+    adobeBlock(b, 1.0, 0.9, 1.0, -0.6, 2.0, -0.6);
+    adobeBlock(b, 0.8, 0.5, 0.8, 0.9, 1.0, 0.5);
+    // Rooftop pergola with a striped canopy.
+    for (const [px, pz] of [[-1.0, -0.2], [-0.2, -0.2], [-1.0, -1.0], [-0.2, -1.0]]) b.add(P.cyl(0.025, 0.03, 0.55, 5), { color: AD.post }, M.t(px, 2.9 + 0.27, pz));
+    for (let k = 0; k < 6; k++) b.add(P.box(0.14, 0.025, 0.9), { color: k % 2 ? AD.cream : AD.red }, M.t(-1.0 + 0.07 + k * 0.134, 3.46, -0.6, 0, 0, 0.08));
+    // Front door under a striped awning, stairs to the roof terrace.
+    tealDoor(b, -0.4, 0.02, 1.11, 0.32, 0.6);
+    awning(b, -0.4, 0.85, 1.11, 1.0, 0.45, true);
+    stairs(b, 1.05, 1.2, 5, 0.2, 0.12, 0.34, -1);
+    for (const x of [-1.05, 0.3]) adobeWindow(b, x, 0.6, 1.11);
+    for (const x of [-0.9, 0.1]) adobeWindow(b, x, 1.55, 0.36);
+    adobeWindow(b, -0.6, 2.45, -0.09);
+    tealDoor(b, 0.9, 1.0, 0.91, 0.24, 0.36);
+    // Front courtyard walls.
+    b.add(P.box(1.0, 0.3, 0.1), { color: AD.wallLight }, M.t(-0.9, 0.15, 1.42));
+    pottedPlant(b, 0.2, 0, 1.3);
+    pottedPlant(b, -1.2, 0, 1.3, 1.2);
+    pottedPlant(b, 0.4, 1.0, 0.9, 0.9);
+    pottedPlant(b, -1.1, 2.0, 0.1, 0.8);
+    torches.push(torchPole(b, -1.35, 1.35), torchPole(b, 1.35, 1.35, 0.6));
+    height = 3.6;
+  }
+  return { finished: b.build(), torches, height };
 }
 
 /** Aztec stepped pyramid. Tier 1-3 (3 is the Great Pyramid with twin shrines). */

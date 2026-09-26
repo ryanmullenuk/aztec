@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, JETTY, TEMPLE } from '../config';
+import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE } from '../config';
 import { Economy, Cost } from '../economy/Economy';
 import { flameMaterial, stylisedMaterial, FX } from '../render/materials';
 import { Terrain } from '../terrain/Terrain';
@@ -104,11 +104,20 @@ export class Building {
   }
 
   get housing(): number {
-    return this.complete ? this.def.housing ?? 0 : 0;
+    if (!this.complete) return 0;
+    if (this.key === 'home') return HOMES.housing[Math.min(HOMES.housing.length, this.tier) - 1];
+    return this.def.housing ?? 0;
+  }
+
+  /** House level shown to the player (hut = 1, home tiers = 2–5). */
+  get houseLevel(): number {
+    return this.key === 'hut' ? 1 : this.key === 'home' ? this.tier + 1 : 0;
   }
 
   get label(): string {
     if (this.key === 'temple') return this.tier === 3 ? 'Great Pyramid' : `Temple (tier ${this.tier})`;
+    if (this.key === 'home') return `Home (level ${this.tier + 1})`;
+    if (this.key === 'hut') return 'Hut (level 1)';
     return this.def.name;
   }
 }
@@ -246,6 +255,11 @@ export class BuildingSystem {
       const cost = this.eco.templeUpgradeCost(b.tier + 1);
       return this.eco.canAfford(cost) ? { ok: true, reason: '', cost } : { ok: false, reason: 'Not enough resources', cost };
     }
+    if (b.key === 'home') {
+      if (b.tier >= (b.def.maxTier ?? 1)) return { ok: false, reason: 'Already the largest house', cost: { wood: 0, stone: 0, belief: 0 } };
+      const cost = HOMES.upgradeCost[b.tier + 1];
+      return this.eco.canAfford(cost) ? { ok: true, reason: '', cost } : { ok: false, reason: 'Not enough resources', cost };
+    }
     if (b.key === 'hut') {
       const cost = BUILDINGS.home.cost;
       // The home needs a 3x3 flat area including the hut's cells.
@@ -264,7 +278,7 @@ export class BuildingSystem {
   upgrade(b: Building): Building | null {
     const chk = this.canUpgrade(b);
     if (!chk.ok) return null;
-    if (b.key === 'temple') {
+    if (b.key === 'temple' || b.key === 'home') {
       this.eco.spend(chk.cost);
       b.upgrading = true;
       b.progress = 0;
@@ -330,7 +344,7 @@ export class BuildingSystem {
     switch (b.key) {
       case 'campfire': return models.campfireModel();
       case 'hut': return models.hutModel();
-      case 'home': return models.homeModel();
+      case 'home': return models.homeModel(b.tier);
       case 'temple': return models.templeModel(b.tier);
       case 'farm': return models.farmModel(sw, sd);
       case 'butcher': return models.butcherModel(sw, sd);
@@ -445,7 +459,7 @@ export class BuildingSystem {
 
   /** Called by builders every frame they work. */
   addProgress(b: Building, dt: number): void {
-    const time = b.upgrading ? TEMPLE.upgradeTime[b.tier + 1] : b.def.buildTime;
+    const time = b.upgrading ? (b.key === 'home' ? HOMES.upgradeTime[b.tier + 1] : TEMPLE.upgradeTime[b.tier + 1]) : b.def.buildTime;
     b.progress = Math.min(1, b.progress + dt / time);
     if (b.progress >= 1) this.finish(b);
     else this.updateStageVisuals(b);
