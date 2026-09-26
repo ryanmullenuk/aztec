@@ -3,10 +3,19 @@ import { Simplex2, clamp, lerp, smoothstep } from './noise';
 import { RNG } from './rng';
 import { World } from './World';
 
+/** Smooth maximum (blends overlapping lobes into one natural coastline). */
+function smax(a: number, b: number, k: number): number {
+  const h = clamp(0.5 + (0.5 * (a - b)) / k, 0, 1);
+  return b + (a - b) * h + k * h * (1 - h);
+}
+
 /**
- * Procedural island from a seed: main island with coves and headlands, offshore islets,
- * stepped contour layers, highland plateau with cliffs, rivers, a waterfall with a pool,
- * a lagoon and an open meadow for the tribe.
+ * Procedural island from a seed, laid out like a tropical atoll concept:
+ *  - a multi-lobed main island with bays and peninsulas and a ragged coastline,
+ *  - a wide turquoise reef shelf all around, dropping off into deep navy sea,
+ *  - a rocky mountain massif on one side (rivers and the waterfall start there),
+ *  - scattered rocky knolls, wide sandy beaches in the bays, large open grasslands between jungle,
+ *  - rocky wooded islets out on the shelf, a lagoon and an open meadow for the tribe.
  */
 export function generateIsland(world: World, seed: number): void {
   world.seed = seed;
@@ -18,55 +27,100 @@ export function generateIsland(world: World, seed: number): void {
 
   const rot = rng.range(0, Math.PI * 2);
   const cr = Math.cos(rot), sr = Math.sin(rot);
-  const stretch = rng.range(1.0, 1.28);
 
-  // Highland centre: offset from the middle of the island.
-  const ha = rng.range(0, Math.PI * 2);
-  const hc = { x: Math.cos(ha) * 0.16, z: Math.sin(ha) * 0.16 };
-
-  // Offshore islets.
+  // Lobes of the main island: a big central body and several peninsulas.
+  const lobes: { x: number; z: number; rx: number; rz: number; a: number }[] = [
+    { x: 0, z: 0, rx: rng.range(0.4, 0.47), rz: rng.range(0.32, 0.38), a: rng.range(0, Math.PI) },
+  ];
+  const nLobes = rng.int(3, 5);
+  for (let k = 0; k < nLobes; k++) {
+    const ang = (k / nLobes) * Math.PI * 2 + rng.range(-0.5, 0.5);
+    const d = rng.range(0.27, 0.4);
+    lobes.push({ x: Math.cos(ang) * d, z: Math.sin(ang) * d, rx: rng.range(0.16, 0.26), rz: rng.range(0.1, 0.17), a: ang + rng.range(-0.6, 0.6) });
+  }
+  // Mountain massif: a ridge of peaks set to one side of the island.
+  const ma = rng.range(0, Math.PI * 2);
+  const mc = { x: Math.cos(ma) * 0.2, z: Math.sin(ma) * 0.2 };
+  const mDir = ma + Math.PI / 2 + rng.range(-0.5, 0.5);
+  const mcs = Math.cos(mDir), msn = Math.sin(mDir);
+  // Rocky knolls elsewhere on the island.
+  const knolls: { x: number; z: number; r: number; h: number }[] = [];
+  for (let k = 0; k < 40 && knolls.length < rng.int(3, 5); k++) {
+    const a2 = rng.range(0, Math.PI * 2), d = rng.range(0.12, 0.42);
+    const x = Math.cos(a2) * d, z = Math.sin(a2) * d;
+    if (Math.hypot(x - mc.x, z - mc.z) < 0.3 || knolls.some((q) => Math.hypot(q.x - x, q.z - z) < 0.18)) continue;
+    knolls.push({ x, z, r: rng.range(0.05, 0.085), h: rng.range(0.22, 0.4) });
+  }
+  // Islets out on the reef shelf.
   world.islets = [];
   const isletCount = rng.int(WORLD.isletCount[0], WORLD.isletCount[1]);
-  const islets: { x: number; z: number; r: number }[] = [];
-  for (let k = 0; k < isletCount; k++) {
-    const a = rng.range(0, Math.PI * 2);
-    const d = rng.range(0.74, 0.88);
-    islets.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r: rng.range(0.035, 0.07) });
+  const islets: { x: number; z: number; r: number; h: number }[] = [];
+  for (let k = 0; k < 200 && islets.length < isletCount; k++) {
+    const a2 = rng.range(0, Math.PI * 2);
+    const d = rng.range(0.62, 0.84);
+    const x = Math.cos(a2) * d, z = Math.sin(a2) * d;
+    if (islets.some((q) => Math.hypot(q.x - x, q.z - z) < 0.2)) continue;
+    islets.push({ x, z, r: rng.range(0.035, 0.065), h: rng.range(0.2, 0.42) });
   }
 
   const v = new Float32Array(N * N);
-  const hlMaskF = new Float32Array(N * N);
+  const massif = new Float32Array(N * N);
+  const knollM = new Float32Array(N * N);
   for (let cz = 0; cz < N; cz++) {
     for (let cx = 0; cx < N; cx++) {
+      const i = cz * N + cx;
       const nx = ((cx + 0.5) / N) * 2 - 1;
       const nz = ((cz + 0.5) / N) * 2 - 1;
       const rx = nx * cr - nz * sr;
       const rz = nx * sr + nz * cr;
-      const wx = rx + 0.2 * sA.fbm(rx * 1.3 + 3.1, rz * 1.3 - 5.7, 3);
-      const wz = rz + 0.2 * sA.fbm(rx * 1.3 - 9.2, rz * 1.3 + 2.4, 3);
-      const d = Math.sqrt(wx * wx + wz * wz * stretch * stretch);
-      const mass = 1 - smoothstep(0.16, 0.7, d);
-      const detail = sA.fbm(nx * 3.4 + 11, nz * 3.4 - 7, 5);
-      const hills = sB.ridge(nx * 2.6 + 4, nz * 2.6 + 8, 3);
-
-      let h = mass * 0.95 + detail * 0.2 - 0.22 + hills * 0.22 * mass;
-
-      // Highland plateau with a cliff edge.
-      const hd = Math.hypot(nx - hc.x, nz - hc.z) + sC.fbm(nx * 3 + 1, nz * 3 - 1, 3) * 0.12;
-      const hl = (1 - smoothstep(0.08, 0.34, hd)) * smoothstep(0.2, 0.5, mass);
-      hlMaskF[cz * N + cx] = hl;
-      h += hl * 0.28 + smoothstep(0.42, 0.52, hl) * 0.26;
-
-      // Deeper ocean towards the map edge.
-      const dr = Math.hypot(nx, nz);
-      if (h < 0) h -= smoothstep(0.72, 1.05, dr) * 0.4;
-
-      for (const it of islets) {
-        const di = Math.hypot(nx - it.x, nz - it.z);
-        const iv = (1 - di / it.r) * 0.22 + sB.noise(nx * 14, nz * 14) * 0.025 - 0.02;
-        if (iv > h) h = iv;
+      const wx = rx + 0.11 * sA.fbm(rx * 1.8 + 3.1, rz * 1.8 - 5.7, 4);
+      const wz = rz + 0.11 * sA.fbm(rx * 1.8 - 9.2, rz * 1.8 + 2.4, 4);
+      let m = -10;
+      for (const L of lobes) {
+        const dx = wx - L.x, dz = wz - L.z;
+        const ca = Math.cos(L.a), sa = Math.sin(L.a);
+        const u = dx * ca + dz * sa, w = -dx * sa + dz * ca;
+        m = smax(m, 1 - Math.sqrt((u / L.rx) ** 2 + (w / L.rz) ** 2), 0.22);
       }
-      v[cz * N + cx] = h;
+      // Ragged coast: bays and points.
+      m += sB.fbm(nx * 4.2 + 11, nz * 4.2 - 7, 4) * 0.17;
+
+      let h: number;
+      if (m > 0) {
+        // Gently rolling lowland rising inland.
+        h = 0.06 + Math.pow(m, 0.8) * 0.4 + sA.fbm(nx * 3 + 2, nz * 3, 4) * 0.07;
+      } else {
+        // Wide shallow reef shelf, then a drop-off into the deep.
+        const shelfW = 0.36 + sC.noise(nx * 2.3 + 5, nz * 2.3) * 0.1;
+        if (m > -shelfW) h = -0.012 + (m / shelfW) * 0.1 + sC.fbm(nx * 9, nz * 9, 2) * 0.018;
+        else h = -0.112 - (-shelfW - m) * 1.7;
+      }
+      // Mountain massif: ridged peaks, only on land.
+      const mx = nx - mc.x, mz = nz - mc.z;
+      const mu = mx * mcs + mz * msn, mw = -mx * msn + mz * mcs;
+      const md = Math.sqrt((mu / 0.4) ** 2 + (mw / 0.21) ** 2) + sC.fbm(nx * 3.5 + 1, nz * 3.5 - 1, 3) * 0.2;
+      const mm = (1 - smoothstep(0.25, 1.0, md)) * smoothstep(0.04, 0.26, m);
+      massif[i] = mm;
+      // Tall, jagged peaks along the ridge.
+      const rid = sB.ridge(nx * 2.5 + 4, nz * 2.5 + 8, 4);
+      h += mm * (0.45 + rid * 1.3 + Math.pow(rid, 2) * 1.1 * mm);
+      // Knolls.
+      for (const k of knolls) {
+        const dk = Math.hypot(nx - k.x, nz - k.z) / k.r;
+        if (dk < 1.4) {
+          const kv = Math.max(0, 1 - dk * dk) * k.h * smoothstep(0, 0.12, m);
+          h += kv;
+          knollM[i] = Math.max(knollM[i], 1 - dk / 1.4);
+        }
+      }
+      // Islets, each with its own ring of shallows.
+      for (const it of islets) {
+        const di = Math.hypot(nx - it.x, nz - it.z) / it.r;
+        const iv = (1 - di) * it.h + sB.noise(nx * 14, nz * 14) * 0.03 - 0.015;
+        if (iv > h) h = iv;
+        if (di < 3.2) h = Math.max(h, -0.012 - (di - 1) * 0.045);
+      }
+      v[i] = h;
     }
   }
 
@@ -87,39 +141,43 @@ export function generateIsland(world: World, seed: number): void {
 
   world.computeDistWater();
 
-  // Rocky headlands and beaches.
+  // Rocky headlands, cliffs on the mountains and knolls, wide beaches in the bays.
   for (let cz = 0; cz < N; cz++) {
     for (let cx = 0; cx < N; cx++) {
       const i = cz * N + cx;
       if (world.layer[i] < 1) continue;
       const nx = cx / N, nz = cz / N;
       const dw = world.distWater[i];
-      const head = sC.noise(nx * 9 + 30, nz * 9 - 30);
-      if (dw <= 3 && head > 0.38) {
-        world.layer[i] = Math.max(world.layer[i], 2 + Math.round((head - 0.38) * 6 + (3 - dw) * 0.3));
+      const head = sC.noise(nx * 7 + 30, nz * 7 - 30);
+      if (dw <= 2 && head > 0.55) {
+        world.layer[i] = Math.max(world.layer[i], 2 + Math.round((head - 0.55) * 8 + (2 - dw) * 0.4));
         world.rocky[i] = 1;
-      } else if (dw <= 1 || (dw <= 3 && world.layer[i] <= 2 && head < 0.1)) {
+      } else if (dw <= 2 || (dw <= 4 && world.layer[i] <= 2 && head < 0.2)) {
         world.sandy[i] = 1;
       }
-      if (hlMaskF[i] > 0.5 && sB.noise(nx * 12, nz * 12) > 0.15) world.rocky[i] = Math.max(world.rocky[i], 0.7);
-      if (world.layer[i] >= 11) world.rocky[i] = Math.max(world.rocky[i], 0.6 + sA.noise(nx * 20, nz * 20) * 0.3);
+      // Mountains: green lower slopes with rocky crags, bare rock toward the peaks.
+      if (massif[i] > 0.3 && (sB.noise(nx * 12, nz * 12) > 0.3 || world.layer[i] >= 12)) world.rocky[i] = Math.max(world.rocky[i], 0.55 + massif[i] * 0.45);
+      if (knollM[i] > 0.45) world.rocky[i] = Math.max(world.rocky[i], 0.8);
+      if (world.layer[i] >= 13) world.rocky[i] = Math.max(world.rocky[i], 0.7 + sA.noise(nx * 20, nz * 20) * 0.3);
     }
   }
 
-  placeMeadow(world, rng, hlMaskF);
+  placeMeadow(world, rng, massif);
 
-  // Jungle density: dense everywhere except glades, beaches and the meadow.
+  // Vegetation: jungle broken by large open grasslands; bare rock high up; beaches and the meadow clear.
   for (let cz = 0; cz < N; cz++) {
     for (let cx = 0; cx < N; cx++) {
       const i = cz * N + cx;
       if (world.layer[i] < 1) continue;
       const nx = cx / N, nz = cz / N;
-      let f = smoothstep(-0.5, -0.18, sB.fbm(nx * 5 + 20, nz * 5 - 20, 3));
+      let f = smoothstep(-0.2, 0.18, sB.fbm(nx * 2.4 + 20, nz * 2.4 - 20, 4));
+      // Mountain slopes are wooded below the bare rock.
+      f = Math.max(f, massif[i] > 0.15 && world.layer[i] < 12 ? 0.8 : 0);
       f *= smoothstep(1.5, 4.5, world.distWater[i]);
       f *= 1 - world.rocky[i] * 0.75;
       f *= 1 - world.sandy[i];
       const dm = Math.hypot(world.centerX(cx) - world.meadow.x, world.centerZ(cz) - world.meadow.z);
-      f *= smoothstep(world.meadow.r, world.meadow.r + 6, dm);
+      f *= smoothstep(world.meadow.r, world.meadow.r + 8, dm);
       world.forest[i] = f;
     }
   }
@@ -204,18 +262,27 @@ function carveRivers(world: World, rng: RNG, v: Float32Array): void {
   world.waterfall = null;
   const count = rng.int(WORLD.riverCount[0], WORLD.riverCount[1]);
   const sources: number[] = [];
-  for (let k = 0; k < 3000 && sources.length < count; k++) {
+  let topL = 0;
+  for (let i = 0; i < N * N; i++) topL = Math.max(topL, world.layer[i]);
+  const srcMin = Math.max(8, topL - 5);
+  // Plenty of candidate springs high in the mountains; rivers are tried until enough reach the sea.
+  for (let k = 0; k < 8000 && sources.length < count * 10; k++) {
     const i = rng.int(0, N * N - 1);
-    if (world.layer[i] < 8) continue;
+    if (world.layer[i] < srcMin) continue;
     const cx = i % N, cz = (i / N) | 0;
-    if (sources.some((s) => Math.hypot((s % N) - cx, ((s / N) | 0) - cz) < 22)) continue;
+    if (sources.some((s) => Math.hypot((s % N) - cx, ((s / N) | 0) - cz) < 6)) continue;
     sources.push(i);
   }
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const inMeadow = (cx: number, cz: number) =>
     Math.hypot(world.centerX(cx) - world.meadow.x, world.centerZ(cz) - world.meadow.z) < world.meadow.r + 3;
 
-  sources.forEach((src, riverIndex) => {
+  for (const src of sources) {
+    if (world.rivers.length >= count) break;
+    // Rivers must stay apart.
+    const scx = src % N, scz = (src / N) | 0;
+    if (world.rivers.some((r) => r.points.some((p) => Math.hypot(world.centerX(scx) - p.x, world.centerZ(scz) - p.z) < 16))) continue;
+    const riverIndex = world.rivers.length;
     const path: number[] = [src];
     const visited = new Set<number>([src]);
     let cur = src;
@@ -244,7 +311,7 @@ function carveRivers(world: World, rng: RNG, v: Float32Array): void {
       path.push(best);
       cur = best;
     }
-    if (path.length < 12 || world.layer[path[path.length - 1]] > 0) return;
+    if (path.length < 12 || world.layer[path[path.length - 1]] > 0) continue;
 
     // Monotonic bed along the path.
     const beds: number[] = [];
@@ -259,14 +326,30 @@ function carveRivers(world: World, rng: RNG, v: Float32Array): void {
     }
 
     // Find the biggest drop for a waterfall on the first river.
-    let fallK = -1, fallDrop = 1;
+    // Waterfall on the first river: the steepest stretch high up on the mountain, deepened into a
+    // proper cliff (at least five layers) that drops into a pool.
+    let fallK = -1;
     if (riverIndex === 0) {
-      for (let k = 2; k < beds.length - 6; k++) {
-        const drop = beds[k] - beds[k + 2];
-        if (drop > fallDrop && beds[k + 2] >= 1) {
-          fallDrop = drop;
+      let bestS = -1;
+      for (let k = 2; k < beds.length - 8; k++) {
+        if (beds[k] < 7) continue;
+        const sc = beds[k] - beds[k + 4] + beds[k] * 0.25;
+        if (sc > bestS) {
+          bestS = sc;
           fallK = k;
         }
+      }
+      if (fallK < 0) {
+        for (let k = 2; k < beds.length - 6; k++) if (beds[k] - beds[k + 2] >= 2 && beds[k + 2] >= 1) {
+          fallK = k;
+          break;
+        }
+      }
+      if (fallK >= 0) {
+        const top = beds[fallK];
+        const target = Math.max(1, Math.min(beds[fallK + 2], top - 5));
+        beds[fallK + 1] = top;
+        for (let j = fallK + 2; j < beds.length; j++) beds[j] = Math.min(beds[j], target);
       }
     }
 
@@ -360,7 +443,7 @@ function carveRivers(world: World, rng: RNG, v: Float32Array): void {
       }
     }
     world.rivers.push({ points });
-  });
+  }
 }
 
 function carveLagoon(world: World, rng: RNG): void {
