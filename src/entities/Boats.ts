@@ -61,7 +61,7 @@ export class Particles {
       vertexShader: `attribute float aAlpha; attribute float aSize; varying float vA; uniform float uScale;
         void main(){ vA = aAlpha; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = aSize * uScale / -mv.z; gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `uniform vec3 uColor; varying float vA;
-        void main(){ vec2 c = gl_PointCoord - 0.5; float d = length(c); float a = smoothstep(0.5, 0.15, d) * vA; if (a < 0.01) discard; gl_FragColor = vec4(uColor, a); }`,
+        void main(){ vec2 c = gl_PointCoord - 0.5; float d = length(c); float a = pow(smoothstep(0.5, 0.0, d), 1.6) * vA * 1.25; if (a < 0.01) discard; gl_FragColor = vec4(uColor, min(a, 1.0)); }`,
       transparent: true,
       depthWrite: false,
     });

@@ -7,12 +7,8 @@ import { World } from '../world/World';
 import { Water } from '../water/Water';
 import { Particles } from './Boats';
 
-// ---------------- Models (faceted low poly, length 1 along +z, head at +z) ----------------
+// ---------------- Models (length 1 along +z, head at +z) ----------------
 
-const WHALE_TOP = new THREE.Color(0x2b323c);
-const WHALE_MID = new THREE.Color(0x4a535e);
-const WHALE_BELLY = new THREE.Color(0xdfe4e6);
-const WHALE_GROOVE = new THREE.Color(0xb3bcc2);
 
 /** Radius profile along the body: t = 0 tail stock → 1 snout. */
 function whaleRadius(t: number): number {
@@ -91,65 +87,198 @@ function mergeFlat(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return out;
 }
 
-function whaleBody(): THREE.BufferGeometry {
-  const shell = bodyShell(whaleRadius, 16, 10, (t) => (t > 0.8 ? 0.72 : 0.86), (t, a, s) => {
-    if (s < -0.3) {
-      // Pale belly with throat grooves at the front half.
-      if (t > 0.55) return Math.floor(a * 6) % 2 ? WHALE_BELLY : WHALE_GROOVE;
-      return t > 0.35 ? WHALE_BELLY.clone().lerp(WHALE_MID, 0.4) : WHALE_MID;
-    }
-    return s < 0 ? WHALE_MID : WHALE_TOP;
-  });
-  // Dorsal hump, head knobs (tubercles) and eyes.
-  const extra = new GeoBuilder();
-  extra.add(P.cone(0.03, 0.05, 5), { color: WHALE_TOP }, M.t(0, 0.085, -0.16, -0.5, 0, 0));
-  for (let k = 0; k < 9; k++) {
-    const z = 0.3 + (k % 5) * 0.035, x = (k % 2 ? 1 : -1) * (0.012 + (k % 3) * 0.018);
-    extra.add(P.sphere(0.012, 0), { color: WHALE_TOP }, M.t(x, whaleRadius(z + 0.5) * 0.7, z));
-  }
-  for (const x of [-1, 1]) extra.add(P.sphere(0.012, 0), { color: 0x0e1014 }, M.t(x * 0.085, -0.005, 0.33));
-  return mergeFlat([shell, extra.build()]);
+// Smooth-shaded humpback: countershaded dark slate back, irregular white belly and flanks,
+// ventral throat pleats, tubercles on the head, barnacled chin, knuckled tail stock.
+const W_TOP = new THREE.Color(0x2b3540);
+const W_FLANK = new THREE.Color(0x4b5866);
+const W_BELLY = new THREE.Color(0xe7ebed);
+const W_PLEAT = new THREE.Color(0x9aa6ae);
+const W_MOUTH = new THREE.Color(0x0e1115);
+const W_BARN = new THREE.Color(0xc9ccc2);
+const W_SPOT = new THREE.Color(0x5d6974);
+
+function h1(x: number, y: number): number {
+  const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+/** Smooth value noise for colour patterns. */
+function vn(x: number, y: number): number {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = h1(xi, yi), b = h1(xi + 1, yi), c = h1(xi, yi + 1), d = h1(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+const PLEATS = 26;
+/** 0..1 closeness to a throat-pleat groove line around the body angle. */
+function pleat(a: number): number {
+  const f = ((a / (Math.PI * 2)) * PLEATS) % 1;
+  return Math.max(0, 1 - Math.abs(f - 0.5) / 0.14);
 }
 
-/** Long humpback pectoral fin: one tapered, swept blade, dark on top and white beneath. Pivot at the root, extends along +x. */
+function whaleShellGeometry(): THREE.BufferGeometry {
+  const RINGS = 60, SEG = 30;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= RINGS; i++) {
+    const t = i / RINGS;
+    const z = t - 0.5;
+    const r = whaleRadius(t);
+    // Tail stock is flattened side to side; the head is flat on top with a broad lower jaw.
+    const xs = t < 0.24 ? 0.58 + (t / 0.24) * 0.42 : 1;
+    for (let j = 0; j < SEG; j++) {
+      const a = (j / SEG) * Math.PI * 2;
+      const c = Math.cos(a), sn = Math.sin(a);
+      let ys = (t > 0.8 ? 0.74 : 0.86) * (sn < 0 ? 0.86 : 1);
+      if (t > 0.76 && sn > 0) ys *= 1 - (t - 0.76) * 1.1;
+      let rr = r;
+      if (t > 0.7 && sn < -0.05) rr *= 1 + (t - 0.7) * 0.4 * -sn;
+      if (sn < -0.25 && t > 0.48 && t < 0.97) rr *= 1 - pleat(a) * 0.022 * Math.min(1, (t - 0.48) * 6);
+      rr *= 1 + (vn(t * 11, a * 2.2) - 0.5) * 0.025;
+      pos.push(c * rr * xs, sn * rr * ys, z);
+    }
+  }
+  for (let i = 0; i < RINGS; i++) {
+    for (let j = 0; j < SEG; j++) {
+      const p = i * SEG + j, q = i * SEG + ((j + 1) % SEG), u = p + SEG, v = q + SEG;
+      idx.push(p, q, u, q, v, u);
+    }
+  }
+  const tail = pos.length / 3;
+  pos.push(0, 0, -0.5);
+  const nose = tail + 1;
+  pos.push(0, -0.004, 0.5);
+  for (let j = 0; j < SEG; j++) {
+    idx.push(tail, (j + 1) % SEG, j);
+    idx.push(nose, RINGS * SEG + j, RINGS * SEG + ((j + 1) % SEG));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+const _wc = new THREE.Color();
+function whaleColor(p: THREE.Vector3): THREE.Color {
+  const t = p.z + 0.5;
+  const a = Math.atan2(p.y, p.x);
+  const sn = p.y / (Math.hypot(p.x, p.y) || 1);
+  const c = _wc.copy(W_TOP).lerp(W_FLANK, THREE.MathUtils.smoothstep(sn, 0.55, -0.15));
+  // Pale speckles and scars on the dark back.
+  if (sn > -0.1) {
+    const sp = vn(t * 60, a * 9);
+    if (sp > 0.8) c.lerp(W_SPOT, (sp - 0.8) * 3.5);
+    if (Math.abs(vn(t * 7 + 5, a * 3) - 0.5) < 0.02 && sn > 0.3) c.lerp(W_SPOT, 0.5);
+  }
+  // Irregular white belly that reaches up the flanks in patches (humpback pattern).
+  const edge = -0.2 + (vn(t * 7 + 3, a * 1.6) - 0.5) * 0.55 + (t > 0.35 && t < 0.92 ? 0.1 : -0.45);
+  const w = THREE.MathUtils.smoothstep(edge + 0.06 - sn, 0, 0.12);
+  if (w > 0) {
+    _wb.copy(W_BELLY);
+    // Throat pleats: grey grooves from chin to navel.
+    if (sn < -0.25 && t > 0.5 && t < 0.97) _wb.lerp(W_PLEAT, pleat(a) * 0.75);
+    // Mottled grey on the rear belly.
+    if (t < 0.45) _wb.lerp(W_FLANK, (0.45 - t) * 2.2 * vn(t * 20, a * 4));
+    c.lerp(_wb, w);
+  }
+  // Mouth line along the side of the head.
+  if (t > 0.79) {
+    const my = -0.12 - (t - 0.79) * 0.35;
+    if (Math.abs(sn - my) < 0.045) c.lerp(W_MOUTH, 0.85);
+  }
+  // Barnacle clusters on the chin and throat.
+  if (t > 0.9 && sn < -0.1) {
+    const bn = vn(t * 90, a * 14);
+    if (bn > 0.62) c.lerp(W_BARN, Math.min(1, (bn - 0.62) * 4));
+  }
+  return c;
+}
+const _wb = new THREE.Color();
+
+function whaleBody(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(whaleShellGeometry(), { color: (p) => whaleColor(p).clone() });
+  // Tubercles: rows of knobs on the rostrum and along the lower jaw.
+  for (let k = 0; k < 26; k++) {
+    const t = 0.83 + (k % 13) * 0.0125;
+    const top = k < 13;
+    const side = (k % 2 ? 1 : -1) * (0.01 + ((k * 7) % 4) * 0.012);
+    const r = whaleRadius(t);
+    const y = top ? r * (0.74 * (1 - (t - 0.76) * 1.1)) * 0.92 : -r * 0.6;
+    const x = top ? side * 0.8 : Math.sign(side) * r * 0.78;
+    b.add(P.sphere(0.0042 + ((k * 13) % 5) * 0.0008, 1), { color: top ? W_TOP : W_BARN }, M.t(x, y * 0.97, t - 0.5, 0, 0, 0, 1, 0.7, 1));
+  }
+  // Small dorsal fin on a hump, then knuckles along the ridge to the tail.
+  b.add(P.cone(0.028, 0.055, 8), { color: W_TOP }, M.t(0, 0.078, -0.17, -0.65, 0, 0, 0.55, 1, 1.6));
+  for (let k = 0; k < 6; k++) {
+    const t = 0.06 + k * 0.045;
+    b.add(P.sphere(0.009, 1), { color: W_TOP }, M.t(0, whaleRadius(t) * 0.84, t - 0.5, 0, 0, 0, 0.7, 0.8, 1.4));
+  }
+  // Eyes with a pale rim.
+  for (const x of [-1, 1]) {
+    const r = whaleRadius(0.79);
+    b.add(P.sphere(0.012, 1), { color: 0xc4ccd0 }, M.t(x * r * 0.99, -0.018, 0.29));
+    b.add(P.sphere(0.0085, 1), { color: 0x07090b }, M.t(x * r * 1.02, -0.018, 0.293));
+  }
+  return b.build();
+}
+
+/** Long humpback flipper: scalloped leading edge, white beneath, mottled white and slate on top. Pivot at the root, along +x. */
 function whaleFin(): THREE.BufferGeometry {
   const sh = new THREE.Shape();
-  // Outline in (x = span, y = chord); the leading edge is scalloped like a humpback's.
-  sh.moveTo(0, 0.035);
-  const lead: [number, number][] = [];
-  for (let k = 1; k <= 8; k++) {
-    const u = k / 8;
-    lead.push([u * 0.34, 0.035 - u * 0.06 + (k % 2 ? 0.006 : 0)]);
+  sh.moveTo(0, 0.036);
+  for (let k = 1; k <= 12; k++) {
+    const u = k / 12;
+    // Leading edge knobs (tubercles).
+    sh.lineTo(u * 0.34, 0.036 - u * 0.058 + (k % 2 ? 0.006 : -0.001));
   }
-  for (const [x, y] of lead) sh.lineTo(x, y);
-  sh.lineTo(0.35, -0.03);
-  sh.lineTo(0.2, -0.045);
-  sh.lineTo(0.06, -0.04);
-  sh.lineTo(0, -0.03);
-  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.012, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 1 });
+  sh.quadraticCurveTo(0.36, -0.03, 0.33, -0.036);
+  sh.lineTo(0.2, -0.048);
+  sh.quadraticCurveTo(0.06, -0.05, 0, -0.032);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.012, bevelEnabled: true, bevelSize: 0.005, bevelThickness: 0.005, bevelSegments: 2, curveSegments: 6 });
   g.translate(0, 0, -0.006);
   g.rotateX(Math.PI / 2);
+  g.computeVertexNormals();
+  const top = new THREE.Color(0x2a323b);
   const b = new GeoBuilder();
-  b.add(g, { color: (p, nn) => (nn.y < 0 ? WHALE_BELLY : p.x > 0.22 ? WHALE_BELLY.clone().lerp(WHALE_TOP, 0.45) : WHALE_TOP) });
-  return facet(b.build());
+  b.add(g, {
+    color: (p, nn) => {
+      if (nn.y < -0.2) return vn(p.x * 40, p.z * 40) > 0.78 ? W_PLEAT.clone() : W_BELLY.clone();
+      // Top: slate near the root, white toward the tip and along the leading edge, with mottles.
+      const m = THREE.MathUtils.smoothstep(p.x, 0.08, 0.3) * 0.7 + (p.z < -0.018 ? 0.4 : 0) + (vn(p.x * 30, p.z * 30) - 0.5) * 0.5;
+      return top.clone().lerp(W_BELLY, THREE.MathUtils.clamp(m, 0, 1));
+    },
+  });
+  return b.build();
 }
 
-/** Tail fluke: two swept lobes. Pivot at the tail stock, extends along -z. */
+/** Tail fluke: two swept lobes with a serrated trailing edge; black above, white with dark marks beneath. Pivot at the tail stock, along -z. */
 function whaleFluke(): THREE.BufferGeometry {
   const b = new GeoBuilder();
   for (const side of [-1, 1]) {
     const s = new THREE.Shape();
     s.moveTo(0, 0);
-    s.lineTo(side * 0.17, -0.05);
-    s.lineTo(side * 0.19, -0.1);
-    s.lineTo(side * 0.08, -0.07);
+    s.quadraticCurveTo(side * 0.1, -0.012, side * 0.19, -0.06);
+    s.lineTo(side * 0.205, -0.098);
+    // Serrated trailing edge back to the notch.
+    for (let k = 1; k <= 10; k++) {
+      const u = k / 10;
+      s.lineTo(side * (0.205 - u * 0.2), -0.098 + u * 0.058 + (k % 2 ? 0.006 : -0.003));
+    }
     s.lineTo(0, -0.03);
-    const g = new THREE.ExtrudeGeometry(s, { depth: 0.012, bevelEnabled: false });
+    const g = new THREE.ExtrudeGeometry(s, { depth: 0.012, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 1, curveSegments: 8 });
     g.translate(0, 0, -0.006);
     g.rotateX(Math.PI / 2);
-    b.add(g, { color: (_p, nn) => (nn.y < -0.5 ? WHALE_BELLY : WHALE_TOP) });
+    g.computeVertexNormals();
+    b.add(g, {
+      color: (p, nn) => {
+        if (nn.y > -0.2) return W_TOP.clone();
+        const n = vn(p.x * 28 + 3, p.z * 28);
+        return n > 0.62 ? W_TOP.clone().lerp(W_BELLY, 0.15) : W_BELLY.clone();
+      },
+    });
   }
-  return facet(b.build());
+  return b.build();
 }
 
 function dolphinGeometry(): THREE.BufferGeometry {
@@ -165,6 +294,24 @@ function dolphinGeometry(): THREE.BufferGeometry {
   for (const x of [-1, 1]) b.add(P.box(0.13, 0.008, 0.05), { color: top }, M.t(x * 0.1, -0.05, 0.18, 0, x * -0.5, x * 0.4));
   for (const x of [-1, 1]) b.add(P.box(0.12, 0.008, 0.05), { color: top }, M.t(x * 0.06, 0, -0.5, 0, x * -0.5, 0));
   return mergeFlat([shell, b.build()]);
+}
+
+/** Tint a material toward deep sea-water colour the further below the surface it is (light absorption). */
+function underwater<T extends THREE.Material>(mat: T, key: string): T {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    prev.call(mat, shader, r);
+    if (!shader.vertexShader.includes('varying float vWy')) shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying float vWy;');
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWy = (modelMatrix * vec4(transformed, 1.0)).y;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vWy;')
+      .replace(
+        '#include <fog_fragment>',
+        '{ float uwD = max(-vWy, 0.0); float ab = (1.0 - exp(-uwD * 0.5)) * 0.5; gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.035, 0.19, 0.26), ab); }\n#include <fog_fragment>'
+      );
+  };
+  mat.customProgramCacheKey = () => key;
+  return mat;
 }
 
 // ---------------- Effects textures ----------------
@@ -200,11 +347,57 @@ function spiralFoamTexture(): THREE.Texture {
     }
     g.stroke();
   }
+  // Lacy foam: rings of bubbles, denser toward the middle.
+  for (let k = 0; k < 520; k++) {
+    const a = Math.random() * Math.PI * 2, r = Math.pow(Math.random(), 0.7) * 118;
+    g.strokeStyle = `rgba(255,255,255,${0.2 + Math.random() * 0.5 * (1 - r / 130)})`;
+    g.lineWidth = 0.8 + Math.random() * 1.6;
+    g.beginPath();
+    g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 2 + Math.random() * 7, 0, Math.PI * 2);
+    g.stroke();
+  }
   for (let k = 0; k < 160; k++) {
     const a = Math.random() * Math.PI * 2, r = Math.random() * 120;
     g.fillStyle = `rgba(255,255,255,${Math.random() * 0.8})`;
     g.beginPath();
     g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 0.8 + Math.random() * 2.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** A soft, broken ring of foam (for ripples and the foam collar around a rising whale). */
+function foamRingTexture(): THREE.Texture {
+  const s = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d')!;
+  const cx = s / 2;
+  // RingGeometry UVs map the ring's bounding square onto the texture: radius 1 = texture edge.
+  const grd = g.createRadialGradient(cx, cx, cx * 0.62, cx, cx, cx);
+  grd.addColorStop(0, 'rgba(255,255,255,0)');
+  grd.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+  grd.addColorStop(0.7, 'rgba(255,255,255,0.8)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  // Break it up: gaps and bubbly specks.
+  g.globalCompositeOperation = 'destination-out';
+  for (let k = 0; k < 70; k++) {
+    const a = Math.random() * Math.PI * 2, r = cx * (0.72 + Math.random() * 0.26);
+    g.fillStyle = `rgba(0,0,0,${0.2 + Math.random() * 0.4})`;
+    g.beginPath();
+    g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 1.5 + Math.random() * 5, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+  for (let k = 0; k < 140; k++) {
+    const a = Math.random() * Math.PI * 2, r = cx * (0.7 + Math.random() * 0.28);
+    g.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.6})`;
+    g.beginPath();
+    g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 0.8 + Math.random() * 2, 0, Math.PI * 2);
     g.fill();
   }
   const t = new THREE.CanvasTexture(c);
@@ -236,8 +429,8 @@ function softTexture(): THREE.Texture {
  *  fin = pectoral fin spread (radians).
  */
 const BREACH: { t: number; y: number; h: number; pitch: number; roll: number; fin: number }[] = [
-  { t: 0.0, y: -1.05, h: 0.0, pitch: 8, roll: 0, fin: 0.3 },
-  { t: 1.0, y: -0.49, h: 0.0, pitch: 6, roll: 10, fin: 0.5 },
+  { t: 0.0, y: -0.64, h: -0.3, pitch: 36, roll: 0, fin: 0.3 },
+  { t: 1.0, y: -0.42, h: -0.08, pitch: 16, roll: 10, fin: 0.5 },
   { t: 1.4, y: -0.26, h: 0.0, pitch: 7, roll: 45, fin: 0.9 },
   { t: 1.8, y: -0.06, h: 0.01, pitch: 9, roll: 95, fin: 1.1 },
   { t: 2.2, y: 0.08, h: 0.02, pitch: 12, roll: 145, fin: 0.9 },
@@ -253,6 +446,7 @@ const BREACH_END = 4.9;
 /** Seconds of diving and turning upward before the breach starts. */
 const DIVE_T = 3.2;
 const IMPACT_T = 3.4;
+const _ax = new THREE.Vector3();
 const FLUKE_T = 4.2;
 
 function sampleTrack(t: number): { y: number; h: number; pitch: number; roll: number; fin: number } {
@@ -289,6 +483,7 @@ interface Whale {
   t: number;
   nextBreach: number;
   nextSpout: number;
+  nextPrint: number;
   bx: number;
   bz: number;
   fallYaw: number;
@@ -338,9 +533,11 @@ export class Marine {
   private pods: Pod[] = [];
   private dolphins: Dolphin[] = [];
   private dolphinMesh: THREE.InstancedMesh;
-  private spray = new Particles(700, 0xf2fcff);
-  private mist = new Particles(220, 0xe8f8ff);
-  private rings: { mesh: THREE.Mesh; t: number; life: number; r0: number; r1: number }[] = [];
+  private spray = new Particles(1500, 0xf2fcff);
+  private mist = new Particles(420, 0xe8f8ff);
+  /** Rising, flaring sheets of water thrown up around a splash. */
+  private crowns: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; t: number; life: number; r0: number; r1: number; h: number }[] = [];
+  private rings: { mesh: THREE.Mesh; t: number; life: number; r0: number; r1: number; alpha: number }[] = [];
   private rng: RNG;
   private time = 0;
   sfx: (n: string, x: number, z: number) => void = () => {};
@@ -352,14 +549,48 @@ export class Marine {
 
     const mat = stylisedMaterial();
     const bodyGeo = whaleBody(), finGeo = whaleFin(), flukeGeo = whaleFluke();
+    const finMat = underwater(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0, side: THREE.DoubleSide }), 0.3), 'whale-fin');
     const foamTex = spiralFoamTexture(), soft = softTexture();
-    const ringGeo = new THREE.RingGeometry(0.955, 1, 56).rotateX(-Math.PI / 2);
-    for (let k = 0; k < 10; k++) {
-      const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xf2fcff, transparent: true, opacity: 0, depthWrite: false, fog: true }));
+    const ringTex = foamRingTexture();
+    const ringGeo = new THREE.RingGeometry(0.72, 1, 64, 1).rotateX(-Math.PI / 2);
+    for (let k = 0; k < 16; k++) {
+      const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ map: ringTex, color: 0xf2fcff, transparent: true, opacity: 0, depthWrite: false, fog: true }));
       m.visible = false;
       m.renderOrder = 15;
       this.group.add(m);
-      this.rings.push({ mesh: m, t: 1, life: 1, r0: 1, r1: 2 });
+      this.rings.push({ mesh: m, t: 1, life: 1, r0: 1, r1: 2, alpha: 0.6 });
+    }
+
+    const crownGeo = new THREE.CylinderGeometry(1, 1, 1, 64, 6, true).translate(0, 0.5, 0);
+    for (let k = 0; k < 4; k++) {
+      const cm = new THREE.ShaderMaterial({
+        uniforms: { uA: { value: 0 }, uFlare: { value: 0.5 }, uSeed: { value: k * 17.3 }, uDay: this.water.shared.uDay },
+        vertexShader: `uniform float uFlare; uniform float uSeed; varying vec2 vUv;
+          void main(){ vUv = uv; vec3 p = position; float ang = atan(p.z, p.x);
+            // Ragged rim: the sheet breaks into tongues of water.
+            float jag = 0.7 + 0.2 * sin(ang * 9.0 + uSeed) + 0.1 * sin(ang * 23.0 + uSeed * 2.0);
+            p.y *= jag; p.xz *= 1.0 + p.y * uFlare;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
+        fragmentShader: `uniform float uA; uniform float uDay; uniform float uSeed; varying vec2 vUv;
+          float hs(float x){ return fract(sin(x * 127.1 + uSeed) * 43758.5453); }
+          void main(){
+            // Irregular tongues of water: each column rises to its own height and breaks up at the top.
+            float cx = vUv.x * 64.0; float c0 = floor(cx); float fx = fract(cx);
+            float r1 = mix(hs(c0), hs(c0 + 1.0), smoothstep(0.0, 1.0, fx));
+            float r2 = mix(hs(c0 * 1.7 + 3.1), hs((c0 + 1.0) * 1.7 + 3.1), smoothstep(0.0, 1.0, fx));
+            float top = 0.3 + 0.7 * r2;
+            float a = uA * (1.0 - smoothstep(top - 0.3, top, vUv.y)) * (0.3 + 0.7 * r1) * smoothstep(0.0, 0.05, vUv.y);
+            vec3 col = mix(vec3(0.55, 0.8, 0.86), vec3(1.0), smoothstep(0.05, 0.6, vUv.y)) * mix(0.35, 1.0, uDay);
+            gl_FragColor = vec4(col, a * 0.9); }`,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const cmesh = new THREE.Mesh(crownGeo, cm);
+      cmesh.visible = false;
+      cmesh.renderOrder = 17;
+      this.group.add(cmesh);
+      this.crowns.push({ mesh: cmesh, mat: cm, t: 1, life: 1, r0: 1, r1: 1, h: 1 });
     }
 
     const spots = this.deepSpots(MARINE.whales);
@@ -368,13 +599,13 @@ export class Marine {
       const root = new THREE.Group();
       // Each whale gets its own material so its body can bend independently.
       const bend = { uPhase: { value: 0 }, uAmp: { value: 0 }, uTurn: { value: 0 } };
-      const bodyMat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }), 0.35);
+      const bodyMat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0 }), 0.3);
       const baseCompile = bodyMat.onBeforeCompile;
       bodyMat.onBeforeCompile = (shader, r) => {
         baseCompile.call(bodyMat, shader, r);
         Object.assign(shader.uniforms, bend);
         shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', '#include <common>\nuniform float uPhase; uniform float uAmp; uniform float uTurn;')
+          .replace('#include <common>', '#include <common>\nuniform float uPhase; uniform float uAmp; uniform float uTurn; varying float vWy;')
           .replace('#include <begin_vertex>', `#include <begin_vertex>
             {
               // Travelling wave: still at the head, strongest at the tail (flukes drive the swim).
@@ -384,10 +615,11 @@ export class Marine {
               transformed.x += uTurn * zz * zz;
             }`);
       };
+      underwater(bodyMat, 'whale-body');
       const body = new THREE.Mesh(bodyGeo, bodyMat);
       body.castShadow = true;
       const finL = new THREE.Group(), finR = new THREE.Group();
-      const fl = new THREE.Mesh(finGeo, mat), fr = new THREE.Mesh(finGeo, mat);
+      const fl = new THREE.Mesh(finGeo, finMat), fr = new THREE.Mesh(finGeo, finMat);
       fl.castShadow = fr.castShadow = true;
       fl.scale.x = -1; // mirrored for the left side
       finL.add(fl);
@@ -395,7 +627,7 @@ export class Marine {
       finL.position.set(-0.09, -0.04, 0.2);
       finR.position.set(0.09, -0.04, 0.2);
       const fluke = new THREE.Group();
-      const fm = new THREE.Mesh(flukeGeo, mat);
+      const fm = new THREE.Mesh(flukeGeo, finMat);
       fm.castShadow = true;
       fluke.add(fm);
       fluke.position.set(0, 0, -0.5);
@@ -408,7 +640,7 @@ export class Marine {
         this.group.add(mesh);
         return mesh;
       };
-      const ring = mk(new THREE.RingGeometry(0.84, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, fog: true }));
+      const ring = mk(new THREE.RingGeometry(0.6, 1.25, 48, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: ringTex, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, fog: true }));
       ring.renderOrder = 16;
       const glowMat = new THREE.ShaderMaterial({
         uniforms: { uA: { value: 0 } },
@@ -429,7 +661,7 @@ export class Marine {
       this.whales.push({
         root, body, finL, finR, fluke, x: s.x, z: s.z, heading: 0,
         route: { x: s.x, z: s.z, r: 10 + this.rng.next() * 10, a, dir: this.rng.chance(0.5) ? 1 : -1 },
-        state: 'swim', t: 0, nextBreach: MARINE.firstBreach + k * 9 + this.rng.next() * 10, nextSpout: 3 + this.rng.next() * 8,
+        state: 'swim', t: 0, nextBreach: MARINE.firstBreach + k * 9 + this.rng.next() * 10, nextSpout: 3 + this.rng.next() * 8, nextPrint: 1 + this.rng.next() * 3,
         bx: 0, bz: 0, fallYaw: 0, length: L, flags: new Set(), ring, glow, patch, foam,
         bend, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
       });
@@ -468,6 +700,13 @@ export class Marine {
     return out;
   }
 
+  /** Seabed height (the dark ocean floor lies at -6.2 beyond the island's slopes). */
+  private bedAt(x: number, z: number): number {
+    const w = this.world;
+    if (Math.abs(x) > w.half || Math.abs(z) > w.half) return -6.2;
+    return Math.max(w.heightAt(x, z), -6.2);
+  }
+
   private deepEnough(x: number, z: number, bed = -2.6): boolean {
     const w = this.world;
     if (Math.abs(x) > w.half * 1.05 || Math.abs(z) > w.half * 1.05) return true;
@@ -497,9 +736,45 @@ export class Marine {
     return best;
   }
 
+  /** A sheet of water that shoots up around a splash, flares out and collapses. */
+  private crown(x: number, z: number, r0: number, r1: number, h: number, life: number): void {
+    const c = this.crowns.find((k) => k.t >= k.life) ?? this.crowns[0];
+    c.t = 0;
+    c.life = life;
+    c.r0 = r0;
+    c.r1 = r1;
+    c.h = h;
+    c.mesh.position.set(x, -0.05, z);
+    c.mesh.rotation.y = this.rng.next() * 6.28;
+    // Droplets flung off the rim.
+    for (let k = 0; k < Math.round(90 * (h / 2)); k++) {
+      const a = this.rng.next() * Math.PI * 2;
+      const out = (1.2 + this.rng.next() * 2.2) * (r1 / 3);
+      this.spray.spawn(x + Math.cos(a) * r0, h * (0.3 + this.rng.next() * 0.6), z + Math.sin(a) * r0, Math.cos(a) * out, 2 + this.rng.next() * 4 * (h / 2), Math.sin(a) * out, 0.9 + this.rng.next() * 0.9, 0.04 + this.rng.next() * 0.1, 0.02);
+    }
+  }
+
+  private updateCrowns(dt: number): void {
+    for (const c of this.crowns) {
+      if (c.t >= c.life) {
+        c.mesh.visible = false;
+        continue;
+      }
+      c.t += dt;
+      const f = Math.min(1, c.t / c.life);
+      const r = c.r0 + (c.r1 - c.r0) * (1 - (1 - f) * (1 - f));
+      const rise = Math.sin(Math.min(1, f / 0.85) * Math.PI);
+      c.mesh.visible = true;
+      c.mesh.scale.set(r, Math.max(0.01, c.h * Math.pow(rise, 0.8)), r);
+      c.mat.uniforms.uA.value = Math.pow(1 - f, 1.2) * 0.9;
+      c.mat.uniforms.uFlare.value = 0.3 + f * 0.5;
+    }
+  }
+
   /** Spawn an expanding ripple ring on the water. */
-  private ring(x: number, z: number, r0: number, r1: number, life: number, delay = 0): void {
+  private ring(x: number, z: number, r0: number, r1: number, life: number, delay = 0, alpha = 0.6): void {
     const slot = this.rings.find((r) => r.t >= r.life) ?? this.rings[0];
+    slot.alpha = alpha;
     slot.t = -delay;
     slot.life = life;
     slot.r0 = r0;
@@ -526,10 +801,11 @@ export class Marine {
       const rad = r.r0 + (r.r1 - r.r0) * (1 - (1 - f) * (1 - f));
       r.mesh.visible = true;
       r.mesh.scale.set(rad, 1, rad);
-      (r.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - f) * (1 - f) * 0.6;
+      (r.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - f) * (1 - f) * r.alpha;
     }
+    this.updateCrowns(dt);
     this.spray.update(dt, 9);
-    this.mist.update(dt, -0.3);
+    this.mist.update(dt, -0.25);
   }
 
 /** Apply a pose (tilt from vertical toward yaw, spin about the body axis) to the whale root. */
@@ -539,6 +815,12 @@ export class Marine {
     q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.degToRad(p.pitch)));
     q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(p.roll)));
     q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+    // Never sink into the seabed: lift the whole body if its lowest point would touch the bottom.
+    const ax = _ax.set(0, 0, 1).applyQuaternion(q);
+    const L = w.length;
+    const lowest = y - Math.abs(ax.y) * 0.5 * L - 0.2 * L;
+    const floor = this.bedAt(x, z) + 0.3;
+    if (lowest < floor) y += floor - lowest;
     w.root.position.set(x, y, z);
     w.root.quaternion.copy(q);
     return q;
@@ -593,7 +875,15 @@ export class Marine {
         w.nextBreach = MARINE.breachEvery[0] + this.rng.next() * (MARINE.breachEvery[1] - MARINE.breachEvery[0]);
         // Prefer breaching where the player is looking.
         const near = Math.hypot(w.x - camTarget.x, w.z - camTarget.z) < 90;
-        if (near || this.rng.chance(0.4)) this.breach(w);
+        // Only breach where the sea is deep enough for the rise (otherwise try again soon).
+        if ((near || this.rng.chance(0.4)) && this.bedAt(w.x, w.z) < -4.6) this.breach(w);
+        else if (this.bedAt(w.x, w.z) >= -4.6) w.nextBreach = 6;
+      }
+      w.nextPrint -= dt;
+      if (w.nextPrint <= 0) {
+        w.nextPrint = 2.6 + this.rng.next() * 2;
+        const tx = w.x - Math.sin(P.yaw) * L * 0.4, tz = w.z - Math.cos(P.yaw) * L * 0.4;
+        this.ring(tx, tz, L * 0.08, L * 0.32, 3.2, 0, 0.22);
       }
       w.ring.visible = w.glow.visible = w.patch.visible = false;
       this.fadeFoam(w, dt);
@@ -608,12 +898,20 @@ export class Marine {
       const e = f * f * (3 - 2 * f);
       if (w.state === 'dive') {
         const k = f < 0.4 ? f / 0.4 : 1;
-        P.pitch = f < 0.4 ? 90 + 50 * k : 140 - (140 - 8) * ((f - 0.4) / 0.6);
-        P.y = -MARINE.swimDepth + (-1.05 * L + MARINE.swimDepth) * e;
+        P.pitch = f < 0.4 ? 90 + 40 * k : 130 - (130 - 36) * ((f - 0.4) / 0.6);
+        P.y = -MARINE.swimDepth + (-0.64 * L + MARINE.swimDepth) * e;
         const sp = MARINE.whaleSpeed * (1 - f);
         w.x += Math.sin(P.yaw) * sp * dt;
         w.z += Math.cos(P.yaw) * sp * dt;
         P.roll *= 1 - Math.min(1, dt * 2);
+        // Turn toward the breach direction while swinging nose-up (hidden underwater).
+        if (f > 0.4) {
+          let dy = w.fallYaw - w.heading;
+          while (dy > Math.PI) dy -= Math.PI * 2;
+          while (dy < -Math.PI) dy += Math.PI * 2;
+          const u = (f - 0.4) / 0.6;
+          P.yaw = w.heading + dy * u * u * (3 - 2 * u);
+        }
       } else {
         P.pitch = 186 + (90 - 186) * e;
         P.roll = 228 * (1 - e);
@@ -667,7 +965,7 @@ export class Marine {
     w.glow.visible = glowA > 0.01;
     w.glow.position.set(w.bx, -0.06, w.bz);
     w.glow.scale.set(L * 0.35, L * 1.1, L * 0.35);
-    (w.glow.material as THREE.ShaderMaterial).uniforms.uA.value = glowA * 1.1;
+    (w.glow.material as THREE.ShaderMaterial).uniforms.uA.value = glowA * 0.4;
     const patchA = t < 1.3 ? Math.min(1, t / 0.5) * (1 - Math.max(0, (t - 1.0) / 0.3)) : 0;
     w.patch.visible = patchA > 0.01;
     w.patch.position.set(w.bx, -0.02, w.bz);
@@ -702,15 +1000,23 @@ export class Marine {
     once('surface', 1.0, () => {
       this.sfx('splash', w.bx, w.bz);
       for (const [r1, life, delay] of [[L * 0.45, 1.6, 0], [L * 0.7, 2.2, 0.35], [L * 0.95, 2.6, 0.8], [L * 1.1, 2.8, 1.3]]) this.ring(w.bx, w.bz, 0.3, r1, life, delay);
-      this.burst(w.bx, w.bz, 60, 2.2, 0.6);
+      this.burst(w.bx, w.bz, 90, 2.4, 0.6);
+      this.crown(w.bx, w.bz, L * 0.12, L * 0.3, L * 0.16, 1.4);
     });
     once('impact', IMPACT_T, () => {
       const ix = w.bx + dirX * L * 0.55, iz = w.bz + dirZ * L * 0.55;
       this.sfx('bigsplash', ix, iz);
-      this.burst(ix, iz, 320, 5.5, L * 0.35);
-      for (let m = 0; m < 70; m++) {
-        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.5;
-        this.mist.spawn(ix + Math.cos(a) * r, 0.2 + this.rng.next() * 1.5, iz + Math.sin(a) * r, Math.cos(a) * 0.9, 0.3 + this.rng.next() * 0.9, Math.sin(a) * 0.9, 1.6 + this.rng.next() * 1.4, 0.28, 0.35);
+      this.burst(ix, iz, 480, 5.8, L * 0.35);
+      this.crown(ix, iz, L * 0.22, L * 0.72, L * 0.62, 2.1);
+      this.crown(ix, iz, L * 0.14, L * 0.42, L * 0.36, 1.5);
+      for (let m = 0; m < 60; m++) {
+        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.4;
+        this.mist.spawn(ix + Math.cos(a) * r, this.rng.next() * L * 0.25, iz + Math.sin(a) * r, Math.cos(a) * 1.6, 1.5 + this.rng.next() * 2.5, Math.sin(a) * 1.6, 1.2 + this.rng.next() * 0.8, 1.4 + this.rng.next() * 1.2, 1.2);
+      }
+      for (let m = 0; m < 150; m++) {
+        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.55;
+        // Mist hangs in the air and drifts downwind before fading.
+        this.mist.spawn(ix + Math.cos(a) * r, 0.2 + this.rng.next() * L * 0.4, iz + Math.sin(a) * r, Math.cos(a) * 0.7 + 0.35, 0.2 + this.rng.next() * 0.8, Math.sin(a) * 0.7 + 0.2, 2.4 + this.rng.next() * 2.2, 0.9 + this.rng.next() * 1.1, 0.8);
       }
       for (const [r1, life, delay] of [[L * 0.8, 1.6, 0], [L * 1.2, 2.2, 0.25], [L * 1.6, 2.8, 0.6]]) this.ring(ix, iz, L * 0.3, r1, life, delay);
       w.foam.visible = true;
@@ -720,7 +1026,10 @@ export class Marine {
     once('fluke', FLUKE_T, () => {
       const tail = new THREE.Vector3(0, 0, -0.5 * L).applyQuaternion(q).add(new THREE.Vector3(cx, cy, cz));
       this.sfx('splash', tail.x, tail.z);
-      this.burst(tail.x, tail.z, 60, 2.6, 0.4);
+      this.burst(tail.x, tail.z, 110, 2.8, 0.45);
+      this.crown(tail.x, tail.z, L * 0.08, L * 0.24, L * 0.16, 1.2);
+      // Water pouring off the raised fluke.
+      for (let k = 0; k < 60; k++) this.spray.spawn(tail.x + (this.rng.next() - 0.5) * L * 0.3, tail.y + this.rng.next() * 0.4, tail.z + (this.rng.next() - 0.5) * L * 0.3, (this.rng.next() - 0.5) * 0.4, this.rng.next() * 0.5, (this.rng.next() - 0.5) * 0.4, 0.8 + this.rng.next() * 0.6, 0.06 + this.rng.next() * 0.1, 0);
     });
     this.fadeFoam(w, dt);
     if (t >= BREACH_END) {
@@ -736,11 +1045,11 @@ export class Marine {
     const u = w.foam.userData as { t?: number };
     if (!w.foam.visible || u.t === undefined) return;
     u.t += dt;
-    const f = u.t / 2.2;
+    const f = u.t / 5.5;
     const L = w.length;
     const r = L * (0.35 + 0.55 * (1 - Math.pow(1 - Math.min(1, f), 2)));
     w.foam.scale.set(r, 1, r);
-    w.foam.rotation.y += dt * 0.9;
+    w.foam.rotation.y += dt * 0.5 * (1 - f);
     (w.foam.material as THREE.MeshBasicMaterial).opacity = Math.max(0, f < 0.15 ? f / 0.15 : 1 - (f - 0.15) / 0.85) * 0.95;
     if (f >= 1) w.foam.visible = false;
   }
@@ -750,7 +1059,9 @@ export class Marine {
       const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * radius;
       const up = speed * (0.5 + this.rng.next() * 0.8);
       const out = speed * 0.35 * (0.3 + this.rng.next());
-      this.spray.spawn(x + Math.cos(a) * r, 0.05, z + Math.sin(a) * r, Math.cos(a) * out, up, Math.sin(a) * out, 0.8 + this.rng.next() * 0.9, 0.08 + this.rng.next() * 0.18, 0.05);
+      // Mostly fine droplets, with the odd bigger clump of water.
+      const big = this.rng.next() < 0.05;
+      this.spray.spawn(x + Math.cos(a) * r, 0.05, z + Math.sin(a) * r, Math.cos(a) * out, up, Math.sin(a) * out, 0.8 + this.rng.next() * 0.9, big ? 0.14 + this.rng.next() * 0.12 : 0.04 + this.rng.next() * 0.08, big ? 0.12 : 0.03);
     }
   }
 
