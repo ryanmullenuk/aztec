@@ -18,6 +18,8 @@ export interface RiverData {
 
 /** Height of rope bridge decks above the sea. */
 export const BRIDGE_DECK_Y = 0.3;
+/** How deep a dug canal channel is cut below the surrounding ground. */
+export const CANAL_DEPTH = 0.5;
 
 export interface WaterfallData {
   x: number;
@@ -79,6 +81,10 @@ export class World {
   islets: { x: number; z: number; r: number }[] = [];
   /** Which island each land cell belongs to: 0 sea, 1 the main island, 2 the wild island. */
   isle = new Uint8Array(this.N * this.N);
+  /** Water canals dug by the player from existing water (1 = channel). */
+  canal = new Uint8Array(this.N * this.N);
+  /** Number of canal cells (0 skips the channel carve in height lookups). */
+  canalCount = 0;
   /** Rope bridges built across shallow water (1 = deck). */
   bridge = new Uint8Array(this.N * this.N);
 
@@ -206,7 +212,30 @@ export class World {
 
   /** Terrain surface height at a world position (matches the rendered mesh). */
   heightAt(x: number, z: number): number {
-    return this.terrace(this.layerF(x, z));
+    const h = this.terrace(this.layerF(x, z));
+    return this.canalCount ? h - this.canalCarve(x, z) : h;
+  }
+
+  /**
+   * Canals are one cell wide, too narrow for the blurred layer field to show, so their channel
+   * is cut into the surface directly: a ditch with steep banks at the cell edges.
+   */
+  private canalCarve(x: number, z: number): number {
+    const gx = x + this.half - 0.5, gz = z + this.half - 0.5;
+    const x0 = Math.floor(gx), z0 = Math.floor(gz);
+    const fx = gx - x0, fz = gz - z0;
+    const c = (cx: number, cz: number) => (this.inBounds(cx, cz) ? this.canal[cz * this.N + cx] : 0);
+    const a = c(x0, z0), b = c(x0 + 1, z0), cc = c(x0, z0 + 1), d = c(x0 + 1, z0 + 1);
+    if (!(a | b | cc | d)) return 0;
+    const v = (a * (1 - fx) + b * fx) * (1 - fz) + (cc * (1 - fx) + d * fx) * fz;
+    return CANAL_DEPTH * smoothstep(0.15, 0.62, v);
+  }
+
+  /** Recount canal cells after digging, filling or loading. */
+  countCanals(): void {
+    let n = 0;
+    for (let i = 0; i < this.canal.length; i++) n += this.canal[i];
+    this.canalCount = n;
   }
 
   /** Flat top height of a given layer. */
