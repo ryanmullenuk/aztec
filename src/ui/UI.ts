@@ -2,6 +2,7 @@ import { PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, S
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
 import { ROLE_LABEL } from '../entities/Islander';
+import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
 import { BUILD_MENU, TOOLS, ToolId } from './tools';
@@ -84,13 +85,27 @@ export class UI {
     this.buildSettings();
     this.buildHelp();
     this.buildTutorial();
+    this.updateIslandName();
     this.refresh(true);
   }
 
   // ---------------- Construction ----------------
 
+  private nameInput?: HTMLInputElement;
+  private isleNameEl!: HTMLDivElement;
+
+  /** Show the island's name on the HUD (and in the settings field). */
+  updateIslandName(): void {
+    const n = this.game.islandName;
+    this.isleNameEl.textContent = n.toUpperCase() === 'GODMODE' ? '' : n;
+    this.isleNameEl.classList.toggle('hidden', !this.isleNameEl.textContent);
+    if (this.nameInput && document.activeElement !== this.nameInput) this.nameInput.value = n;
+  }
+
   private buildTopLeft(): void {
     this.tl = el('div', 'panel tl');
+    this.isleNameEl = el('div', 'islename') as HTMLDivElement;
+    this.tl.appendChild(this.isleNameEl);
     const clock = el('div', 'clock');
     this.sunIcon = el('span', 'sunicon', ICONS.sun);
     this.timeEl = el('div', 'time');
@@ -292,6 +307,9 @@ export class UI {
     const card = el('div', 'panel card');
     card.innerHTML = `
       <div class="card-head"><span>Settings</span></div>
+      <div class="row namerow">Island name
+        <span class="nameedit"><input type="text" maxlength="32" spellcheck="false" autocomplete="off" data-n="name" aria-label="Island name"><button class="btn small" data-a="rename" title="Pick a random name">${ICONS.seed} Random</button></span>
+      </div>
       <label class="row">Graphics
         <select data-k="preset">
           <option value="high">High</option><option value="medium">Medium</option><option value="low">Low (phones)</option>
@@ -326,7 +344,25 @@ export class UI {
       this.game.applySettings();
     };
     this.presetSelect = sel;
-    card.querySelectorAll<HTMLInputElement>('input').forEach((inp) => {
+    // Island name: typed, or rolled from Nahuatl place-name roots.
+    const nameIn = card.querySelector<HTMLInputElement>('[data-n="name"]')!;
+    nameIn.value = this.game.islandName;
+    const applyName = (v: string) => {
+      const r = this.game.setIslandName(v);
+      if (r.god && r.changed) this.toast('The gods smile upon this island.');
+      this.updateIslandName();
+    };
+    nameIn.onchange = () => applyName(nameIn.value);
+    nameIn.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') nameIn.blur();
+    };
+    card.querySelector<HTMLButtonElement>('[data-a="rename"]')!.onclick = () => {
+      nameIn.value = randomIslandName();
+      applyName(nameIn.value);
+    };
+    this.nameInput = nameIn;
+    card.querySelectorAll<HTMLInputElement>('input[data-k]').forEach((inp) => {
       const k = inp.dataset.k as keyof typeof s;
       if (inp.type === 'checkbox') inp.checked = !!s[k];
       else inp.value = String(s[k]);
