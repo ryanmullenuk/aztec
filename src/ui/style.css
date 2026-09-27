@@ -155,6 +155,12 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   background: var(--panel-solid); border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--text);
   box-shadow: var(--shadow); max-width: 92vw; text-align: center;
 }
+.found-btn {
+  display: inline-flex; align-items: center; gap: 6px; font-weight: 700; padding: 8px 16px; border-radius: 999px;
+  background: linear-gradient(180deg, #f2c46b, #d99a2b); color: #2a1a08; box-shadow: var(--shadow); animation: foundPulse 1.6s ease-in-out infinite;
+}
+.found-btn svg { width: 18px; height: 18px; }
+@keyframes foundPulse { 50% { transform: scale(1.06); } }
 .beliefbar {
   display: flex; align-items: center; gap: 8px; width: min(420px, 86vw); padding: 5px 10px; border-radius: 999px;
   background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--panel-border);

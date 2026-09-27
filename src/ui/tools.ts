@@ -1,6 +1,6 @@
 import { BuildingKey, POWERS } from '../config';
 
-export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'unpath';
+export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'unpath' | 'bridge';
 
 export interface ToolDef {
   id: ToolId;

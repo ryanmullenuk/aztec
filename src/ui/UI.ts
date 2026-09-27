@@ -60,9 +60,10 @@ export class UI {
   private infoKey = '';
   private buildItems = new Map<BuildingKey, HTMLButtonElement>();
   private tutSteps: TutorialStep[] = [
+    { title: 'Found your village', text: 'Your first two villagers have come ashore. Choose open, flat land for the campfire: your village will grow around it. (Tap Place campfire if you closed the placement.)', done: (g) => g.buildings.hasCampfire },
     { title: 'Look around', text: 'Drag with the mouse (or one finger) to pan the island. WASD and arrow keys work too. Rotate with Q/E, middle-drag, or by dragging the compass at the bottom right.', done: (g) => Math.hypot(g.rig.cur.x - this.tutStart.x, g.rig.cur.z - this.tutStart.z) > 8 || Math.abs(g.rig.cur.yaw - g.rig.goal.yaw) > 0.3 },
     { title: 'Zoom in', text: 'Scroll (or pinch) to zoom in close to your islanders, and out to see the whole island.', done: (g) => Math.abs(g.rig.cur.dist - this.tutStart.dist) > 15 },
-    { title: 'Meet your tribe', text: 'Tap an islander near the tribal fire to see their name, job and needs.', done: (g) => g.selectedIslander >= 0 },
+    { title: 'Meet your villagers', text: 'Tap an islander near the campfire to see their name, job and needs. More settlers arrive by canoe when you have spare beds and food.', done: (g) => g.selectedIslander >= 0 },
     { title: 'Build a Hut', text: 'Press Build (2), choose a Hut and place it on flat land. Your builders will do the rest.', done: (g) => g.buildings.list.some((b) => b.key === 'hut' || b.key === 'home') },
     { title: 'Shape the land', text: 'Use Raise (3) or Lower (4): hold and drag to sculpt terraces flat for bigger buildings. Sculpting costs Belief.', done: (g) => g.stats.sculpted > 0 },
   ];
@@ -140,6 +141,10 @@ export class UI {
   private buildBottom(): void {
     const bottom = el('div', 'bottom');
     this.hint = el('div', 'hint hidden');
+    // Shown until the village is founded, in case the campfire placement is closed.
+    this.foundBtn = el('button', 'btn found-btn hidden', `${ICONS.belief} Place campfire`) as HTMLButtonElement;
+    this.foundBtn.onclick = () => this.game.promptCampfire();
+    bottom.appendChild(this.foundBtn);
     const bb = el('div', 'beliefbar');
     bb.title = 'Belief: earned from happy islanders and temples, spent on god powers';
     bb.innerHTML = `<span class="bicon">${ICONS.belief}</span>`;
@@ -178,14 +183,15 @@ export class UI {
       this.buildItems.set(key, b);
     }
     // Paths: drag-to-paint tools rather than a building.
-    const pathItem = (id: 'path' | 'unpath', name: string, iconKey: string, cost: string, tip: string) => {
+    const pathItem = (id: 'path' | 'unpath' | 'bridge', name: string, iconKey: string, cost: string, tip: string) => {
       const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
       b.onclick = () => this.game.setTool(id);
       this.addTip(b, tip);
       grid.appendChild(b);
     };
     pathItem('path', 'Stone path', 'b_path', `${icon('stone')}${PATHS.stonePerCell}`, `<b>Stone path</b><br>Hold and drag to lay a paved path. Islanders prefer paths and walk faster on them.<br><span class="c">${icon('stone')} ${PATHS.stonePerCell} per cell</span>`);
-    pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path</b><br>Hold and drag over a path to lift the stones.');
+    pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
+    pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path or bridge</b><br>Hold and drag over a path or bridge to take it apart.');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
   }
@@ -380,6 +386,8 @@ export class UI {
         <li>Select an islander, then click a building, tree, rock or fruit bush to give them that job.</li>
         <li>Homes let couples raise children. Temples upgrade twice into the Great Pyramid.</li>
         <li>A Jetty builds fishing boats. Fish stocks regrow slowly, so spread your fishing.</li>
+        <li>Across the strait to the east lies a wild island with thick jungle, more fruit and most of the game. Build a <b>Rope bridge</b> (Build menu) across the shallows to reach it.</li>
+        <li>New settlers arrive by canoe when you have spare beds and food.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and breach now and then. Tap one to make it jump.</li>
       </ul>`;
@@ -498,7 +506,11 @@ export class UI {
 
   // ---------------- Per-frame ----------------
 
+  private foundBtn!: HTMLButtonElement;
+
   update(dt: number): void {
+    const g0 = this.game;
+    this.foundBtn.classList.toggle('hidden', !(g0.awaitingFire && g0.colony.list.length > 0 && g0.placing !== 'campfire'));
     this.timer -= dt;
     if (this.timer <= 0) {
       this.timer = 0.25;
@@ -544,7 +556,7 @@ export class UI {
     this.beliefText.textContent = `${Math.floor(e.res.belief)} / ${e.beliefCap}`;
     this.slots.forEach((b, i) => {
       const tool = TOOLS[i];
-      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath')));
+      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath' || g.tool === 'bridge')));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
       if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
     });
