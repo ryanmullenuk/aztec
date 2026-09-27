@@ -6,7 +6,7 @@ import { ROLE_LABEL } from '../entities/Islander';
 import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
-import { BUILD_MENU, TOOLS, ToolId } from './tools';
+import { BUILD_MENU, PAINT_TOOLS, TOOLS, ToolId } from './tools';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -203,13 +203,14 @@ export class UI {
       this.buildItems.set(key, b);
     }
     // Paths: drag-to-paint tools rather than a building.
-    const pathItem = (id: 'path' | 'unpath' | 'bridge' | 'canal', name: string, iconKey: string, cost: string, tip: string) => {
+    const pathItem = (id: 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal', name: string, iconKey: string, cost: string, tip: string) => {
       const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
       b.onclick = () => this.game.setTool(id);
       this.addTip(b, tip);
       grid.appendChild(b);
     };
     pathItem('path', 'Stone path', 'b_path', `${icon('stone')}${PATHS.stonePerCell}`, `<b>Stone path</b><br>Hold and drag to lay a paved path. Islanders prefer paths and walk faster on them.<br><span class="c">${icon('stone')} ${PATHS.stonePerCell} per cell</span>`);
+    pathItem('dirtpath', 'Dirt path', 'b_dirtpath', 'Free', '<b>Dirt path</b><br>Hold and drag to tread a simple earth track. Free, and islanders walk a little faster on it (a stone path is faster). Lay stone over it later to pave it.');
     pathItem('canal', 'Water canal', 'b_canal', `${icon('wood')}${PATHS.canalWood}`, `<b>Water canal</b><br>Hold and drag outward from a river, pool or the sea to dig a channel and bring water into the village. Chinampas can be built beside canals.<br><span class="c">${icon('wood')} ${PATHS.canalWood} per section</span>`);
     pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
     pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path, bridge or canal</b><br>Hold and drag over a path, bridge or canal to take it away (canals are filled back in).');
@@ -666,7 +667,7 @@ export class UI {
     this.beliefText.textContent = `${Math.floor(e.res.belief)} / ${e.beliefCap}`;
     this.slots.forEach((b, i) => {
       const tool = TOOLS[i];
-      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath' || g.tool === 'bridge' || g.tool === 'canal')));
+      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && PAINT_TOOLS.includes(g.tool)));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
       if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
     });
@@ -805,6 +806,7 @@ export class UI {
       actions += `<button class="btn small" data-a="jaguar" ${g.eco.canAfford(c) ? '' : 'disabled'}>${ICONS.warrior} Jaguar ${cs}</button><button class="btn small" data-a="eagle" ${g.eco.canAfford(c) ? '' : 'disabled'}>${ICONS.eagle} Eagle ${cs}</button>`;
     }
     if (!b.complete || b.upgrading) actions += `<button class="btn small" data-a="helpers" title="Call the nearest free villagers to come and build">${ICONS.people} Call helpers</button>`;
+    if (g.buildings.canRelocate(b)) actions += `<button class="btn small" data-a="rotate" title="Turn a quarter turn">${ICONS.rotate} Rotate</button><button class="btn small" data-a="move" title="Pick it up and place it somewhere else">${ICONS.move} Move</button>`;
     if (b.key !== 'campfire') actions += `<button class="btn small ghost" data-a="demolish">${ICONS.demolish} ${b.complete ? 'Demolish' : 'Cancel'}</button>`;
     return `<div class="card-head"><span><span class="bic">${ICONS[BUILD_ICON[b.key]]}</span> ${b.label}</span></div>
       <p class="muted small">${b.def.description}</p>${body}<div class="actions">${actions}</div>`;
@@ -836,6 +838,14 @@ export class UI {
           this.toast(b.key === 'hut' ? 'The hut will be rebuilt as a level 2 Home.' : b.key === 'home' ? `The house is being extended to level ${b.tier + 2}.` : 'Temple upgrade started.');
           if (nb !== b) g.select({ building: nb.id });
         }
+      }
+      if (a === 'rotate') {
+        g.rotateBuilding(b);
+        return;
+      }
+      if (a === 'move') {
+        g.startMove(b);
+        return;
       }
       if (a === 'demolish') {
         g.buildings.remove(b, true);
