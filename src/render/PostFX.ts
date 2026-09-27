@@ -244,6 +244,13 @@ export class PostFX {
     this.composer.addPass(this.scenePass);
     this.composer.addPass(this.gtao);
     this.composer.addPass(this.dof);
+    // Guard before bloom: replace any NaN/Inf pixel and clamp extreme highlights, so a single
+    // bad pixel can never be blurred across the screen into a black flash.
+    this.composer.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: quadVert.replace('gl_Position = vec4(position.xy, 0.0, 1.0);', 'gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);'),
+      fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 c = texture2D(tDiffuse, vUv); if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0, 0.0, 0.0, 1.0); gl_FragColor = vec4(min(c.rgb, vec3(48.0)), c.a); }',
+    }));
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.grade);
