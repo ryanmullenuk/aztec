@@ -28,9 +28,34 @@ export class CameraRig {
 
   get pitch(): number {
     const t = smoothstep(CAMERA.minDistance, 70, this.cur.dist);
+    // Zoomed right out the view turns to look almost straight down on the whole map.
+    const top = smoothstep(CAMERA.maxDistance * 0.8, this.maxDist, this.cur.dist);
     // Player tilt offsets the automatic zoom-based pitch (kept between a low view and straight down).
-    return (clamp(lerp(CAMERA.pitchClose, CAMERA.pitch, t) + this.cur.tilt, 16, 86) * Math.PI) / 180;
+    const base = lerp(CAMERA.pitchClose, CAMERA.pitch, t);
+    return (clamp(lerp(base + this.cur.tilt, CAMERA.overviewPitch, top), 16, 86) * Math.PI) / 180;
   }
+
+  /** Furthest zoom: far enough to fit the whole map (and a margin of sea) on screen. */
+  get maxDist(): number {
+    const span = this.world.N * 1.12;
+    const vh = 2 * Math.tan((RENDER.fov * Math.PI) / 360);
+    return Math.max(CAMERA.maxDistance, span / (vh * Math.min(1, this.camera.aspect)));
+  }
+
+  /** Fly out to see the whole map from above (or back to where you were). */
+  toggleOverview(): void {
+    if (this.saved) {
+      this.goal = { ...this.saved };
+      this.saved = null;
+      return;
+    }
+    this.saved = { ...this.goal };
+    // Islands side by side on a wide screen, one above the other on a tall (phone) screen.
+    // (Centred a little toward the bottom of the screen, which the toolbar covers.)
+    const wide = this.camera.aspect >= 1;
+    this.goal = { x: wide ? 0 : 7, z: wide ? 7 : 0, dist: this.maxDist * 1.04, yaw: wide ? 0 : Math.PI / 2, tilt: 0 };
+  }
+  private saved: { x: number; z: number; dist: number; yaw: number; tilt: number } | null = null;
 
   /** Tilt the view up or down (degrees). */
   tilt(deg: number): void {
@@ -69,7 +94,8 @@ export class CameraRig {
   /** Zoom by a factor, optionally toward a world point. */
   zoom(factor: number, toward?: { x: number; z: number }): void {
     const old = this.goal.dist;
-    this.goal.dist = clamp(old * factor, CAMERA.minDistance, CAMERA.maxDistance);
+    this.goal.dist = clamp(old * factor, CAMERA.minDistance, this.maxDist);
+    this.saved = null;
     if (toward) {
       const k = 1 - this.goal.dist / old;
       this.goal.x += (toward.x - this.goal.x) * k;
