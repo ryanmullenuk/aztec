@@ -1,4 +1,4 @@
-import { BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR } from '../config';
+import { PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR } from '../config';
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
 import { ROLE_LABEL } from '../entities/Islander';
@@ -176,6 +176,15 @@ export class UI {
       grid.appendChild(b);
       this.buildItems.set(key, b);
     }
+    // Paths: drag-to-paint tools rather than a building.
+    const pathItem = (id: 'path' | 'unpath', name: string, iconKey: string, cost: string, tip: string) => {
+      const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
+      b.onclick = () => this.game.setTool(id);
+      this.addTip(b, tip);
+      grid.appendChild(b);
+    };
+    pathItem('path', 'Stone path', 'b_path', `${icon('stone')}${PATHS.stonePerCell}`, `<b>Stone path</b><br>Hold and drag to lay a paved path. Islanders prefer paths and walk faster on them.<br><span class="c">${icon('stone')} ${PATHS.stonePerCell} per cell</span>`);
+    pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path</b><br>Hold and drag over a path to lift the stones.');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
   }
@@ -534,7 +543,7 @@ export class UI {
     this.beliefText.textContent = `${Math.floor(e.res.belief)} / ${e.beliefCap}`;
     this.slots.forEach((b, i) => {
       const tool = TOOLS[i];
-      b.classList.toggle('on', g.tool === tool.id);
+      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath')));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
       if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
     });
