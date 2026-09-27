@@ -6,6 +6,12 @@ import { stylisedMaterial } from '../render/materials';
 import { Particles } from '../render/Particles';
 import { RNG } from '../world/rng';
 
+/** The sea plane sits a little above 0 so surf can wash up the beaches (and drain back below 0). */
+export const SEA_SURFACE = 0.07;
+/** Swell wavelengths and headings, shared with the shader (keep in step with SWL / SWA). */
+const SWELL_L = [11.8, 8.3, 6.1, 4.55];
+const SWELL_A = [0.0, 0.62, -0.55, 1.15];
+
 /** GLSL shared by the ocean, rivers and pool. */
 const waterVert = /* glsl */ `
   #include <common>
@@ -28,6 +34,11 @@ const waterFrag = /* glsl */ `
   uniform float uFlow;
   /** Extra depth for narrow canals, too fine for the seabed texture to resolve. */
   uniform float uDeepen;
+  /** 1 for the sea: surf rolls in and washes up the beaches (the plane sits SEA_SURFACE above 0). */
+  uniform float uSwash;
+  uniform float uSurface;
+  /** Wind strength patch at this pixel (set by waves()). */
+  float gWind;
   uniform sampler2D uHeight;
   uniform vec3 uSunDir;
   uniform vec3 uSunCol;
@@ -57,34 +68,50 @@ const waterFrag = /* glsl */ `
     float k = a - b - c + d;
     return vec3(du * (vec2(b - a, c - a) + k * u.yx), a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y);
   }
+  /** Swell components: wavelengths (no simple ratios, so they never fall into step) and headings. */
+  const float SWL[7] = float[7](11.8, 8.3, 6.1, 4.55, 3.4, 2.45, 1.8);
+  const float SWA[7] = float[7](0.0, 0.62, -0.55, 1.15, -1.0, 0.3, -1.45);
   /**
-   * Calm stylised sea: four long, low swells (matched on the CPU so boats ride them) plus soft
-   * rippled noise in three rotated, slowly drifting layers. Noise has no period, so the surface
-   * never shows a repeating pattern; each layer fades once it is smaller than a few pixels.
+   * Natural sea: seven swells from spread-out headings. Their crests are bent by broad noise so
+   * they curve instead of running in rows, and each builds and fades in slowly drifting wave
+   * groups, so the sea never shows a grid. On top, three layers of drifting ripple noise, made
+   * rougher or glassier by broad wind patches. Each layer fades once smaller than a few pixels.
+   * The CPU matches the swell sines (without the groups) so boats ride them.
    */
   float waves(vec2 p, float t, float fw, out vec2 g, out float ampSum) {
     float h = 0.0;
     g = vec2(0.0);
     ampSum = 0.0;
     float amp = 1.0 + uStorm * 1.7;
-    float lam = 7.5;
-    for (int i = 0; i < 4; i++) {
+    // Broad fields shared by all swells (a few lookups instead of two per swell).
+    float bendA = vnoise(p * 0.031 + vec2(3.1, 7.7));
+    float bendB = vnoise(p * 0.057 + vec2(-5.3, 1.9));
+    float grpA = vnoise(p * 0.019 + vec2(t * 0.021, -t * 0.013));
+    float grpB = vnoise(p * 0.043 + vec2(-t * 0.017, t * 0.024) + 9.4);
+    for (int i = 0; i < 7; i++) {
       float fi = float(i);
-      float ang = 0.62 + (fract(fi * 0.6180339 + 0.13) - 0.5) * (1.1 + fi * 0.2);
+      float lam = SWL[i];
+      float ang = 0.62 + SWA[i];
       vec2 d = vec2(cos(ang), sin(ang));
       float k = TAU / lam;
       float w = sqrt(9.8 * k) * 0.55 * (1.0 + uFlow * 1.5);
-      float ph = dot(d, p) * k + t * w + fi * 1.93;
-      float A = lam * 0.0125 * amp;
+      float mixK = fract(fi * 0.618 + 0.21);
+      float bend = (mix(bendA, bendB, mixK) - 0.5) * (4.0 + fi * 0.6);
+      float ph = dot(d, p) * k + t * w + fi * 1.93 + bend;
+      // Wave groups: each swell swells and fades across the sea.
+      float grp = 0.3 + 1.4 * smoothstep(0.15, 0.85, mix(grpA, grpB, fract(fi * 0.414 + 0.35)));
+      float A = lam * 0.0105 * amp * grp;
       h += A * sin(ph);
-      // Slopes kept gentle: the swell reads as a slow broad shimmer, not stripes.
-      g += A * k * d * cos(ph) * 0.55 * (1.0 - smoothstep(lam * 0.12, lam * 0.4, fw));
+      // Long swells shade gently, and fade further as the camera pulls back (from high up a real
+      // sea shows wind texture and glitter, not rows of swell).
+      g += A * k * d * cos(ph) * 0.34 * (1.0 - smoothstep(lam * 0.12, lam * 0.4, fw)) * (1.0 - 0.65 * smoothstep(0.06, 0.4, fw));
       ampSum += A;
-      lam *= 0.72;
     }
+    // Wind patches: rough, darker ruffled water beside glassy calm stretches, drifting slowly.
+    gWind = smoothstep(0.28, 0.78, vnoise(p * 0.012 + vec2(t * 0.004, t * 0.003)) * 0.65 + vnoise(p * 0.031 - vec2(t * 0.006, 0.0)) * 0.35);
     // A slow large-scale warp keeps the ripple layers from drifting in straight lines.
     vec2 warp = vec2(vnoise(p * 0.045 + vec2(t * 0.012, 0.0)), vnoise(p * 0.045 + vec2(5.2, -t * 0.01))) * 6.0;
-    float ra = 0.32 * amp;
+    float ra = 0.32 * amp * mix(0.35, 1.7, gWind);
     float freq = 0.42;
     for (int i = 0; i < 3; i++) {
       float fi = float(i);
@@ -99,6 +126,10 @@ const waterFrag = /* glsl */ `
       freq *= 2.1;
       ra *= 0.55;
     }
+    // Broad, slow undulations that stay visible zoomed right out (no period, no rows).
+    vec3 m1 = vnoised(p * 0.07 + vec2(t * 0.02, -t * 0.015));
+    vec3 m2 = vnoised(p * 0.16 + vec2(-t * 0.03, t * 0.02) + 3.3);
+    g += m1.xy * 0.07 * 0.85 + m2.xy * 0.16 * 0.22;
     return h;
   }
   void main() {
@@ -106,9 +137,29 @@ const waterFrag = /* glsl */ `
     float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
     vec4 hr = texture2D(uHeight, clamp(uv, 0.0, 1.0));
     float bed = mix(-7.0, hr.r, inside);
-    float depth = max(vW.y - bed, 0.0) + uDeepen;
     float t = uTime;
     vec2 p = vW.xz;
+    // ---- Surf ----
+    // Waves roll in over the shallows along the depth contours, arriving at different moments
+    // along the coast, every third or so bigger; each one washes up the sand, then drains back.
+    float cd0 = max(-bed, 0.0);
+    float along = vnoise(p * 0.055) * 2.8 + vnoise(p * 0.16 + 4.0) * 0.8;
+    float surfP = t * 1.2 + along * 3.14159;
+    float setK = 0.72 + 0.28 * sin(surfP * 0.34 + along * 1.7);
+    // Distance to the nearest land (blue channel): surf lines run parallel to the coast.
+    float sd = hr.b;
+    float surfZone = (1.0 - smoothstep(2.6, 5.5, sd)) * inside * uSwash;
+    float fSw = fract((surfP - 1.5708) / TAU);
+    float runup = smoothstep(0.0, 0.16, fSw) * (1.0 - smoothstep(0.28, 0.92, fSw));
+    float level = mix(vW.y, -0.03 + (uSurface + 0.03) * runup * setK, uSwash * inside);
+    float wet = 0.0;
+    if (bed > level && uSwash > 0.5 && inside > 0.5) {
+      // Above the water line: sand the last wave reached stays dark and glossy for a moment.
+      float reach = -0.03 + (uSurface + 0.03) * setK * 0.95;
+      wet = (bed < reach ? 1.0 : 0.0) * (1.0 - smoothstep(0.3, 1.0, fSw)) * smoothstep(0.1, 0.3, fSw + 0.2);
+      if (wet < 0.02) discard;
+    }
+    float depth = max(level - bed, 0.0) + uDeepen;
     // World units covered by one pixel here: drives wave level of detail.
     float fw = length(fwidth(p)) * 1.5;
     vec2 grad; float ampSum;
@@ -130,7 +181,7 @@ const waterFrag = /* glsl */ `
       vec2 ou = vec2(cos(ak), sin(ak)) * (2.2 / uWorld);
       bs += texture2D(uHeight, clamp(uv + ou, 0.0, 1.0)).r;
     }
-    float cdepth = max(vW.y - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0) + uDeepen;
+    float cdepth = max(level - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0) + uDeepen;
     vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.75, cdepth));
     col = mix(col, cMid, smoothstep(0.6, 2.6, cdepth));
     col = mix(col, cDeep2, smoothstep(2.0, 5.2, cdepth));
@@ -142,6 +193,8 @@ const waterFrag = /* glsl */ `
     // Very soft, very large colour drift (like light and shade from passing clouds) — no visible tiling.
     float drift = vnoise(p * 0.018 + vec2(t * 0.006, -t * 0.004)) * 0.6 + vnoise(p * 0.05 - vec2(t * 0.01, 0.0)) * 0.4;
     col *= 0.93 + 0.14 * drift;
+    // Ruffled wind patches read slightly darker and bluer than the glassy calms.
+    col *= mix(1.04, 0.93, gWind * smoothstep(1.5, 4.0, cdepth));
 
     float dayK = mix(0.3, 1.0, uDay);
     float ndl = max(dot(n, L), 0.0);
@@ -149,7 +202,8 @@ const waterFrag = /* glsl */ `
     // Gentle light through the swell tops (every pow() base is clamped to 0..1: pow of a tiny negative
     // rounding error is NaN on some GPUs, and one NaN pixel turns the whole frame black once bloom spreads it).
     float back = pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
-    lit += vec3(0.03, 0.16, 0.18) * clamp(crest, 0.0, 1.0) * (0.3 + back) * dayK * smoothstep(0.8, 3.0, depth);
+    float crestK = smoothstep(0.35, 0.75, vnoise(p * 0.09 + vec2(t * 0.03, 0.0)) * 0.7 + gWind * 0.5);
+    lit += vec3(0.03, 0.16, 0.18) * clamp(crest, 0.0, 1.0) * (0.3 + back) * dayK * smoothstep(0.8, 3.0, depth) * 0.55 * crestK;
 
     // Sunlight dancing on the shallows: soft, faint caustic lines over the sand.
     vec2 cq = p * 0.9 + warpC(p, t);
@@ -186,14 +240,29 @@ const waterFrag = /* glsl */ `
     cap *= smoothstep(0.55, 0.85, vnoise(p * 3.4 - vec2(t * 0.5, t * 0.3))) * uStorm * 1.2;
     lit = mix(lit, cFoam * mix(0.3, 1.0, uDay), clamp(cap, 0.0, 1.0) * 0.85);
 
-    // Shoreline: a soft white lip on the sand and one or two gentle ripples rolling in.
+    // Shoreline: a white lip that follows the swash up and down the sand.
     float fn = vnoise(p * 1.1 + t * 0.12);
-    float shore = 1.0 - smoothstep(0.0, 0.13 + 0.08 * fn, depth);
-    float bandMask = 1.0 - smoothstep(0.08, 0.5, depth);
+    // Thickest as a wave surges up the sand, thinning as it drains away.
+    float surge = smoothstep(0.0, 0.12, fSw) * (1.0 - smoothstep(0.2, 0.55, fSw)) * setK * uSwash;
+    float shore = 1.0 - smoothstep(0.0, 0.05 + 0.06 * fn + 0.16 * surge, depth);
+    // Rolling surf lines: a lighter hump out in the shallows that steepens and breaks into
+    // foam as it nears the beach.
+    float line = pow(clamp(0.5 + 0.5 * sin(sd * 3.6 + surfP), 0.0, 1.0), 4.0) * surfZone * setK;
+    float breaking = 1.0 - smoothstep(0.3, 2.2, sd);
+    lit += vec3(0.14, 0.24, 0.24) * line * (1.0 - breaking) * dayK;
+    // The steep face in front of each wave sits in its own shadow.
+    float trough = pow(clamp(0.5 + 0.5 * sin(sd * 3.6 + surfP + 1.1), 0.0, 1.0), 6.0) * surfZone * setK;
+    lit *= 1.0 - 0.16 * trough * (0.4 + breaking);
+    float surfFoam = line * mix(0.3, 1.0, breaking) * smoothstep(0.08, 0.42, vnoise(p * 3.1 + vec2(t * 0.4, -t * 0.25)) * 0.8 + breaking * 0.3) * 1.35;
+    // The foam left behind as a wave drains back down the beach.
+    float backwash = (1.0 - smoothstep(0.0, 0.18, depth)) * smoothstep(0.3, 0.6, fSw) * (1.0 - smoothstep(0.6, 0.95, fSw)) * uSwash
+                   * smoothstep(0.45, 0.75, vnoise(p * 4.5 + vec2(0.0, t * 0.3)));
+    // The old gentle ripples on rivers and pools.
+    float bandMask = (1.0 - smoothstep(0.08, 0.5, depth)) * (1.0 - uSwash);
     float bands = smoothstep(0.7, 0.97, sin(depth * 11.0 - t * 1.1 + fn * 3.0) * 0.5 + 0.5) * bandMask;
-    float rock = hr.g * (0.6 + 0.3 * sin(t * 1.4 + fn * 5.0));
-    float foam = clamp(shore * 0.9 + bands * 0.4 + rock * 0.85, 0.0, 1.0);
-    foam *= smoothstep(0.2, 0.5, vnoise(p * 2.6 + vec2(t * 0.3, -t * 0.2)) + shore * 0.8 + rock * 0.4);
+    float rock = hr.g * (0.55 + 0.35 * sin(t * 1.4 + fn * 5.0) + 0.4 * line);
+    float foam = clamp(shore * 0.9 + bands * 0.4 + rock * 0.85 + surfFoam * 0.95 + backwash * 0.6, 0.0, 1.0);
+    foam *= smoothstep(0.2, 0.5, vnoise(p * 2.6 + vec2(t * 0.3, -t * 0.2)) + shore * 0.8 + rock * 0.4 + surfFoam * 1.6);
     foam *= inside;
     lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
 
@@ -201,6 +270,11 @@ const waterFrag = /* glsl */ `
     float alpha = mix(0.22, 0.6, smoothstep(0.0, 0.9, cdepth));
     alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
     alpha = max(alpha, foam);
+    // Wet sand just above the water line: a thin dark gloss, no water colour.
+    if (wet > 0.0) {
+      lit = mix(vec3(0.3, 0.27, 0.2), skyR * 0.6, 0.25) * dayK;
+      alpha = 0.3 * wet;
+    }
     // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
     alpha = mix(1.0, alpha, inside * smoothstep(0.0, 0.16, edgeD));
     gl_FragColor = vec4(lit, alpha);
@@ -354,6 +428,8 @@ export class Water {
   constructor(private world: World) {
     this.res = world.N * 2;
     this.heightData = new Uint16Array(this.res * this.res * 4);
+    this.heightF = new Float32Array(this.res * this.res);
+    this.shoreD = new Float32Array(this.res * this.res);
     this.heightTex = new THREE.DataTexture(this.heightData, this.res, this.res, THREE.RGBAFormat, THREE.HalfFloatType);
     this.heightTex.magFilter = THREE.LinearFilter;
     this.heightTex.minFilter = THREE.LinearFilter;
@@ -376,6 +452,8 @@ export class Water {
           uHeight: { value: this.heightTex },
           uFlow: { value: flow },
           uDeepen: { value: deepen },
+          uSwash: { value: 0 },
+          uSurface: { value: SEA_SURFACE },
         },
         vertexShader: waterVert,
         fragmentShader: waterFrag,
@@ -384,11 +462,13 @@ export class Water {
         depthWrite: true,
       });
     this.oceanMat = make(0);
+    this.oceanMat.uniforms.uSwash.value = 1;
     this.riverMat = make(1);
     this.canalMat = make(0.4, 0.7);
 
     const ocean = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.oceanSize, WORLD.oceanSize, 1, 1).rotateX(-Math.PI / 2), this.oceanMat);
     ocean.name = 'ocean';
+    ocean.position.y = SEA_SURFACE;
     ocean.renderOrder = 10;
     this.group.add(ocean);
     // Dark ocean floor under everything, so looking through the water past the island's seabed
@@ -462,13 +542,73 @@ export class Water {
         const x = (i + 0.5) / 2 - w.half;
         const z = (j + 0.5) / 2 - w.half;
         const k = (j * r + i) * 4;
-        this.heightData[k] = toH(w.heightAt(x, z));
+        const h = w.heightAt(x, z);
+        this.heightF[j * r + i] = h;
+        this.heightData[k] = toH(h);
         this.heightData[k + 1] = toH(w.sampleField(w.foam, x, z));
-        this.heightData[k + 2] = 0;
         this.heightData[k + 3] = toH(1);
       }
     }
+    this.shoreDistance();
     this.heightTex.needsUpdate = true;
+  }
+
+  private heightF = new Float32Array(0);
+  private shoreD = new Float32Array(0);
+
+  /**
+   * Distance from each water texel to the nearest land, in world units (blue channel), so surf
+   * lines can roll in parallel to the real coastline even over flat shelves. Two-pass chamfer
+   * distance transform, then a light blur so the contours curve smoothly.
+   */
+  private shoreDistance(): void {
+    const r = this.res;
+    const H = this.heightF, D = this.shoreD;
+    const BIG = 1e6;
+    for (let i = 0; i < r * r; i++) D[i] = H[i] > 0 ? 0 : BIG;
+    const a = 1, b = Math.SQRT2;
+    for (let j = 0; j < r; j++) {
+      for (let i = 0; i < r; i++) {
+        const k = j * r + i;
+        let v = D[k];
+        if (v === 0) continue;
+        if (i > 0) v = Math.min(v, D[k - 1] + a);
+        if (j > 0) {
+          v = Math.min(v, D[k - r] + a);
+          if (i > 0) v = Math.min(v, D[k - r - 1] + b);
+          if (i < r - 1) v = Math.min(v, D[k - r + 1] + b);
+        }
+        D[k] = v;
+      }
+    }
+    for (let j = r - 1; j >= 0; j--) {
+      for (let i = r - 1; i >= 0; i--) {
+        const k = j * r + i;
+        let v = D[k];
+        if (v === 0) continue;
+        if (i < r - 1) v = Math.min(v, D[k + 1] + a);
+        if (j < r - 1) {
+          v = Math.min(v, D[k + r] + a);
+          if (i < r - 1) v = Math.min(v, D[k + r + 1] + b);
+          if (i > 0) v = Math.min(v, D[k + r - 1] + b);
+        }
+        D[k] = v;
+      }
+    }
+    const toH = THREE.DataUtils.toHalfFloat;
+    for (let j = 0; j < r; j++) {
+      for (let i = 0; i < r; i++) {
+        // 3x3 blur (texels → world units: two texels per unit), capped far out at sea.
+        let sum = 0, n = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const ii = i + di, jj = j + dj;
+          if (ii < 0 || jj < 0 || ii >= r || jj >= r) continue;
+          sum += Math.min(D[jj * r + ii], 40);
+          n++;
+        }
+        this.heightData[(j * r + i) * 4 + 2] = toH((sum / n) * 0.5);
+      }
+    }
   }
 
   private buildRivers(): void {
@@ -632,15 +772,16 @@ export class Water {
 
   /** Waves at a point in world space (used for boats bobbing). */
   waveHeight(x: number, z: number, t: number): number {
-    // The four longest of the shader's waves (the rest are too small to move a boat).
+    // The four longest of the shader's swells, at their average strength (the rest are too small
+    // to move a boat; the crest bending and wave groups are left out).
     const amp = 1 + this.shared.uStorm.value * 1.7;
-    let h = 0, lam = 7.5;
+    let h = 0;
     for (let i = 0; i < 4; i++) {
-      const ang = 0.62 + ((i * 0.6180339 + 0.13) % 1 - 0.5) * (1.1 + i * 0.2);
+      const lam = SWELL_L[i];
+      const ang = 0.62 + SWELL_A[i];
       const k = (Math.PI * 2) / lam;
       const w = Math.sqrt(9.8 * k) * 0.55;
-      h += lam * 0.0125 * amp * Math.sin((Math.cos(ang) * x + Math.sin(ang) * z) * k + t * w + i * 1.93);
-      lam *= 0.72;
+      h += lam * 0.0105 * amp * Math.sin((Math.cos(ang) * x + Math.sin(ang) * z) * k + t * w + i * 1.93);
     }
     return h;
   }
