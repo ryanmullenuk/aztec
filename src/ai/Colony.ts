@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Economy } from '../economy/Economy';
 import { Islander, Role, Task, makeIslander } from '../entities/Islander';
@@ -228,7 +228,7 @@ export class Colony {
       isl.workplace = b.id;
       return `${isl.name} will help build the ${b.label}.`;
     }
-    const map: Partial<Record<string, Role>> = { farm: 'farmer', temple: 'priest', jetty: 'fisher', butcher: 'butcher', woodstore: 'woodcutter', grainstore: 'gatherer' };
+    const map: Partial<Record<string, Role>> = { farm: 'farmer', maizefarm: 'farmer', chinampa: 'farmer', temple: 'priest', jetty: 'fisher', butcher: 'butcher', smokehouse: 'smoker', woodstore: 'woodcutter', grainstore: 'gatherer' };
     if (b.key === 'warroom') {
       isl.manualRole = false;
       return this.trainWarrior(b, this.rnd() < 0.5 ? 'jaguar' : 'eagle', isl) ? `${isl.name} is training as a warrior.` : 'Not enough resources to train a warrior.';
@@ -239,7 +239,7 @@ export class Colony {
       return `Nothing to do at the ${b.label}.`;
     }
     isl.role = role;
-    isl.workplace = ['farm', 'temple', 'jetty', 'butcher'].includes(b.key) ? b.id : -1;
+    isl.workplace = isFarm(b.key) || ['temple', 'jetty', 'butcher', 'smokehouse'].includes(b.key) ? b.id : -1;
     return `${isl.name} now works as a ${role}.`;
   }
 
@@ -293,13 +293,14 @@ export class Colony {
     const slots: { b: Building; role: Role; n: number }[] = [];
     for (const b of this.bld.list) {
       if (!b.complete || b.upgrading) slots.push({ b, role: 'builder', n: b.def.builders });
-      else if (b.key === 'farm') slots.push({ b, role: 'farmer', n: b.def.workers });
+      else if (isFarm(b.key)) slots.push({ b, role: 'farmer', n: b.def.workers });
+      else if (b.key === 'smokehouse') slots.push({ b, role: 'smoker', n: b.def.workers });
       else if (b.key === 'temple') slots.push({ b, role: 'priest', n: b.def.workers });
       else if (b.key === 'butcher') slots.push({ b, role: 'butcher', n: b.def.workers });
       else if (b.key === 'jetty') slots.push({ b, role: 'fisher', n: Math.min(b.def.workers, b.boats.length) });
     }
     // Builders first, then food producers, then the temple.
-    const prio: Record<string, number> = { builder: 0, farmer: 1, fisher: 2, butcher: 3, priest: 4 };
+    const prio: Record<string, number> = { builder: 0, farmer: 1, fisher: 2, butcher: 3, smoker: 3.5, priest: 4 };
     slots.sort((a, b) => prio[a.role] - prio[b.role]);
     // Priests only once the tribe can spare them.
     for (const s of slots) if (s.role === 'priest') s.n = Math.min(s.n, Math.max(0, Math.floor((workers.length - 4) / 3)));
@@ -691,6 +692,15 @@ export class Colony {
         this.setTask(isl, 'farm', farm.id, x, z);
         return true;
       }
+      case 'smoker': {
+        const b = this.bld.byId(isl.workplace);
+        if (!b) return false;
+        // Only when there is raw fish or meat to smoke and a little firewood.
+        if ((this.eco.res.fish < SMOKE.input && this.eco.res.meat < SMOKE.input) || this.eco.res.wood < SMOKE.wood) return false;
+        const [rx, rz] = b.local(0.45, 0.0);
+        this.setTask(isl, 'smoke', b.id, rx, rz);
+        return true;
+      }
       case 'priest': {
         const t = this.bld.byId(isl.workplace);
         if (!t) return false;
@@ -947,7 +957,7 @@ export class Colony {
         if (t.timer > 0) return;
         if (harvesting) {
           if (f.growth >= 1) {
-            f.stock += FARM.grainYield;
+            f.stock += FARM_TYPES[f.key]?.yield ?? FARM.grainYield;
             f.growth = 0;
             this.hooks.sfx?.('harvest', isl.x, isl.z);
           }
@@ -957,6 +967,35 @@ export class Colony {
           this.releaseTask(isl);
           this.deliver(isl);
         } else this.releaseTask(isl);
+        break;
+      }
+      case 'smoke': {
+        const b = this.bld.byId(t.target);
+        if (!b || !b.complete) return this.releaseTask(isl);
+        isl.tool = 'none';
+        if (t.stage < 2) {
+          const r = this.travel(isl, dt, t.x, t.z, { allowBuilding: b.id, goalRadius: 0.6 });
+          if (r === 'failed') return this.fail(isl);
+          if (r !== 'arrived') return;
+          t.stage = 2;
+          t.timer = SMOKE.batchSeconds;
+        }
+        // Hanging fish and meat on the racks and tending the fire.
+        const [fx, fz] = b.local(0.8, 0);
+        this.faceTo(isl, fx - isl.x, fz - isl.z, dt);
+        isl.anim = 'harvest';
+        isl.reachHigh = Math.sin(t.timer * 0.9) > -0.2;
+        b.tendTimer = 2;
+        t.timer -= dt;
+        if (t.timer > 0) return;
+        const kind = this.eco.res.fish >= this.eco.res.meat ? 'fish' : 'meat';
+        if (this.eco.res[kind] >= SMOKE.input && this.eco.res.wood >= SMOKE.wood) {
+          this.eco.res[kind] -= SMOKE.input;
+          this.eco.res.wood -= SMOKE.wood;
+          this.eco.add(kind, SMOKE.output);
+          this.hooks.sfx?.('harvest', isl.x, isl.z);
+        }
+        this.releaseTask(isl);
         break;
       }
       case 'pray': {
@@ -1293,7 +1332,7 @@ export class Colony {
       } else {
         // Night falls: stop heading to work and go to bed.
         const t = isl.task;
-        if (this.time.isNight && !isl.child && isl.role !== 'warrior' && t.stage <= 1 && (t.kind === 'chop' || t.kind === 'mine' || t.kind === 'gather' || t.kind === 'farm' || t.kind === 'wander' || t.kind === 'pray' || t.kind === 'spearfish')) {
+        if (this.time.isNight && !isl.child && isl.role !== 'warrior' && t.stage <= 1 && (t.kind === 'chop' || t.kind === 'mine' || t.kind === 'gather' || t.kind === 'farm' || t.kind === 'smoke' || t.kind === 'wander' || t.kind === 'pray' || t.kind === 'spearfish')) {
           this.releaseTask(isl);
           this.goSleep(isl);
         } else this.runTask(isl, dt);
@@ -1337,7 +1376,8 @@ export class Colony {
       case 'gather': return t.stage < 2 ? 'Looking for fruit' : 'Picking fruit';
       case 'deliver': return `Carrying ${isl.carry?.n ?? 0} ${isl.carry?.res ?? ''} to the ${b?.label ?? 'store'}`;
       case 'build': return `Building the ${b?.label ?? 'site'}`;
-      case 'farm': return b && (b.growth >= 1 || b.stock > 0) ? 'Harvesting maize' : 'Tending the fields';
+      case 'farm': return b && (b.growth >= 1 || b.stock > 0) ? `Harvesting ${(FARM_TYPES[b.key]?.label ?? 'crops').toLowerCase()}` : b?.key === 'chinampa' ? 'Tending the chinampa beds' : 'Tending the fields';
+      case 'smoke': return 'Smoking fish and meat';
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
       case 'sleep': return 'Going to bed';
