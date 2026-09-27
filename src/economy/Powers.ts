@@ -32,6 +32,7 @@ export class Powers {
   private nextSpark = 0;
   private lastDay = -1;
   private flash = 0;
+  private flashTarget = 0;
   private flashTimer = 5;
   onThunder: () => void = () => {};
   notify: (t: string, kind?: 'info' | 'warn') => void = () => {};
@@ -157,13 +158,15 @@ export class Powers {
       this.flashTimer -= realDt;
       if (this.flashTimer <= 0) {
         this.flashTimer = 9 + this.rnd() * 14;
-        this.flash = 1;
+        this.flashTarget = 1;
         setTimeout(() => this.onThunder(), 300 + this.rnd() * 900);
       }
     }
-    this.flash = Math.max(0, this.flash - realDt * 4);
-    // A soft brightening, not a full-screen white flash.
-    this.lighting.ambient.intensity += this.flash * 0.9;
+    // Lightning is a soft, distant glow: it swells over a fraction of a second and fades,
+    // never a sudden full-screen flash.
+    this.flash += (this.flashTarget - this.flash) * Math.min(1, realDt * 7);
+    this.flashTarget = Math.max(0, this.flashTarget - realDt * 3.5);
+    this.lighting.ambient.intensity += this.flash * 0.35;
 
     // Rain streaks follow the camera.
     const mat = this.rain.material as THREE.LineBasicMaterial;
