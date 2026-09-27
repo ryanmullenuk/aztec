@@ -29,6 +29,7 @@ import { Powers } from './economy/Powers';
 import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { Bridges } from './buildings/Bridges';
+import { GOD_NAME, randomIslandName } from './world/names';
 import { SPECIES, TIME } from './config';
 import type { Islander } from './entities/Islander';
 
@@ -378,6 +379,34 @@ export class Game {
   private loadFrom(save: SaveData): void {
     applyRest(this, save);
     this.terrain.updateWear();
+  }
+
+  /** The player's name for their island (saved with the game). */
+  islandName = randomIslandName();
+
+  /** Rename the island. (The secret test name unlocks unlimited resources.) */
+  setIslandName(name: string): { god: boolean; changed: boolean } {
+    const n = name.trim().slice(0, 32) || this.islandName;
+    const god = n.toUpperCase() === GOD_NAME;
+    const was = this.eco.godMode;
+    this.islandName = n;
+    this.eco.godMode = god;
+    if (was && !god) {
+      // Back to normal: stores return to their real size and anything over it is lost.
+      this.buildings.recomputeCaps();
+      const e = this.eco;
+      e.res.wood = Math.min(e.res.wood, e.woodCap);
+      e.res.stone = Math.min(e.res.stone, e.woodCap);
+      e.res.belief = Math.min(e.res.belief, e.beliefCap);
+      const food = e.food;
+      if (food > e.foodCap) for (const k of ['grain', 'fruit', 'meat', 'fish'] as const) e.res[k] = Math.floor((e.res[k] / food) * e.foodCap);
+    }
+    try {
+      document.title = god ? 'Aztlan Isle' : `${n} · Aztlan Isle`;
+    } catch {
+      /* no document */
+    }
+    return { god, changed: god !== was };
   }
 
   /** Waiting for the player to choose the village site (no campfire yet). */
