@@ -12,6 +12,9 @@ export class Economy {
   rates: Partial<Record<ResourceKey, number>> = {};
   private acc: Partial<Record<ResourceKey, number>> = {};
   private rateTimer = 0;
+  /** Test mode: everything is free and stores never run out. */
+  godMode = false;
+  static readonly GOD_AMOUNT = 9999;
 
   get food(): number {
     return FOOD_KEYS.reduce((s, k) => s + this.res[k], 0);
@@ -19,6 +22,7 @@ export class Economy {
 
   /** Remaining space for a resource. */
   space(k: ResourceKey): number {
+    if (this.godMode) return Economy.GOD_AMOUNT;
     if (k === 'belief') return this.beliefCap - this.res.belief;
     if (k === 'wood' || k === 'stone') return this.woodCap - this.res[k];
     return this.foodCap - this.food;
@@ -33,10 +37,12 @@ export class Economy {
   }
 
   canAfford(c: Cost): boolean {
+    if (this.godMode) return true;
     return this.res.wood >= c.wood && this.res.stone >= c.stone && this.res.belief >= c.belief;
   }
 
   spend(c: Cost): boolean {
+    if (this.godMode) return true;
     if (!this.canAfford(c)) return false;
     this.res.wood -= c.wood;
     this.res.stone -= c.stone;
@@ -64,6 +70,7 @@ export class Economy {
   }
 
   recomputeCaps(woodCap: number, foodCap: number, templeTiers: number): void {
+    if (this.godMode) return;
     this.woodCap = woodCap;
     this.foodCap = foodCap;
     this.beliefCap = ECONOMY.beliefBaseCap + templeTiers * ECONOMY.beliefCapPerTempleTier;
@@ -71,6 +78,11 @@ export class Economy {
   }
 
   update(dt: number): void {
+    if (this.godMode) {
+      // Keep every store brimming.
+      for (const k of Object.keys(this.res) as ResourceKey[]) this.res[k] = Economy.GOD_AMOUNT;
+      this.woodCap = this.foodCap = this.beliefCap = Economy.GOD_AMOUNT * 10;
+    }
     this.rateTimer += dt;
     if (this.rateTimer >= 30) {
       for (const k of Object.keys(this.acc) as ResourceKey[]) this.rates[k] = ((this.acc[k] ?? 0) / this.rateTimer) * 60;
