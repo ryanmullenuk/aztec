@@ -60,6 +60,8 @@ export class World {
   occ = new Int32Array(this.N * this.N);
   /** Path wear 0..1 (islanders trampling grass into dirt). */
   wear = new Float32Array(this.N * this.N);
+  /** Stone paths laid by the player (1 = paved). */
+  path = new Uint8Array(this.N * this.N);
   /** Farm soil 0..1. */
   soil = new Float32Array(this.N * this.N);
   /** Foam intensity around rocks in the shallows. */
