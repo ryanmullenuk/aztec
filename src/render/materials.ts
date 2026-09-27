@@ -136,7 +136,10 @@ export function patchStylised(mat: THREE.MeshStandardMaterial, rim = 0.35): THRE
           // Warm rim on top edges.
           float rimF = pow(1.0 - clamp(dot(normal, Vv), 0.0, 1.0), 3.0);
           float upF = clamp(dot(normal, uSunView) * 0.5 + 0.5, 0.0, 1.0);
-          outgoingLight += uSunCol * rimF * upF * uRim * 0.18 * uSunI * (0.4 + 0.6 * vLeaf);
+          // Foliage gets a softer rim tinted by its own green, so sunlit crowns stay leafy instead of
+          // washing out pale.
+          vec3 rimCol = mix(uSunCol, uSunCol * diffuseColor.rgb * 2.2, vLeaf * 0.7);
+          outgoingLight += rimCol * rimF * upF * uRim * 0.18 * uSunI * (0.5 - 0.25 * vLeaf);
         }
         #include <opaque_fragment>`
       );
