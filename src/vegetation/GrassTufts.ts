@@ -102,7 +102,7 @@ export class GrassTufts {
       let n = 0;
       for (const t of list) {
         const i = t.cell;
-        if (w.occ[i] !== 0 || w.wear[i] > 0.3 || w.soil[i] > 0.05 || !w.isLandCell(i)) continue;
+        if (w.occ[i] !== 0 || w.path[i] || w.wear[i] > 0.3 || w.soil[i] > 0.05 || !w.isLandCell(i)) continue;
         const y = w.heightAt(t.x, t.z);
         q.setFromAxisAngle(up, t.rot);
         mtx.compose(p.set(t.x, y - 0.01, t.z), q, s.setScalar(t.s));
