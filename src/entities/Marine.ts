@@ -789,16 +789,33 @@ export class Marine {
     this.dolphinMesh.castShadow = true;
     this.dolphinMesh.frustumCulled = false;
     this.dolphinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.dolphinMesh.count = 0;
     this.group.add(this.dolphinMesh);
-    const podSpots = this.deepSpots(MARINE.pods, -2.6, 0.45, 0.85);
-    podSpots.forEach((s, k) => {
-      const pod: Pod = { phase: this.rng.next() * 6.28, x: s.x, z: s.z, cx: s.x, cz: s.z, a: this.rng.range(0, 6.28), r: 12 + this.rng.next() * 12, dir: k % 2 ? 1 : -1, speed: MARINE.dolphinSpeed, ids: [] };
+    // Each pod swims a loop that lies entirely in deep water (checked all the way round).
+    const loops: { cx: number; cz: number; r: number }[] = [];
+    for (let k = 0; k < 3000 && loops.length < MARINE.pods; k++) {
+      const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(this.world.half * 0.72, this.world.half * 1.05);
+      const cx = Math.cos(a) * d, cz = Math.sin(a) * d, r = 9 + this.rng.next() * 9;
+      if (loops.some((l) => Math.hypot(l.cx - cx, l.cz - cz) < l.r + r + 12)) continue;
+      let ok = true;
+      for (let s = 0; s < 16 && ok; s++) {
+        const t = (s / 16) * Math.PI * 2;
+        if (this.bedAt(cx + Math.cos(t) * r, cz + Math.sin(t) * r) > -2.8) ok = false;
+      }
+      if (ok) loops.push({ cx, cz, r });
+    }
+    loops.forEach((l, k) => {
+      const a0 = this.rng.range(0, 6.28);
+      const s = { x: l.cx + Math.cos(a0) * l.r, z: l.cz + Math.sin(a0) * l.r };
+      const pod: Pod = { phase: this.rng.next() * 6.28, x: s.x, z: s.z, cx: l.cx, cz: l.cz, a: a0, r: l.r, dir: k % 2 ? 1 : -1, speed: MARINE.dolphinSpeed, ids: [] };
       for (let d = 0; d < MARINE.dolphinsPerPod; d++) {
         pod.ids.push(this.dolphins.length);
         this.dolphins.push({ pod: k, lag: d * 0.07 + this.rng.next() * 0.05, leapH: 0.85 + this.rng.next() * 0.3, stroke: this.rng.next() * 6.28, offX: (this.rng.next() - 0.5) * 3.2, offZ: (d - MARINE.dolphinsPerPod / 2) * 0.7 + (this.rng.next() - 0.5) * 0.6, phase: this.rng.next() * 6.28, x: s.x, y: -0.4, z: s.z, pitch: 0, yaw: 0, roll: 0, wasUp: false, spin: false });
       }
       this.pods.push(pod);
     });
+    // Place every dolphin before the first frame (nothing sits at the origin).
+    this.updateDolphins(0.0001);
   }
 
   /** Random deep-water points around the island (optionally within a radius band of the map). */
@@ -1203,12 +1220,13 @@ export class Marine {
     for (const pod of this.pods) {
       pod.a += (dt * pod.speed * pod.dir) / pod.r;
       const nx = pod.cx + Math.cos(pod.a) * pod.r, nz = pod.cz + Math.sin(pod.a) * pod.r;
-      if (!this.deepEnough(nx, nz, -2.0)) {
-        pod.dir *= -1;
-        pod.a += pod.dir * 0.3;
-      } else {
-        pod.x = nx;
-        pod.z = nz;
+      pod.x = nx;
+      pod.z = nz;
+      // Shallows ahead (e.g. the land was raised): drift the whole loop further out to sea.
+      if (!this.deepEnough(nx, nz, -2.2)) {
+        const d = Math.hypot(pod.cx, pod.cz) || 1;
+        pod.cx += (pod.cx / d) * dt * 4;
+        pod.cz += (pod.cz / d) * dt * 4;
       }
     }
     const L = MARINE.dolphinLength;
