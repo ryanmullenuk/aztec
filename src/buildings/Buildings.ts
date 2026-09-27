@@ -218,8 +218,24 @@ export class BuildingSystem {
     return n;
   }
 
+  get hasCampfire(): boolean {
+    return this.list.some((b) => b.key === 'campfire');
+  }
+
+  /** Free beds across all finished homes and huts. */
+  get freeBeds(): number {
+    return this.list.reduce((s, b) => s + (b.complete ? Math.max(0, b.housing - b.residents.length) : 0), 0);
+  }
+
+  /** Finish a building at once (the founding campfire). */
+  completeNow(b: Building): void {
+    if (!b.complete) this.finish(b);
+  }
+
   canPlace(key: BuildingKey, cx: number, cz: number, rot: number): { ok: boolean; reason: string } {
     const def = BUILDINGS[key];
+    if (key === 'campfire' && this.hasCampfire) return { ok: false, reason: 'The village already has its fire' };
+    if (key !== 'campfire' && !this.hasCampfire) return { ok: false, reason: 'Found your village first: place the campfire' };
     const [sw, sd] = def.size;
     const w = rot % 2 ? sd : sw, d = rot % 2 ? sw : sd;
     const f = this.world.isFlatFree(cx, cz, w, d);
