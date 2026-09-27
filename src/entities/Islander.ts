@@ -31,7 +31,8 @@ export type Anim =
   | 'build'
   | 'pray'
   | 'sleep'
-  | 'eat';
+  | 'eat'
+  | 'wave';
 
 export type Tool = 'none' | 'axe' | 'pick' | 'hoe' | 'spear' | 'hammer';
 
@@ -93,6 +94,9 @@ export interface Islander {
   warrior: 'jaguar' | 'eagle' | null;
   /** Day of the last evening spent at a bonfire. */
   lastBonfire: number;
+  /** Waving up at the player (seconds left), and time until they might wave again. */
+  waveT: number;
+  waveCool: number;
   hidden: boolean;
   think: number;
   lastMeal?: ResourceKey;
@@ -148,6 +152,8 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
     warrior: null,
     hidden: false,
     lastBonfire: -1,
+    waveT: 0,
+    waveCool: 3 + Math.random() * 12,
     think: rnd(),
     stuck: 0,
     lastCell: -1,

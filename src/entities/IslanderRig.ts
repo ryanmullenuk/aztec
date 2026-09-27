@@ -185,6 +185,20 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
       p.lean = 0.12 + (Math.sin(ph) * 0.5 + 0.5) * 0.6;
       break;
     }
+    case 'wave': {
+      // Looking up at the player, leaning back a touch, one arm high and waving from the elbow.
+      const ph = t * 8.5;
+      p.headX = -0.62;
+      p.lean = -0.1;
+      p.uaRx = -2.75 + Math.sin(ph * 0.5) * 0.08;
+      p.uaRz = -0.55;
+      p.faR = -0.35 + Math.sin(ph) * 0.5;
+      p.uaLx = -0.15;
+      p.uaLz = 0.12;
+      p.faL = -0.3;
+      p.bob = Math.max(0, Math.sin(ph * 0.5)) * 0.012;
+      break;
+    }
     case 'eat': {
       const ph = t * 3;
       p.uaRx = -0.8 + Math.sin(ph) * 0.15;

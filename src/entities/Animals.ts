@@ -342,6 +342,18 @@ export class Animals {
   registerPen(b: Building): void {
     this.pens.set(b.id, { x: b.penX, z: b.penZ, r: 0.9 });
   }
+  /** A pen whose building was moved: its animals follow it to the new spot. */
+  movePen(b: Building): void {
+    const p = this.pens.get(b.id);
+    if (!p) return;
+    const dx = b.penX - p.x, dz = b.penZ - p.z;
+    p.x = b.penX;
+    p.z = b.penZ;
+    for (const a of this.list) if (a.pen === b.id) {
+      a.x += dx;
+      a.z += dz;
+    }
+  }
   releasePen(id: number): void {
     for (const a of this.list) if (a.pen === id) {
       a.pen = -1;
