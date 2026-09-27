@@ -238,9 +238,23 @@ export class BuildingSystem {
     if (!b.complete) this.finish(b);
   }
 
-  canPlace(key: BuildingKey, cx: number, cz: number, rot: number): { ok: boolean; reason: string } {
+  /**
+   * Can this building go here? `moving` is a building being moved or rotated: its own cells count
+   * as free and it costs nothing.
+   */
+  canPlace(key: BuildingKey, cx: number, cz: number, rot: number, moving?: Building): { ok: boolean; reason: string } {
+    if (!moving) return this.siteCheck(key, cx, cz, rot, false);
+    const cells: number[] = [];
+    for (let z = moving.cz; z < moving.cz + moving.d; z++) for (let x = moving.cx; x < moving.cx + moving.w; x++) cells.push(this.world.idx(x, z));
+    for (const i of cells) this.world.occ[i] = 0;
+    const res = this.siteCheck(key, cx, cz, rot, true);
+    for (const i of cells) this.world.occ[i] = moving.id + 1;
+    return res;
+  }
+
+  private siteCheck(key: BuildingKey, cx: number, cz: number, rot: number, moving: boolean): { ok: boolean; reason: string } {
     const def = BUILDINGS[key];
-    if (key === 'campfire' && this.hasCampfire) return { ok: false, reason: 'The village already has its fire' };
+    if (key === 'campfire' && this.hasCampfire && !moving) return { ok: false, reason: 'The village already has its fire' };
     if (key !== 'campfire' && !this.hasCampfire) return { ok: false, reason: 'Found your village first: place the campfire' };
     const [sw, sd] = def.size;
     const w = rot % 2 ? sd : sw, d = rot % 2 ? sw : sd;
@@ -257,7 +271,70 @@ export class BuildingSystem {
     }
     if ((key === 'jetty' || key === 'tradedock') && this.jettyWater(cx, cz, rot) < JETTY.length - 2) return { ok: false, reason: `A ${key === 'jetty' ? 'jetty' : 'trade dock'} must face open water at the shore` };
     if (key === 'chinampa' && this.waterAround(cx, cz, w, d) < 4) return { ok: false, reason: 'A chinampa must be built right beside water (river, pool or shore)' };
-    if (!this.eco.canAfford(def.cost)) return { ok: false, reason: 'Not enough resources' };
+    if (!moving && !this.eco.canAfford(def.cost)) return { ok: false, reason: 'Not enough resources' };
+    return { ok: true, reason: '' };
+  }
+
+  /** Buildings that can be turned or moved once placed (docks are tied to their shore). */
+  canRelocate(b: Building): boolean {
+    return b.key !== 'jetty' && b.key !== 'tradedock';
+  }
+
+  /** Called after a building is moved or rotated (pens, paths, grass). */
+  onMoved: (b: Building) => void = () => {};
+
+  /** Turn a building a quarter turn about its centre. */
+  rotate(b: Building): { ok: boolean; reason: string } {
+    if (!this.canRelocate(b)) return { ok: false, reason: 'Docks face the water and cannot be turned' };
+    const rot = (b.rot + 1) % 4;
+    const [sw, sd] = b.def.size;
+    const w = rot % 2 ? sd : sw, d = rot % 2 ? sw : sd;
+    const cx = Math.round(b.x + this.world.half - w / 2), cz = Math.round(b.z + this.world.half - d / 2);
+    return this.relocate(b, cx, cz, rot);
+  }
+
+  /**
+   * Move (and/or turn) an existing building, finished or not, keeping everything about it: its
+   * residents, workers, progress, stock and animals.
+   */
+  relocate(b: Building, cx: number, cz: number, rot: number): { ok: boolean; reason: string } {
+    if (!this.canRelocate(b)) return { ok: false, reason: 'Docks are tied to their shore and cannot be moved' };
+    const chk = this.canPlace(b.key, cx, cz, rot, b);
+    if (!chk.ok) return chk;
+    const w = this.world;
+    const farm = isFarm(b.key);
+    for (let z = b.cz; z < b.cz + b.d; z++) for (let x = b.cx; x < b.cx + b.w; x++) {
+      const i = w.idx(x, z);
+      w.occ[i] = 0;
+      if (farm) w.soil[i] = 0;
+    }
+    const [sw, sd] = b.def.size;
+    b.cx = cx;
+    b.cz = cz;
+    b.rot = rot;
+    b.w = rot % 2 ? sd : sw;
+    b.d = rot % 2 ? sw : sd;
+    b.layer = w.layer[w.idx(cx, cz)];
+    b.x = cx + b.w / 2 - w.half;
+    b.z = cz + b.d / 2 - w.half;
+    b.y = w.layerY(b.layer);
+    const [dx, dz] = ROT_DIR[rot];
+    const depth = sd / 2 + 0.55;
+    b.door = { x: b.x + dx * depth, z: b.z + dz * depth };
+    for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) {
+      const i = w.idx(x, z);
+      w.occ[i] = b.id + 1;
+      if (w.path[i] && b.key !== 'torch') w.path[i] = 0;
+      if (farm) w.soil[i] = 1;
+    }
+    this.eco.add('wood', this.veg.clearArea(cx, cz, b.w, b.d));
+    if (b.key === 'butcher') [b.penX, b.penZ] = b.local(sw / 4 + 0.15, 0.1);
+    b.group.position.set(b.x, b.y, b.z);
+    b.group.rotation.y = (rot * Math.PI) / 2;
+    const e = new THREE.Euler(0, (rot * Math.PI) / 2, 0);
+    for (const t of b.torches) t.pos.copy(t.flame.position).applyEuler(e).add(b.group.position);
+    this.terrain.updateWear();
+    this.onMoved(b);
     return { ok: true, reason: '' };
   }
 
@@ -579,7 +656,7 @@ export class BuildingSystem {
 
   // ------------- Ghost preview -------------
 
-  showGhost(key: BuildingKey | null, cx = 0, cz = 0, rot = 0): { ok: boolean; reason: string } {
+  showGhost(key: BuildingKey | null, cx = 0, cz = 0, rot = 0, moving?: Building): { ok: boolean; reason: string } {
     if (!key) {
       if (this.ghost) this.scene.remove(this.ghost);
       this.ghost = null;
@@ -608,7 +685,7 @@ export class BuildingSystem {
     const def = BUILDINGS[key];
     const [sw, sd] = def.size;
     const w = rot % 2 ? sd : sw, d = rot % 2 ? sw : sd;
-    const res = this.canPlace(key, cx, cz, rot);
+    const res = this.canPlace(key, cx, cz, rot, moving);
     const layer = this.world.layerAt(cx, cz);
     const y = key === 'jetty' ? this.world.layerY(Math.max(1, layer)) : this.world.layerY(Math.max(1, layer));
     this.ghost!.position.set(cx + w / 2 - this.world.half, y + 0.02, cz + d / 2 - this.world.half);
