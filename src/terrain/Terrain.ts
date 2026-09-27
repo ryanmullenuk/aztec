@@ -67,7 +67,9 @@ export class Terrain {
     const pos = new Float32Array(V * V * 3);
     const nor = new Float32Array(V * V * 3);
     const colr = new Float32Array(V * V * 3);
-    const mask = new Float32Array(V * V * 2);
+    // Surface masks: grass, flat, sand, rock (for shader detail); forest separately.
+    const mask = new Float32Array(V * V * 4);
+    const forestM = new Float32Array(V * V);
     const idx = new Uint32Array(this.M * this.M * 6);
     let k = 0;
     for (let j = 0; j < this.M; j++) {
@@ -87,7 +89,8 @@ export class Terrain {
     this.geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     this.geo.setAttribute('color', new THREE.BufferAttribute(colr, 3));
-    this.geo.setAttribute('aMask', new THREE.BufferAttribute(mask, 2));
+    this.geo.setAttribute('aMask', new THREE.BufferAttribute(mask, 4));
+    this.geo.setAttribute('aForest', new THREE.BufferAttribute(forestM, 1));
     this.geo.setIndex(new THREE.BufferAttribute(idx, 1));
 
     const N = world.N;
@@ -115,7 +118,7 @@ export class Terrain {
           }
         }
         const g = new THREE.BufferGeometry();
-        for (const name of ['position', 'normal', 'color', 'aMask']) g.setAttribute(name, this.geo.getAttribute(name));
+        for (const name of ['position', 'normal', 'color', 'aMask', 'aForest']) g.setAttribute(name, this.geo.getAttribute(name));
         g.setIndex(new THREE.BufferAttribute(new Uint32Array(ix), 1));
         const m = new THREE.Mesh(g, this.material);
         m.receiveShadow = true;
@@ -140,7 +143,8 @@ export class Terrain {
     const nor = this.geo.getAttribute('normal') as THREE.BufferAttribute;
     const colr = this.geo.getAttribute('color') as THREE.BufferAttribute;
     const mask = this.geo.getAttribute('aMask') as THREE.BufferAttribute;
-    const P = pos.array as Float32Array, NR = nor.array as Float32Array, CL = colr.array as Float32Array, MK = mask.array as Float32Array;
+    const fmask = this.geo.getAttribute('aForest') as THREE.BufferAttribute;
+    const P = pos.array as Float32Array, NR = nor.array as Float32Array, CL = colr.array as Float32Array, MK = mask.array as Float32Array, FM = fmask.array as Float32Array;
     const e = 0.2;
     const n = new THREE.Vector3();
     for (let j = j0; j <= j1; j++) {
@@ -162,14 +166,18 @@ export class Terrain {
         CL[v * 3] = tmpA.r;
         CL[v * 3 + 1] = tmpA.g;
         CL[v * 3 + 2] = tmpA.b;
-        MK[v * 2] = m.grass;
-        MK[v * 2 + 1] = m.flat;
+        MK[v * 4] = m.grass;
+        MK[v * 4 + 1] = m.flat;
+        MK[v * 4 + 2] = m.sand;
+        MK[v * 4 + 3] = m.rock;
+        FM[v] = m.forest;
       }
     }
     pos.needsUpdate = true;
     nor.needsUpdate = true;
     colr.needsUpdate = true;
     mask.needsUpdate = true;
+    fmask.needsUpdate = true;
     // Refresh bounds of the chunks we touched.
     for (const c of this.chunks) {
       if (c.i1 < i0 || c.i0 > i1 || c.j1 < j0 || c.j0 > j1) continue;
@@ -190,7 +198,7 @@ export class Terrain {
   }
 
   /** Terrain colour rules: seabed, wet sand, beach, meadow, jungle floor, earthy terrace faces, rock and moss. */
-  private colorAt(x: number, z: number, y: number, ny: number, out: THREE.Color): { grass: number; flat: number } {
+  private colorAt(x: number, z: number, y: number, ny: number, out: THREE.Color): { grass: number; flat: number; sand: number; rock: number; forest: number } {
     const w = this.world;
     const nz1 = this.noise.noise(x * 0.09, z * 0.09);
     const nz2 = this.noise.noise(x * 0.35 + 40, z * 0.35 - 40);
@@ -207,7 +215,7 @@ export class Terrain {
         out.lerp(C.reefRock, smoothstep(0.42, 0.62, rk) * 0.8 * shelfK);
       }
       out.multiplyScalar(0.95 + nz2 * 0.06);
-      return { grass: 0, flat: 0 };
+      return { grass: 0, flat: 0, sand: 0, rock: 0, forest: 0 };
     }
     // Bicubic samples with a slight noise warp: soft, organic boundaries between grass, jungle floor, sand and rock.
     const qx = x + nz2 * 0.45, qz = z + nz1 * 0.45;
@@ -235,7 +243,7 @@ export class Terrain {
       out.lerp(tmpB, smoothstep(0.1, 0.7, rocky) * (0.65 + (1 - flat) * 0.35));
     }
     const grass = clamp((1 - sandAmt) * (1 - rocky) * (1 - forest * 0.8) * flat, 0, 1);
-    return { grass, flat };
+    return { grass, flat, sand: sandAmt, rock: smoothstep(0.1, 0.7, rocky), forest: clamp(forest * (1 - sandAmt), 0, 1) };
   }
 
   /** Push wear and soil fields into the GPU texture. */
@@ -245,7 +253,7 @@ export class Terrain {
     for (let i = 0; i < w.N * w.N; i++) {
       d[i * 4] = Math.min(255, w.wear[i] * 255);
       d[i * 4 + 1] = Math.min(255, w.soil[i] * 255);
-      d[i * 4 + 2] = 0;
+      d[i * 4 + 2] = w.path[i] ? 255 : 0;
       d[i * 4 + 3] = 255;
     }
     this.wearTex.needsUpdate = true;
@@ -261,9 +269,11 @@ export class Terrain {
       .replace(
         '#include <common>',
         `#include <common>
-        attribute vec2 aMask;
+        attribute vec4 aMask;
+        attribute float aForest;
         varying vec3 vWPos;
-        varying vec2 vMask;
+        varying vec4 vMask;
+        varying float vForest;
         varying float vViewDist;`
       )
       .replace(
@@ -272,9 +282,24 @@ export class Terrain {
         vec4 wpT = modelMatrix * vec4(transformed, 1.0);
         vWPos = wpT.xyz;
         vMask = aMask;
+        vForest = aForest;
         vViewDist = length(cameraPosition - wpT.xyz);`
       );
     shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        {
+          // Fine relief on rock and earth faces: chiselled, cracked stone instead of smooth plaster.
+          float bk = (vMask.w * 0.9 + (1.0 - vMask.y) * 0.5) * (1.0 - smoothstep(25.0, 60.0, vViewDist)) * step(0.0, vWPos.y);
+          if (bk > 0.01) {
+            float e = 0.05;
+            float h0 = relief(vWPos);
+            vec3 g = vec3(relief(vWPos + vec3(e, 0.0, 0.0)) - h0, relief(vWPos + vec3(0.0, e, 0.0)) - h0, relief(vWPos + vec3(0.0, 0.0, e)) - h0) / e;
+            normal = normalize(normal - (viewMatrix * vec4(g * 0.05 * bk, 0.0)).xyz);
+          }
+        }`
+      )
       .replace(
         '#include <common>',
         `#include <common>
@@ -286,7 +311,8 @@ export class Terrain {
         uniform vec3 uSoilCol;
         uniform float uCaustic;
         varying vec3 vWPos;
-        varying vec2 vMask;
+        varying vec4 vMask;
+        varying float vForest;
         varying float vViewDist;
         float th21(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
         float vn2(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -299,6 +325,24 @@ export class Terrain {
             c += abs(sin(q.x * 1.9) * cos(q.y * 1.7));
           }
           return pow(clamp(c / 3.0, 0.0, 1.0), 6.0) * 2.4;
+        }
+        vec3 lin(vec3 c){ return pow(c, vec3(2.2)); }
+        /** Irregular flagstones: returns distance to the nearest stone edge (xy) and a per-stone id hash (z). */
+        vec3 flags(vec2 q){
+          vec2 ip = floor(q), fp = fract(q);
+          float d1 = 8.0, d2 = 8.0; vec2 id = vec2(0.0);
+          for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+            vec2 g = vec2(float(i), float(j));
+            vec2 o = vec2(th21(ip + g), th21(ip + g + 17.3)) * 0.75 + 0.12;
+            vec2 r = g + o - fp;
+            float d = dot(r, r);
+            if (d < d1) { d2 = d1; d1 = d; id = ip + g; } else if (d < d2) d2 = d;
+          }
+          return vec3(sqrt(d2) - sqrt(d1), 0.0, th21(id + 5.0));
+        }
+        /** Height of fine surface relief for rock and earth faces (used to bump the normal). */
+        float relief(vec3 p){
+          return vn2(p.xz * 3.1 + p.y * 1.7) * 0.6 + vn2(vec2(p.x + p.z, p.y) * 6.0) * 0.4;
         }`
       )
       .replace(
@@ -319,12 +363,74 @@ export class Terrain {
           // Tiny wildflower specks on sunny meadow grass.
           vec2 fc = floor(vWPos.xz * 4.0);
           float h = th21(fc);
-          if (h > 0.93 && vMask.x > 0.45 && wear < 0.2 && soil < 0.1) {
+          if (h > 0.93 && vMask.x > 0.45 && wear < 0.2 && soil < 0.1 && wr.b < 0.3) {
             vec2 fp = fract(vWPos.xz * 4.0) - 0.5 - (vec2(th21(fc + 3.1), th21(fc + 7.7)) - 0.5) * 0.5;
             float m = smoothstep(0.13, 0.07, length(fp)) * (1.0 - smoothstep(35.0, 70.0, vViewDist));
             float pick = fract(h * 97.0);
             vec3 fcol = pick < 0.4 ? vec3(1.0, 0.98, 0.92) : (pick < 0.7 ? vec3(1.0, 0.55, 0.72) : vec3(1.0, 0.86, 0.25));
             diffuseColor.rgb = mix(diffuseColor.rgb, fcol, m * vMask.x);
+          }
+          // ---- Surface detail (fades out with distance) ----
+          float nearK = 1.0 - smoothstep(30.0, 85.0, vViewDist);
+          if (vWPos.y > -0.02) {
+            vec2 xz = vWPos.xz;
+            // Grass: broad lush / sun-dried patches and small clover clumps.
+            float gp = vn2(xz * 0.3) * 0.6 + vn2(xz * 1.05 + 7.0) * 0.4;
+            diffuseColor.rgb *= mix(vec3(1.0), mix(vec3(0.86, 0.95, 0.84), vec3(1.08, 1.05, 0.86), gp), vMask.x);
+            float clover = smoothstep(0.62, 0.8, vn2(xz * 3.3)) * vMask.x * nearK;
+            diffuseColor.rgb *= 1.0 - clover * 0.12;
+            // Sand: wind ripples on the dry beach, pebbles and shells.
+            float dry = vMask.z * smoothstep(0.08, 0.3, vWPos.y);
+            float rip = sin(dot(xz, vec2(0.8, 0.6)) * 8.5 + vn2(xz * 0.7) * 7.0) * 0.5 + 0.5;
+            diffuseColor.rgb *= 1.0 - dry * (rip * 0.07) * nearK;
+            vec2 pc = floor(xz * 5.0);
+            float ph = th21(pc + 31.0);
+            if (ph > 0.9 && vMask.z > 0.4) {
+              vec2 pf = fract(xz * 5.0) - 0.5 - (vec2(th21(pc + 1.7), th21(pc + 9.3)) - 0.5) * 0.5;
+              float pm = smoothstep(0.1 + ph * 0.05, 0.04, length(pf * vec2(1.0, 1.4))) * nearK * vMask.z;
+              vec3 pcol = fract(ph * 53.0) < 0.55 ? lin(vec3(0.62, 0.6, 0.58)) : (fract(ph * 31.0) < 0.5 ? lin(vec3(0.98, 0.94, 0.9)) : lin(vec3(0.96, 0.78, 0.74)));
+              diffuseColor.rgb = mix(diffuseColor.rgb, pcol, pm);
+            }
+            // Jungle floor: fallen leaves in browns and olive, darker damp patches.
+            float fk = vForest * (1.0 - vMask.z);
+            if (fk > 0.05) {
+              diffuseColor.rgb *= 1.0 - fk * smoothstep(0.45, 0.8, vn2(xz * 0.9 + 3.0)) * 0.18;
+              vec2 lc = floor(xz * 7.0);
+              float lh = th21(lc + 11.0);
+              if (lh > 0.45) {
+                vec2 lf = fract(xz * 7.0) - 0.5 - (vec2(th21(lc + 2.2), th21(lc + 4.4)) - 0.5) * 0.45;
+                float a = lh * 40.0;
+                lf = mat2(cos(a), -sin(a), sin(a), cos(a)) * lf;
+                float lm = smoothstep(0.2, 0.12, length(lf * vec2(2.3, 1.0))) * fk * nearK;
+                vec3 lcol = mix(lin(vec3(0.55, 0.36, 0.16)), lin(vec3(0.62, 0.55, 0.2)), fract(lh * 17.0));
+                lcol = mix(lcol, lin(vec3(0.3, 0.42, 0.14)), step(0.8, fract(lh * 7.0)));
+                diffuseColor.rgb = mix(diffuseColor.rgb, lcol, lm * 0.75);
+              }
+            }
+            // Rock and terrace faces: sedimentary layers, cracks, lichen on the tops.
+            float face = (1.0 - vMask.y) * (1.0 - vMask.z);
+            float rk = max(vMask.w, face * 0.8);
+            if (rk > 0.02) {
+              float strata = sin(vWPos.y * 11.0 + vn2(xz * 0.5) * 4.0) * 0.5 + 0.5;
+              diffuseColor.rgb *= 1.0 - rk * (1.0 - vMask.y) * strata * 0.12;
+              // Short broken cracks (masked by a second noise so they never form continuous contour lines).
+              float crack = 1.0 - smoothstep(0.0, 0.02, abs(vn2(vec2(xz.x * 2.6 + vWPos.y * 1.9, xz.y * 2.6 - vWPos.y * 1.1)) - 0.5));
+              crack *= smoothstep(0.55, 0.75, vn2(xz * 1.3 + vWPos.y * 0.7 + 21.0));
+              diffuseColor.rgb *= 1.0 - crack * rk * 0.22 * nearK;
+              float lichen = smoothstep(0.7, 0.85, vn2(xz * 4.0 + 9.0)) * vMask.w * vMask.y * nearK;
+              diffuseColor.rgb = mix(diffuseColor.rgb, lin(vec3(0.74, 0.76, 0.5)), lichen * 0.35);
+            }
+          }
+          // Stone paths: irregular flagstones with dark joints, ragged edges into the grass.
+          float pv = wr.b * step(-0.02, vWPos.y);
+          float pathK = smoothstep(0.42 + (grain - 0.5) * 0.25, 0.6 + (grain - 0.5) * 0.25, pv);
+          if (pathK > 0.001) {
+            vec3 fl = flags(vWPos.xz * 2.4);
+            float gap = smoothstep(0.03, 0.1, fl.x);
+            vec3 stone = mix(lin(vec3(0.74, 0.66, 0.54)), lin(vec3(0.9, 0.84, 0.72)), fl.z) * (0.9 + 0.12 * vn2(vWPos.xz * 11.0));
+            stone *= 0.9 + 0.12 * smoothstep(0.06, 0.35, fl.x);
+            vec3 joint = mix(lin(vec3(0.34, 0.29, 0.22)), lin(vec3(0.33, 0.42, 0.2)), smoothstep(0.4, 0.8, vn2(vWPos.xz * 3.0)));
+            diffuseColor.rgb = mix(diffuseColor.rgb, mix(joint, stone, gap), pathK);
           }
           // Caustics dancing on the shallow seabed.
           if (vWPos.y < 0.02) {
