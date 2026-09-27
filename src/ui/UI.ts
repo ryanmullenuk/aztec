@@ -134,7 +134,10 @@ export class UI {
     const gear = el('button', 'ib', ICONS.gear);
     gear.title = 'Settings';
     gear.onclick = () => this.toggle(this.settings);
-    tr.append(this.muteBtn, help, gear);
+    const over = el('button', 'ib', ICONS.island);
+    over.title = 'See the whole map from above (O) · again to go back';
+    over.onclick = () => this.game.rig.toggleOverview();
+    tr.append(over, this.muteBtn, help, gear);
     this.root.appendChild(tr);
   }
 
