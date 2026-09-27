@@ -260,7 +260,9 @@ export class Vegetation {
           table = [['palm', -1, 20], ['broadleaf', 2, 1]];
         } else if (forest > 0.35) {
           chance = (0.46 * forest + (river ? 0.15 : 0)) * (0.7 + cluster * 0.6);
-          table = [['broadleaf', 0, 20], ['broadleaf', 1, 18], ['broadleaf', 5, river ? 30 : 14], ['broadleaf', 6, river ? 16 : 9], ['broadleaf', 3, 7], ['broadleaf', 4, 5], ['palm', -1, 14], ['banana', 0, 4], ['apple', 1, 3]];
+          // The wild island's jungle is rich in bananas and fruit trees.
+          const fruitK = w.isle[i] === 2 ? 3.5 : 1;
+          table = [['broadleaf', 0, 20], ['broadleaf', 1, 18], ['broadleaf', 5, river ? 30 : 14], ['broadleaf', 6, river ? 16 : 9], ['broadleaf', 3, 7], ['broadleaf', 4, 5], ['palm', -1, 14], ['banana', 0, 4 * fruitK], ['apple', 1, 3 * fruitK], ['apple', 0, fruitK > 1 ? 6 : 0]];
         } else if (hills) {
           chance = 0.07 * (0.3 + cluster);
           table = [['broadleaf', 3, 35], ['broadleaf', 2, 30], ['broadleaf', 4, 20], ['palm', -1, 15]];
