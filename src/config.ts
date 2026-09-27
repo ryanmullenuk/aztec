@@ -27,11 +27,11 @@ export const WORLD = {
 
 export const COLORS = {
   // Open ocean: deep navy-teal like a real sea seen from above; tropical turquoise only in the shallows.
-  deepOcean: 0x0a2c48,
-  deepOcean2: 0x0f3d60,
-  midWater: 0x17698c,
-  shallow: 0x19b8cb,
-  shallowBright: 0x52dcd6,
+  deepOcean: 0x08253f,
+  deepOcean2: 0x0c3558,
+  midWater: 0x15668a,
+  shallow: 0x2cc6d2,
+  shallowBright: 0x7ee9de,
   reef1: 0x1c6e7a,
   reef2: 0x2a5f6e,
   foam: 0xf5fbff,
