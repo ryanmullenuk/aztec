@@ -23,6 +23,8 @@ export interface SaveData {
   }[];
   islanders: Partial<Islander>[];
   schools: number[];
+  /** The player's name for the island. */
+  name?: string;
   /** Land animals: [alive, x, z, pen building id, respawn]. */
   animals?: number[][];
 }
@@ -107,6 +109,7 @@ export function serialize(g: Game): SaveData {
     })),
     schools: g.wildlife?.schools.map((s) => Math.round(s.stock * 10) / 10) ?? [],
     animals: g.wildlife?.animals.serialize() ?? [],
+    name: g.islandName,
   };
 }
 
@@ -135,6 +138,7 @@ export function applyWorld(w: World, d: SaveData): void {
 
 /** Step 2 of loading: plants, buildings, islanders, economy and time. */
 export function applyRest(g: Game, d: SaveData): void {
+  if (d.name) g.setIslandName(d.name);
   const u = fromB64(d.plants);
   g.veg.plants.forEach((p, i) => {
     if (i * 4 + 3 >= u.length) return;
