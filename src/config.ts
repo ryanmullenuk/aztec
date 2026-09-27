@@ -8,7 +8,7 @@ export type PresetName = 'high' | 'medium' | 'low';
 
 export const WORLD = {
   /** Grid cells along each side of the square map. */
-  size: 168,
+  size: 200,
   /** Height of one sculpted contour layer. */
   layerHeight: 0.55,
   minLayer: -9,
@@ -18,7 +18,7 @@ export const WORLD = {
   isletCount: [5, 8] as [number, number],
   riverCount: [1, 3] as [number, number],
   /** Radius (cells) of the open starting meadow. */
-  meadowRadius: 14,
+  meadowRadius: 24,
   /** Size of the ocean plane that reaches the horizon. */
   oceanSize: 2400,
   /** Everyone plays the same hand-designed island (this seed sets its trees, rocks and wildlife). */
@@ -186,8 +186,8 @@ export const VEG = {
 };
 
 export const ISLANDER = {
-  startMale: 3,
-  startFemale: 3,
+  startMale: 1,
+  startFemale: 1,
   max: 160,
   walkSpeed: 1.25,
   /** Walking speed multiplier on stone paths. */
@@ -274,12 +274,23 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   jetty: { key: 'jetty', name: 'Jetty', description: 'Wooden pier into the shallows. Builds canoes and fishing boats.', size: [2, 2], cost: { wood: 24, stone: 0, belief: 0 }, buildTime: 30, builders: 2, workers: 3, placeable: true },
 };
 
+/** New settlers arriving by canoe once the village has room and food to spare. */
+export const SETTLERS = {
+  /** Seconds (game time) between possible arrivals. */
+  interval: [150, 260] as [number, number],
+  /** Free beds and food needed before a canoe comes. */
+  minFreeBeds: 2,
+  minFood: 15,
+};
+
 /** Stone paths laid with the Build menu's path tool. */
 export const PATHS = {
   /** Stone per paved cell. */
   stonePerCell: 1,
   /** Brush radius in cells (about two cells wide). */
   radius: 0.85,
+  /** Wood per rope bridge deck cell. */
+  bridgeWood: 2,
 };
 
 /** Adobe homes grow in place: tier 1–4 are house levels 2–5. */
@@ -482,7 +493,7 @@ export const MILESTONES = [
 ];
 
 export const SAVE = {
-  key: 'aztlan-isle-save-v5',
+  key: 'aztlan-isle-save-v6',
   settingsKey: 'aztec-isle-settings-v1',
   tutorialKey: 'aztec-isle-tutorial-v1',
 };

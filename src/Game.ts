@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE, isFarm } from './config';
+import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE, isFarm, SETTLERS } from './config';
 import { World } from './world/World';
 import { generateIsland } from './world/generator';
 import { GameTime } from './world/Time';
@@ -28,6 +28,7 @@ import { Marine } from './entities/Marine';
 import { Powers } from './economy/Powers';
 import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
+import { Bridges } from './buildings/Bridges';
 import { SPECIES, TIME } from './config';
 import type { Islander } from './entities/Islander';
 
@@ -73,6 +74,7 @@ export class Game {
   readonly eco = new Economy();
   terrain: Terrain;
   water: Water;
+  bridges: Bridges;
   veg: Vegetation;
   tufts: GrassTufts;
   clouds: PeakClouds;
@@ -162,6 +164,8 @@ export class Game {
     this.clouds = new PeakClouds(this.world);
     this.scene.add(this.clouds.group);
     this.water = new Water(this.world);
+    this.bridges = new Bridges(this.world);
+    this.scene.add(this.bridges.mesh);
     this.scene.add(this.water.group);
 
     this.buildings = new BuildingSystem(this.world, this.veg, this.eco, this.terrain, this.scene);
@@ -199,7 +203,6 @@ export class Game {
     this.connectSystems();
 
     if (save) this.loadFrom(save);
-    else this.foundTribe();
 
     this.brush = new THREE.Mesh(
       new THREE.RingGeometry(0.92, 1.0, 48).rotateX(-Math.PI / 2),
@@ -216,7 +219,7 @@ export class Game {
     this.input = new Input(canvas, this.rig, {
       onTap: (x, y) => this.onTap(x, y),
       onCancel: () => this.cancel(),
-      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath',
+      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge',
       onToolDragStart: (x, y) => this.toolDrag(x, y, true),
       onToolDrag: (x, y) => this.toolDrag(x, y, false),
       onToolDragEnd: () => this.toolDragEnd(),
@@ -227,6 +230,9 @@ export class Game {
     });
 
     this.ui = new UI(this);
+    // A new game (or a save from before anyone landed) starts with the arrival canoe.
+    if (this.colony.list.length === 0) this.beginSettlement();
+    else if (!this.buildings.hasCampfire) this.awaitingFire = true;
     this.applySettings();
     if (save) this.ui.toast('Welcome back. Your island was restored.');
     window.addEventListener('resize', () => this.resize());
@@ -354,22 +360,57 @@ export class Game {
     this.terrain.updateWear();
   }
 
-  /** Start a new tribe: the tribal fire in the meadow and the first six islanders. */
-  foundTribe(): void {
+  /** Waiting for the player to choose the village site (no campfire yet). */
+  awaitingFire = false;
+  private settlerTimer = 200;
+  /** The camera rides along with the first canoe until it lands (or the player takes over). */
+  private introFollow = false;
+
+  /**
+   * A new game: the first two villagers paddle in from the open sea and land on the main
+   * island's beach; then the player chooses where to light the campfire and found the village.
+   */
+  beginSettlement(): void {
     const m = this.world.meadow;
-    const [cx, cz] = this.world.cellOf(m.x, m.z);
-    // Level a small plaza under the fire.
-    for (let z = cz - 2; z <= cz + 2; z++) for (let x = cx - 2; x <= cx + 2; x++) this.world.layer[this.world.idx(x, z)] = m.layer;
-    this.world.computeSmooth(cx - 3, cz - 3, cx + 3, cz + 3);
-    this.terrain.rebuild(cx - 3, cz - 3, cx + 3, cz + 3);
-    this.buildings.place('campfire', cx - 1, cz - 1, 0, true);
-    const genders: ('m' | 'f')[] = [];
-    for (let i = 0; i < ISLANDER.startMale; i++) genders.push('m');
-    for (let i = 0; i < ISLANDER.startFemale; i++) genders.push('f');
-    genders.forEach((gd, i) => {
-      const a = (i / genders.length) * Math.PI * 2;
-      this.colony.spawn(gd, m.x + Math.cos(a) * 2.6, m.z + Math.sin(a) * 2.6);
+    this.awaitingFire = true;
+    const land = this.boats.sendSettlers(['m', 'f'], m, (people) => {
+      this.ui.toast('Your first villagers have landed. Choose a spot for the campfire to found your village.');
+      // They walk a little way up the beach and wait.
+      for (const p of people) this.colony.walkTo(p, p.x + (m.x - p.x) * 0.15, p.z + (m.z - p.z) * 0.15);
+      this.promptCampfire();
     });
+    if (land) {
+      const start = this.boats.arrivalPos ?? land;
+      this.rig.jumpTo(start.x, start.z, 30, this.rig.goal.yaw);
+      this.introFollow = true;
+    }
+    this.ui.setHint('A canoe carrying your first two villagers approaches the island…');
+  }
+
+  /** Placement mode for the founding campfire. */
+  promptCampfire(): void {
+    if (this.buildings.hasCampfire) return;
+    this.awaitingFire = true;
+    this.startPlacing('campfire');
+    this.ui.setHint('Choose where to light the <b>campfire</b>: this is where your village begins. Pick open, flat land with room to grow.');
+  }
+
+  /** Canoes of new settlers come when there are free beds and spare food. */
+  private updateSettlers(dt: number): void {
+    if (!this.buildings.hasCampfire) return;
+    this.settlerTimer -= dt;
+    if (this.settlerTimer > 0) return;
+    this.settlerTimer = SETTLERS.interval[0] + this.rng.next() * (SETTLERS.interval[1] - SETTLERS.interval[0]);
+    const pop = this.colony.list.length + this.boats.arriving;
+    if (pop >= ISLANDER.max) return;
+    if (this.buildings.freeBeds - this.boats.arriving < SETTLERS.minFreeBeds || this.eco.food < SETTLERS.minFood) return;
+    const fire = this.buildings.of('campfire')[0];
+    const genders: ('m' | 'f')[] = this.rng.next() < 0.6 ? ['m', 'f'] : this.rng.next() < 0.5 ? ['m', 'm'] : ['f', 'f'];
+    const land = this.boats.sendSettlers(genders, fire, (people) => {
+      for (const p of people) this.colony.walkTo(p, fire.x + (this.rng.next() - 0.5) * 4, fire.z + (this.rng.next() - 0.5) * 4);
+      this.ui.toast(`${people.map((p) => p.name).join(' and ')} have arrived by canoe to join the village.`);
+    });
+    if (land) this.ui.toast('A canoe of new settlers has been spotted out at sea.');
   }
 
   private loadSettings(preset: PresetName): Settings {
@@ -480,7 +521,8 @@ export class Game {
       rain: 'Tap anywhere to summon rain',
       calm: 'Tap anywhere to calm a storm',
       path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
-      unpath: 'Hold and drag over a path to <b>remove</b> it · Esc to finish',
+      unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
+      bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
     };
     this.ui.setHint(hints[id] ?? null);
   }
@@ -501,6 +543,8 @@ export class Game {
   }
 
   private cancel(): void {
+    // The founding fire can't be cancelled; there is nowhere else to go.
+    if (this.placing === 'campfire' && this.awaitingFire) return;
     if (this.placing) {
       this.placing = null;
       this.buildings.showGhost(null);
@@ -527,6 +571,7 @@ export class Game {
     const [cx, cz, rot] = this.footprintAt(p, this.placing);
     const res = this.buildings.showGhost(this.placing, cx, cz, rot);
     if (!res.ok && res.reason) this.ui.setHint(`<b>${res.reason}</b> · R rotates · Esc cancels`);
+    else if (this.placing === 'campfire') this.ui.setHint('Tap to light the <b>campfire</b> here: your village will grow around it');
     else this.ui.setHint(`Tap to place the <b>${BUILDINGS[this.placing].name}</b> · <b>R</b> rotates · right-click or Esc cancels`);
   }
 
@@ -538,10 +583,10 @@ export class Game {
     this.cursorWorld.copy(p);
     if (this.placing) this.updateGhost(p);
     const sculpt = this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten';
-    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath';
+    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge';
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -560,6 +605,20 @@ export class Game {
       if (!ok.ok) {
         this.ui.toast(ok.reason, 'warn');
         this.audio?.sfx('deny');
+        return;
+      }
+      if (this.placing === 'campfire') {
+        // Found the village: the fire is lit at once and everyone gathers round.
+        const fire = this.buildings.place('campfire', cx, cz, rot, true);
+        this.buildings.completeNow(fire);
+        this.awaitingFire = false;
+        this.placing = null;
+        this.buildings.showGhost(null);
+        this.setTool('select');
+        for (const isl of this.colony.list) this.colony.walkTo(isl, fire.x + (this.rng.next() - 0.5) * 3, fire.z + (this.rng.next() - 0.5) * 3);
+        this.audio?.sfx('complete', fire.x, fire.z);
+        this.ui.toast('The campfire is lit and your village is founded! Now build homes, farms and stores around it.');
+        this.ui.setHint(null);
         return;
       }
       const b = this.buildings.place(this.placing, cx, cz, rot);
@@ -592,6 +651,9 @@ export class Game {
       case 'path':
       case 'unpath':
         if (p) this.paintPath(p, this.tool === 'path');
+        return;
+      case 'bridge':
+        if (p) this.paintBridge(p);
         return;
       default:
         if (p) this.powerHandler?.(this.tool, p);
@@ -692,8 +754,10 @@ export class Game {
           this.eco.spend(cost);
           w.path[i] = 1;
           changed++;
-        } else if (w.path[i]) {
+        } else if (w.path[i] || w.bridge[i]) {
+          if (w.bridge[i]) this.bridgeDirty = true;
           w.path[i] = 0;
+          w.bridge[i] = 0;
           changed++;
         }
       }
@@ -705,6 +769,39 @@ export class Game {
     }
   }
   private pathDirty = false;
+  private bridgeDirty = false;
+
+  /** Lay rope bridge decks over shallow water under the brush, growing out from the shore. */
+  private paintBridge(p: THREE.Vector3): void {
+    const w = this.world;
+    const ccx = Math.floor(p.x + w.half), ccz = Math.floor(p.z + w.half);
+    const cost = { wood: PATHS.bridgeWood, stone: 0, belief: 0 };
+    let n = 0, short = false;
+    // Nearest cells first so a drag grows the bridge continuously.
+    const cells: [number, number][] = [];
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = ccx + dx, cz = ccz + dz;
+      if (!w.inBounds(cx, cz)) continue;
+      const d = Math.hypot(w.centerX(cx) - p.x, w.centerZ(cz) - p.z);
+      if (d <= 0.75) cells.push([w.idx(cx, cz), d]);
+    }
+    cells.sort((a, b) => a[1] - b[1]);
+    for (const [i] of cells) {
+      if (!this.bridges.canBridge(i)) continue;
+      if (!this.eco.canAfford(cost)) {
+        short = true;
+        break;
+      }
+      this.eco.spend(cost);
+      w.bridge[i] = 1;
+      n++;
+    }
+    if (short) this.ui.setHint('<b>Not enough wood</b> for more bridge');
+    if (n) {
+      this.bridgeDirty = true;
+      this.audio?.sfx('build', p.x, p.z);
+    }
+  }
   private pathLast: { x: number; z: number } | null = null;
 
   private markAt(p: THREE.Vector3, tap: boolean): void {
@@ -723,14 +820,15 @@ export class Game {
       this.markAt(p, false);
       return;
     }
-    if (this.tool === 'path' || this.tool === 'unpath') {
+    if (this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge') {
       // Fill in between pointer samples so a quick drag still lays a continuous path.
       const last = start ? null : this.pathLast;
       const n = last ? Math.max(1, Math.ceil(Math.hypot(p.x - last.x, p.z - last.z) / 0.4)) : 1;
       for (let k = 1; k <= n; k++) {
         const t = k / n;
         _pathP.set(last ? last.x + (p.x - last.x) * t : p.x, p.y, last ? last.z + (p.z - last.z) * t : p.z);
-        this.paintPath(_pathP, this.tool === 'path');
+        if (this.tool === 'bridge') this.paintBridge(_pathP);
+        else this.paintPath(_pathP, this.tool === 'path');
       }
       this.pathLast = { x: p.x, z: p.z };
       return;
@@ -936,6 +1034,15 @@ export class Game {
     this.veg.update(dt, this.rig.camera.position, this.rig.target, RENDER.presets[this.preset].lodDist, growth, t);
     this.colony.update(dt);
     this.buildings.update(dt, t, ls.night, this.time.seasonIndex, this.raining, this.rig.target);
+    this.updateSettlers(dt);
+    if (this.introFollow) {
+      const a = this.boats.arrivalPos;
+      if (!a || this.input.navigating) this.introFollow = false;
+      else {
+        this.rig.goal.x += (a.x - this.rig.goal.x) * Math.min(1, realDt * 2);
+        this.rig.goal.z += (a.z - this.rig.goal.z) * Math.min(1, realDt * 2);
+      }
+    }
     this.eco.update(dt);
     this.sculptor.update(realDt);
     this.tufts.update(realDt);
@@ -943,6 +1050,10 @@ export class Game {
     for (const s of this.systems) s(realDt, dt);
     this.rig3d.update(this.colony.list, this.selectedIslander, realDt);
 
+    if (this.bridgeDirty) {
+      this.bridgeDirty = false;
+      this.bridges.rebuild();
+    }
     if (this.pathDirty) {
       this.pathDirty = false;
       this.terrain.updateWear();
