@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE } from './config';
+import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE } from './config';
 import { World } from './world/World';
 import { generateIsland } from './world/generator';
 import { GameTime } from './world/Time';
@@ -30,6 +30,8 @@ import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { SPECIES, TIME } from './config';
 import type { Islander } from './entities/Islander';
+
+const _pathP = new THREE.Vector3();
 
 export interface GameOptions {
   seed: number;
@@ -214,7 +216,7 @@ export class Game {
     this.input = new Input(canvas, this.rig, {
       onTap: (x, y) => this.onTap(x, y),
       onCancel: () => this.cancel(),
-      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest',
+      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath',
       onToolDragStart: (x, y) => this.toolDrag(x, y, true),
       onToolDrag: (x, y) => this.toolDrag(x, y, false),
       onToolDragEnd: () => this.toolDragEnd(),
@@ -477,6 +479,8 @@ export class Game {
       bless: 'Tap near your farms to bless their crops',
       rain: 'Tap anywhere to summon rain',
       calm: 'Tap anywhere to calm a storm',
+      path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
+      unpath: 'Hold and drag over a path to <b>remove</b> it · Esc to finish',
     };
     this.ui.setHint(hints[id] ?? null);
   }
@@ -534,10 +538,10 @@ export class Game {
     this.cursorWorld.copy(p);
     if (this.placing) this.updateGhost(p);
     const sculpt = this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten';
-    const area = this.tool === 'harvest' || this.tool === 'bless';
+    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath';
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -584,6 +588,10 @@ export class Game {
       case 'raise':
       case 'lower':
       case 'flatten':
+        return;
+      case 'path':
+      case 'unpath':
+        if (p) this.paintPath(p, this.tool === 'path');
         return;
       default:
         if (p) this.powerHandler?.(this.tool, p);
@@ -663,6 +671,42 @@ export class Game {
     });
   }
 
+  /** Lay (or lift) stone paths on the cells under the brush. */
+  private paintPath(p: THREE.Vector3, add: boolean): void {
+    const w = this.world;
+    const ccx = Math.floor(p.x + w.half), ccz = Math.floor(p.z + w.half);
+    let changed = 0, short = false;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ccx + dx, cz = ccz + dz;
+        if (!w.inBounds(cx, cz)) continue;
+        if (Math.hypot(w.centerX(cx) - p.x, w.centerZ(cz) - p.z) > PATHS.radius) continue;
+        const i = w.idx(cx, cz);
+        if (add) {
+          if (w.path[i] || !w.isLandCell(i) || w.occ[i] !== 0) continue;
+          const cost = { wood: 0, stone: PATHS.stonePerCell, belief: 0 };
+          if (!this.eco.canAfford(cost)) {
+            short = true;
+            continue;
+          }
+          this.eco.spend(cost);
+          w.path[i] = 1;
+          changed++;
+        } else if (w.path[i]) {
+          w.path[i] = 0;
+          changed++;
+        }
+      }
+    }
+    if (short) this.ui.setHint('<b>Not enough stone</b> for more path');
+    if (changed) {
+      this.pathDirty = true;
+      this.audio?.sfx(add ? 'place' : 'click', p.x, p.z);
+    }
+  }
+  private pathDirty = false;
+  private pathLast: { x: number; z: number } | null = null;
+
   private markAt(p: THREE.Vector3, tap: boolean): void {
     let n = this.veg.markArea(p.x, p.z, 2, true);
     if (tap && n === 0) n = this.veg.markArea(p.x, p.z, 1.5, false);
@@ -677,6 +721,18 @@ export class Game {
     if (this.tool === 'harvest') {
       this.harvestDrag = true;
       this.markAt(p, false);
+      return;
+    }
+    if (this.tool === 'path' || this.tool === 'unpath') {
+      // Fill in between pointer samples so a quick drag still lays a continuous path.
+      const last = start ? null : this.pathLast;
+      const n = last ? Math.max(1, Math.ceil(Math.hypot(p.x - last.x, p.z - last.z) / 0.4)) : 1;
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        _pathP.set(last ? last.x + (p.x - last.x) * t : p.x, p.y, last ? last.z + (p.z - last.z) * t : p.z);
+        this.paintPath(_pathP, this.tool === 'path');
+      }
+      this.pathLast = { x: p.x, z: p.z };
       return;
     }
     const mode = this.tool as SculptMode;
@@ -887,6 +943,11 @@ export class Game {
     for (const s of this.systems) s(realDt, dt);
     this.rig3d.update(this.colony.list, this.selectedIslander, realDt);
 
+    if (this.pathDirty) {
+      this.pathDirty = false;
+      this.terrain.updateWear();
+      this.tufts.refresh();
+    }
     this.wearTimer -= dt;
     if (this.wearTimer <= 0 && this.colony.wearDirty) {
       this.wearTimer = 2;

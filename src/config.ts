@@ -190,6 +190,8 @@ export const ISLANDER = {
   startFemale: 3,
   max: 160,
   walkSpeed: 1.25,
+  /** Walking speed multiplier on stone paths. */
+  pathSpeed: 1.3,
   runSpeed: 2.3,
   childScale: 0.62,
   childGrowDays: 4,
@@ -267,6 +269,14 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   grainstore: { key: 'grainstore', name: 'Grain Store', description: 'Stores grain, fruit, meat and fish. Baskets fill visibly.', size: [2, 2], cost: { wood: 18, stone: 4, belief: 0 }, buildTime: 24, builders: 2, workers: 0, foodCap: 140, placeable: true },
   warroom: { key: 'warroom', name: 'War Room', description: 'Trains Jaguar and Eagle warriors who patrol the island.', size: [3, 3], cost: { wood: 30, stone: 30, belief: 15 }, buildTime: 55, builders: 3, workers: 0, placeable: true },
   jetty: { key: 'jetty', name: 'Jetty', description: 'Wooden pier into the shallows. Builds canoes and fishing boats.', size: [2, 2], cost: { wood: 24, stone: 0, belief: 0 }, buildTime: 30, builders: 2, workers: 3, placeable: true },
+};
+
+/** Stone paths laid with the Build menu's path tool. */
+export const PATHS = {
+  /** Stone per paved cell. */
+  stonePerCell: 1,
+  /** Brush radius in cells (about two cells wide). */
+  radius: 0.85,
 };
 
 /** Adobe homes grow in place: tier 1–4 are house levels 2–5. */
