@@ -1270,6 +1270,12 @@ export class Colony {
 
   onWarrior: (isl: Islander) => void = () => {};
 
+  /** Send an islander walking to a point (new settlers heading to the village). */
+  walkTo(isl: Islander, x: number, z: number): void {
+    this.releaseTask(isl);
+    this.setTask(isl, 'goto', -1, x, z);
+  }
+
   /** Called by the boat system when a fishing trip ends at the jetty. */
   disembark(isl: Islander, fish: number, x: number, z: number): void {
     isl.hidden = false;

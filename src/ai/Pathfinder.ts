@@ -87,15 +87,21 @@ export class Pathfinder {
 
   walkable(i: number, allowBuilding = -1): boolean {
     const w = this.world;
-    if (w.layer[i] < 1) return false;
+    if (w.layer[i] < 1 && !w.bridge[i]) return false;
     const occ = w.occ[i];
     if (occ !== 0 && occ - 1 !== allowBuilding && !w.passable(occ - 1)) return false;
     return true;
   }
 
+  /** Layer for walking purposes (bridge decks count as shore level). */
+  private walkLayer(i: number): number {
+    const w = this.world;
+    return w.bridge[i] ? Math.max(1, w.layer[i]) : w.layer[i];
+  }
+
   private stepCost(from: number, to: number, base: number): number {
     const w = this.world;
-    const dl = Math.abs(w.layer[to] - w.layer[from]);
+    const dl = Math.abs(this.walkLayer(to) - this.walkLayer(from));
     if (dl > 1) return -1;
     let c = base;
     if (dl === 1) c += 0.9;
@@ -211,7 +217,7 @@ export class Pathfinder {
       const i = cz * N + cx;
       if (i === prev) continue;
       if (!this.walkable(i, allow)) return false;
-      if (Math.abs(w.layer[i] - w.layer[prev]) > 1) return false;
+      if (Math.abs(this.walkLayer(i) - this.walkLayer(prev)) > 1) return false;
       // Keep jungle detours where paths exist: don't cut across forest if the path is worn.
       if (w.forest[i] > 0.6 && w.wear[prev] > 0.4) return false;
       prev = i;
