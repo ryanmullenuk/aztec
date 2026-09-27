@@ -6,6 +6,7 @@ import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
 import { Islander } from './Islander';
 import * as models from './animalModels';
+import { FOLDED, GULL_WING, TOUCAN_WING, WingSpec, flapPose, mixPose, pose, wingMatrices, wingParts } from './birdWings';
 
 interface Gull {
   x: number;
@@ -29,6 +30,9 @@ interface Gull {
   bank: number;
   /** Occasionally wander off from the flock for a while. */
   stray: number;
+  /** Wing fold 0 (spread) … 1 (folded on the ground) and smoothed flap strength. */
+  fold: number;
+  amp: number;
 }
 
 interface Flock {
@@ -55,6 +59,7 @@ interface Toucan {
   t: number;
   dur: number;
   flap: number;
+  fold: number;
 }
 
 const _m = new THREE.Matrix4();
@@ -63,6 +68,9 @@ const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
+const _fp = pose();
+const _wp = pose();
+const _wm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()];
 
 function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
   _e.set(rx, ry, rz, 'YXZ');
@@ -107,10 +115,11 @@ export class Birds {
     this.spawn();
     const G = this.gulls.length, T = this.toucans.length;
     mk('gull', models.gullBody(), G);
-    mk('gullWing', models.wingGeometry(0.2, 0.07, 0xe8eaec, 0x1c1c1e), G * 2);
+    // Jointed wings: panels 0–2 right (arm, forearm, hand), 3–5 left.
+    wingParts(GULL_WING).forEach((g, k) => mk(`gullW${k}`, g, G));
     mk('gullLegs', models.birdLegs(0xf2a030), G);
     mk('toucan', models.toucanBody(), T);
-    mk('toucanWing', models.wingGeometry(0.12, 0.06, 0x121214, 0x0a0a0c), T * 2);
+    wingParts(TOUCAN_WING).forEach((g, k) => mk(`toucanW${k}`, g, T));
   }
 
   private spawn(): void {
@@ -135,14 +144,14 @@ export class Birds {
         this.gulls.push({
           x: c.x + this.rng.range(-4, 4), y: 6 + this.rng.range(-1, 1), z: c.z + this.rng.range(-4, 4), vx: this.rng.range(-1, 1), vy: 0, vz: this.rng.range(-1, 1),
           flock: f, fear: 0, react: 0.08 + this.rng.next() * 0.35, speedMul: 0.85 + this.rng.next() * 0.3, flap: this.rng.next() * 6, state: 'fly', timer: 10 + this.rng.next() * 30,
-          lx: 0, ly: 0, lz: 0, heading: 0, bank: 0, stray: 0,
+          lx: 0, ly: 0, lz: 0, heading: 0, bank: 0, stray: 0, fold: 0, amp: 0.3,
         });
       }
     }
     const nT = this.rng.int(FAUNA.toucans[0], FAUNA.toucans[1]);
     for (let k = 0; k < nT && this.perches.length; k++) {
       const p = this.perches[Math.floor(this.rng.next() * this.perches.length)];
-      this.toucans.push({ x: p.x, y: p.y, z: p.z, heading: this.rng.range(0, 6.28), state: 'perch', timer: 3 + this.rng.next() * 10, look: 0, lookT: 0, from: p.clone(), to: p.clone(), ctrl: p.clone(), t: 0, dur: 1, flap: 0 });
+      this.toucans.push({ x: p.x, y: p.y, z: p.z, heading: this.rng.range(0, 6.28), state: 'perch', timer: 3 + this.rng.next() * 10, look: 0, lookT: 0, from: p.clone(), to: p.clone(), ctrl: p.clone(), t: 0, dur: 1, flap: 0, fold: 1 });
     }
   }
 
@@ -163,7 +172,7 @@ export class Birds {
       this.updateGulls(dt, ray, people);
       this.updateToucans(dt, ray, people);
     }
-    this.draw();
+    this.draw(dt);
   }
 
   private updateGulls(dt: number, ray: THREE.Ray | null, people: SpatialHash<Islander>): void {
@@ -363,21 +372,34 @@ export class Birds {
     }
   }
 
-  private draw(): void {
+  /** Write both wings' six panel matrices for instance i. */
+  private wings(prefix: string, i: number, body: THREE.Matrix4, root: [number, number, number], spec: WingSpec, p: typeof _wp): void {
     const ms = this.meshes;
+    for (const side of [1, -1] as const) {
+      wingMatrices(body, side, root, spec, p, _wm);
+      for (let k = 0; k < 3; k++) ms[prefix + (side === 1 ? k : k + 3)].setMatrixAt(i, _wm[k]);
+    }
+  }
+
+  private draw(dt: number): void {
+    const ms = this.meshes;
+    const k = Math.min(1, dt * 6);
     let gi = 0;
     for (const g of this.gulls) {
       const onGround = g.state === 'ground';
       compose(_m, g.x, g.y + (onGround ? 0.06 : 0), g.z, onGround ? 0 : -g.vy * 0.05, g.heading, onGround ? 0 : g.bank, 1.25);
       ms.gull.setMatrixAt(gi, _m);
-      // Wings: slow glide flaps, fast when frightened, folded on the ground.
-      const flapRate = g.state === 'takeoff' || g.fear > 0.4 ? 20 : g.state === 'land' ? 3 : 5;
-      g.flap += 0.016 * flapRate;
-      const f = onGround ? 1.3 : Math.sin(g.flap) * (g.fear > 0.4 || g.state === 'takeoff' ? 0.9 : 0.35) + 0.12;
-      _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), 0.035, 0.02, 0, 0, 0, onGround ? -1.3 : f));
-      ms.gullWing.setMatrixAt(gi * 2, _m2);
-      _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), -0.035, 0.02, 0, 0, Math.PI, onGround ? -1.3 : f));
-      ms.gullWing.setMatrixAt(gi * 2 + 1, _m2);
+      // Wings: long glides broken by bursts of flapping; hard fast strokes when frightened or
+      // taking off; a slow flare when landing; folded on the ground.
+      const panic = g.state === 'takeoff' || g.fear > 0.4;
+      const burst = Math.sin(this.time * 0.45 + g.speedMul * 23) > 0.35 || g.vy > 0.6;
+      const ampT = panic ? 0.95 : g.state === 'land' ? 0.3 : burst ? 0.5 : 0.06;
+      g.amp += (ampT - g.amp) * k;
+      g.flap += dt * (panic ? 17 : g.state === 'land' ? 5 : 7);
+      g.fold += ((onGround ? 1 : 0) - g.fold) * Math.min(1, dt * (onGround ? 5 : 12));
+      flapPose(g.flap, g.amp, _fp, panic ? 0.05 : 0.2, 0.28);
+      mixPose(_fp, FOLDED, g.fold, _wp);
+      this.wings('gullW', gi, _m, [0.026, 0.028, 0.03], GULL_WING, _wp);
       ms.gullLegs.setMatrixAt(gi, onGround || g.state === 'land' ? _m : new THREE.Matrix4().makeScale(0, 0, 0));
       gi++;
     }
@@ -386,11 +408,10 @@ export class Birds {
       const flying = b.state === 'fly';
       compose(_m, b.x, b.y + 0.05, b.z, flying ? -0.1 : 0, b.heading + (flying ? 0 : b.look * 0.6), 0, 1.3);
       ms.toucan.setMatrixAt(ti, _m);
-      const f = flying ? Math.sin(b.flap * 18) * 0.9 : b.state === 'hop' ? 0.5 : -1.2;
-      _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), 0.035, 0.01, 0, 0, 0, f));
-      ms.toucanWing.setMatrixAt(ti * 2, _m2);
-      _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), -0.035, 0.01, 0, 0, Math.PI, f));
-      ms.toucanWing.setMatrixAt(ti * 2 + 1, _m2);
+      b.fold += ((flying ? 0 : b.state === 'hop' ? 0.45 : 1) - b.fold) * Math.min(1, dt * 10);
+      flapPose(b.flap * 17, 0.85, _fp, 0, 0.12);
+      mixPose(_fp, FOLDED, b.fold, _wp);
+      this.wings('toucanW', ti, _m, [0.04, 0.018, 0.012], TOUCAN_WING, _wp);
       ti++;
     }
     for (const m of Object.values(ms)) m.instanceMatrix.needsUpdate = true;

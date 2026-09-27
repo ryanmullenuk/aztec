@@ -7,6 +7,11 @@ import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
 import { Islander } from './Islander';
 import * as models from './animalModels';
+import { CHICKEN_WING, FOLDED, flapPose, mixPose, pose, wingMatrices, wingParts } from './birdWings';
+
+const _fp = pose();
+const _wp = pose();
+const _wm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()];
 
 type State = 'idle' | 'walk' | 'feed' | 'rest' | 'alert' | 'avoid' | 'flee' | 'held' | 'penned';
 type Feed = 'peck' | 'scratch' | 'graze' | 'sniff' | 'drink';
@@ -39,6 +44,8 @@ export interface Animal {
   lookYaw: number;
   phase: number;
   flap: number;
+  /** Wings 0 folded … 1 spread (smoothed). */
+  wingOpen: number;
   chasedBy: Islander | null;
   heldBy: Islander | null;
   heldMode: 'carry' | 'lead' | null;
@@ -147,7 +154,8 @@ export class Animals {
     add('chicken_rooster', models.chickenBody('rooster'), cap);
     add('head_hen', models.chickenHead(false), cap);
     add('head_rooster', models.chickenHead(true), cap);
-    add('wing_chicken', models.chickenWing(), cap * 2);
+    // Jointed wings (arm, forearm, hand; right then left), tinted with the coat colour.
+    wingParts(CHICKEN_WING, 2).forEach((g, k) => add(`wing_chicken${k}`, g, cap));
     add('leg_chicken', models.legGeometry(0.055, 0.008, 0xe8b030, 0xe8b030), cap * 2);
     add('pig_plain', models.pigBody(false), cap);
     add('pig_spotted', models.pigBody(true), cap);
@@ -255,7 +263,7 @@ export class Animals {
       scale: this.rng.range(v.scale[0], v.scale[1]) * (juvenile ? 0.55 : 1),
       x, z, y: this.world.groundY(x, z), heading: this.rng.range(0, 6.28), speed: 0,
       state: 'idle', feed: 'graze', timer: this.rng.range(0.5, 6), tx: x, tz: z, group, pen: -1, alive: true, respawn: 0,
-      stamina: def.stamina, caught: 0, lookYaw: 0, phase: this.rng.range(0, 10), flap: 0,
+      stamina: def.stamina, caught: 0, lookYaw: 0, phase: this.rng.range(0, 10), flap: 0, wingOpen: 0,
       chasedBy: null, heldBy: null, heldMode: null, tick: this.rng.next() * 0.3, tempo: this.rng.range(0.8, 1.25),
     };
   }
@@ -766,11 +774,16 @@ export class Animals {
         this.put(`leg_${a.sp}`, _m2, a.color);
       });
       if (rig.wings) {
-        const f = a.flap > 0 || a.state === 'flee' ? Math.sin(a.phase * 40) * 0.9 : 0.05;
-        _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), 0.06, 0.1, 0, 0, 0, -0.2 - f));
-        this.put('wing_chicken', _m2, a.color);
-        _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), -0.06, 0.1, 0, 0, Math.PI, -0.2 - f));
-        this.put('wing_chicken', _m2, a.color);
+        // Folded against the sides; spread and beating when running off or flapping up.
+        const open = a.flap > 0 || a.state === 'flee' ? 1 : 0;
+        a.wingOpen += (open - a.wingOpen) * 0.18;
+        flapPose(a.phase * 38, 0.85, _fp, 0, 0.15);
+        _fp.f1 += 0.25;
+        mixPose(FOLDED, _fp, a.wingOpen, _wp);
+        for (const side of [1, -1] as const) {
+          wingMatrices(_m, side, [0.066, 0.118, 0.035], CHICKEN_WING, _wp, _wm);
+          for (let k = 0; k < 3; k++) this.put(`wing_chicken${side === 1 ? k : k + 3}`, _wm[k], a.color);
+        }
       }
       if (a.heldMode === 'lead' && a.heldBy && lines < 64) {
         const l = a.heldBy;

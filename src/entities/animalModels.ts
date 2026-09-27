@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GeoBuilder, M, P, facet } from '../render/GeoBuilder';
+import { ColorFn, GeoBuilder, M, P, facet } from '../render/GeoBuilder';
 
 /**
  * Faceted low-poly animal parts, in world units (islanders stand ~0.62 tall).
@@ -40,12 +40,6 @@ export function chickenHead(rooster: boolean): THREE.BufferGeometry {
   b.add(P.box(0.012, 0.025 * s * s, 0.04 * s), C(0xd62f22), M.t(0, 0.055 * s, 0.008));
   b.add(P.sphere(0.009 * s, 0), C(0xd62f22), M.t(0, -0.005, 0.03));
   for (const x of [-1, 1]) b.add(P.sphere(0.006, 0), C(0x151010), M.t(x * 0.027, 0.028, 0.02));
-  return facet(b.build());
-}
-
-export function chickenWing(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(P.box(0.07, 0.012, 0.06), coat(0.9), M.t(0.035, 0, 0));
   return facet(b.build());
 }
 
@@ -196,20 +190,19 @@ export function toucanBody(): THREE.BufferGeometry {
 
 export function gullBody(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.sphere(0.06, 1), C(0xfafaf6), M.t(0, 0, 0, 0, 0, 0, 0.75, 0.75, 1.5));
-  b.add(P.sphere(0.04, 1), C(0xfafaf6), M.t(0, 0.035, 0.085));
-  b.add(P.cone(0.012, 0.05, 4), C(0xf2b030), M.t(0, 0.03, 0.135, Math.PI / 2, 0, 0));
-  b.add(P.box(0.06, 0.01, 0.07), C(0x9aa0a8), M.t(0, 0.02, -0.07));
-  b.add(P.box(0.03, 0.008, 0.03), C(0x1a1a1a), M.t(0, 0.01, -0.12));
-  for (const x of [-1, 1]) b.add(P.sphere(0.006, 0), C(0x151010), M.t(x * 0.022, 0.045, 0.1));
-  return facet(b.build());
-}
-
-/** Wing along +x from the shoulder; `tip` colours the outer part (black gull tips). */
-export function wingGeometry(len: number, w: number, base: number, tip: number): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(P.box(len * 0.6, 0.01, w), C(base), M.t(len * 0.3, 0, 0));
-  b.add(P.box(len * 0.42, 0.008, w * 0.75), C(tip), M.t(len * 0.78, 0, -w * 0.08, 0, -0.15, 0));
+  // Streamlined body: full chest tapering to the tail, pale grey back, white below.
+  const bodyCol: ColorFn = (p, n) => new THREE.Color(n.y > 0.55 && p.z < 0.05 ? 0xb4bcc4 : 0xfafaf6);
+  b.add(P.sphere(0.06, 1), { color: bodyCol }, M.t(0, 0, 0.01, 0, 0, 0, 0.72, 0.7, 1.35));
+  b.add(P.cone(0.042, 0.1, 6), { color: bodyCol }, M.t(0, 0.004, -0.085, -Math.PI / 2, 0, 0, 1, 1, 0.75));
+  // Head on a short neck.
+  b.add(P.sphere(0.036, 1), C(0xfafaf6), M.t(0, 0.035, 0.085, 0, 0, 0, 0.92, 0.95, 1.1));
+  // Yellow hooked bill with the red spot.
+  b.add(P.cone(0.011, 0.055, 4), C(0xf2c030), M.t(0, 0.03, 0.14, Math.PI / 2, 0, 0, 1, 1, 0.8));
+  b.add(P.sphere(0.005, 0), C(0xd8342a), M.t(0, 0.022, 0.138));
+  // Wedge tail, white with a black band at the tip.
+  b.add(P.box(0.055, 0.008, 0.05), C(0xf4f5f2), M.t(0, 0.008, -0.14, 0.08, 0, 0));
+  b.add(P.box(0.056, 0.009, 0.014), C(0x1c1c1e), M.t(0, 0.006, -0.168, 0.08, 0, 0));
+  for (const x of [-1, 1]) b.add(P.sphere(0.0055, 0), C(0x151010), M.t(x * 0.024, 0.045, 0.1));
   return facet(b.build());
 }
 
