@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { POWERS } from '../config';
+import { POWERS, isFarm } from '../config';
 import { BuildingSystem } from '../buildings/Buildings';
 import { FX } from '../render/materials';
 import { Lighting } from '../render/Lighting';
@@ -87,7 +87,7 @@ export class Powers {
   // ---------------- Powers ----------------
 
   bless(x: number, z: number): void {
-    const farms = this.bld.of('farm').filter((f) => Math.hypot(f.x - x, f.z - z) < POWERS.bless.radius + 2);
+    const farms = this.bld.list.filter((f) => f.complete && isFarm(f.key)).filter((f) => Math.hypot(f.x - x, f.z - z) < POWERS.bless.radius + 2);
     if (!farms.length) return this.notify('No farms here to bless.', 'warn');
     if (!this.eco.spend({ wood: 0, stone: 0, belief: POWERS.bless.cost })) return this.notify('Not enough Belief.', 'warn');
     for (const f of farms) {
@@ -186,7 +186,7 @@ export class Powers {
       (this.rain.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     }
     // Blessing sparkles; blessed farms keep twinkling.
-    for (const f of this.bld.of('farm')) {
+    for (const f of this.bld.list.filter((b) => b.complete && isFarm(b.key))) {
       if (f.blessTimer > 0 && this.rnd() < realDt * 6) this.spark(f.x + (this.rnd() - 0.5) * f.w, f.y + 0.3, f.z + (this.rnd() - 0.5) * f.d);
     }
     for (let i = 0; i < this.sparkLife.length; i++) {
