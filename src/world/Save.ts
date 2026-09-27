@@ -15,7 +15,7 @@ export interface SaveData {
   milestones: string[];
   stats: { sculpted: number; marked: number; boats: number };
   weather: { state: string };
-  world: { layer: string; sandy: string; forest: string; rocky: string; wear: string; path?: string };
+  world: { layer: string; sandy: string; forest: string; rocky: string; wear: string; path?: string; bridge?: string };
   plants: string;
   buildings: {
     id: number; key: BuildingKey; cx: number; cz: number; rot: number; complete: boolean; progress: number; tier: number;
@@ -94,7 +94,7 @@ export function serialize(g: Game): SaveData {
     milestones: [...g.milestones],
     stats: { ...g.stats },
     weather: { state: g.powers?.state ?? 'clear' },
-    world: { layer: toB64(layerU), sandy: q8(w.sandy), forest: q8(w.forest), rocky: q8(w.rocky), wear: q8(w.wear), path: toB64(w.path) },
+    world: { layer: toB64(layerU), sandy: q8(w.sandy), forest: q8(w.forest), rocky: q8(w.rocky), wear: q8(w.wear), path: toB64(w.path), bridge: toB64(w.bridge) },
     plants: toB64(plants),
     buildings: g.buildings.list.map((b) => ({
       id: b.id, key: b.key, cx: b.cx, cz: b.cz, rot: b.rot, complete: b.complete, progress: b.progress, tier: b.tier,
@@ -119,6 +119,10 @@ export function applyWorld(w: World, d: SaveData): void {
   dq8(d.world.forest, w.forest);
   dq8(d.world.rocky, w.rocky);
   dq8(d.world.wear, w.wear);
+  if (d.world.bridge) {
+    const p = fromB64(d.world.bridge);
+    for (let i = 0; i < w.bridge.length && i < p.length; i++) w.bridge[i] = p[i];
+  }
   if (d.world.path) {
     const p = fromB64(d.world.path);
     for (let i = 0; i < w.path.length && i < p.length; i++) w.path[i] = p[i];

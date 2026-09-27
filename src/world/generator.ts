@@ -10,7 +10,13 @@ function smax(a: number, b: number, k: number): number {
 }
 
 /**
- * Procedural island from a seed, laid out like a tropical atoll concept:
+ * Two islands from a hand-designed layout:
+ *  - a large main island with a wide, open grassland plain in the middle for the village
+ *    (room for fifty islanders, their homes and several farms), mountains, a river and a
+ *    waterfall to the north-west, beaches and a belt of jungle around the edges,
+ *  - a wild island across a shallow strait (bridgeable) with dense jungle, hills, fruit and
+ *    most of the wild animals,
+ * Earlier notes for the shared terrain:
  *  - a multi-lobed main island with bays and peninsulas and a ragged coastline,
  *  - a wide turquoise reef shelf all around, dropping off into deep navy sea,
  *  - a rocky mountain massif on one side (rivers and the waterfall start there),
@@ -25,77 +31,95 @@ export function generateIsland(world: World, seed: number): void {
   const sB = new Simplex2(rng);
   const sC = new Simplex2(rng);
 
-  // ---- The island's hand-designed layout (the same for everyone), in map units -1..1. ----
-  const rot = 0;
-  const cr = Math.cos(rot), sr = Math.sin(rot);
-  // Main body plus peninsulas: north-west, south-west, south, east and north-east.
-  const S = 1.15; // overall island scale
-  const lobes: { x: number; z: number; rx: number; rz: number; a: number }[] = [
-    { x: -0.05, z: 0.02, rx: 0.45, rz: 0.35, a: 0.2 },
-    { x: -0.37, z: -0.27, rx: 0.2, rz: 0.13, a: -0.7 },
-    { x: -0.4, z: 0.28, rx: 0.21, rz: 0.13, a: 0.6 },
-    { x: 0.0, z: 0.42, rx: 0.2, rz: 0.12, a: 1.45 },
-    { x: 0.38, z: 0.08, rx: 0.24, rz: 0.17, a: 0.15 },
-    { x: 0.22, z: -0.36, rx: 0.2, rz: 0.13, a: -1.0 },
-  ].map((l) => ({ x: l.x * S, z: l.z * S, rx: l.rx * S, rz: l.rz * S, a: l.a }));
-  // Mountain range along the eastern side, running roughly north–south.
-  const mc = { x: 0.24 * S, z: -0.06 * S };
-  const mDir = 1.35;
+  // ---- The hand-designed layout (the same for everyone), in map units -1..1. ----
+  // Main island: a broad body with peninsulas; the village plain sits in its middle.
+  const mainLobes = [
+    { x: -0.3, z: 0.06, rx: 0.47, rz: 0.41, a: 0.1 },
+    { x: -0.63, z: -0.3, rx: 0.2, rz: 0.14, a: -0.6 },
+    { x: -0.62, z: 0.44, rx: 0.19, rz: 0.13, a: 0.7 },
+    { x: -0.2, z: 0.52, rx: 0.22, rz: 0.12, a: 1.4 },
+    { x: -0.12, z: -0.4, rx: 0.22, rz: 0.13, a: -1.1 },
+  ];
+  // Wild island to the east.
+  const wildLobes = [
+    { x: 0.55, z: -0.02, rx: 0.26, rz: 0.34, a: 0.25 },
+    { x: 0.66, z: 0.36, rx: 0.14, rz: 0.1, a: 0.8 },
+    { x: 0.44, z: -0.4, rx: 0.15, rz: 0.1, a: -0.8 },
+    { x: 0.74, z: -0.12, rx: 0.12, rz: 0.16, a: 0.1 },
+  ];
+  /** The shallow strait between the islands (a band around x = straitX, bridgeable). */
+  const straitX = 0.215, straitW = 0.035;
+  const plain = { x: -0.22, z: 0.1, r: WORLD.meadowRadius / (N / 2) };
+  // Mountain range on the north-west of the main island (rivers and the waterfall start there).
+  const mc = { x: -0.5, z: -0.2 };
+  const mDir = 0.75;
   const mcs = Math.cos(mDir), msn = Math.sin(mDir);
-  // Rocky knolls around the rest of the island.
+  // Rocky hills on the wild island, and a knoll or two on the main island's edge.
   const knolls = [
-    { x: -0.32, z: 0.12, r: 0.07, h: 0.32 },
-    { x: -0.06, z: 0.33, r: 0.065, h: 0.3 },
-    { x: -0.22, z: -0.3, r: 0.06, h: 0.28 },
-  ].map((k) => ({ ...k, x: k.x * S, z: k.z * S }));
-  // Islets around the reef shelf.
+    { x: 0.5, z: -0.12, r: 0.1, h: 0.55 },
+    { x: 0.62, z: 0.14, r: 0.08, h: 0.45 },
+    { x: 0.42, z: 0.2, r: 0.07, h: 0.35 },
+    { x: 0.58, z: -0.3, r: 0.07, h: 0.4 },
+    { x: -0.62, z: 0.36, r: 0.06, h: 0.28 },
+    { x: 0.02, z: -0.36, r: 0.06, h: 0.26 },
+  ];
+  // Islets out on the reef shelf.
   world.islets = [];
   const islets = [
-    [-2.45, 0.84, 0.05], [-1.75, 0.83, 0.045], [-0.85, 0.85, 0.055], [0.25, 0.84, 0.05], [1.05, 0.83, 0.045], [1.9, 0.84, 0.055], [2.75, 0.85, 0.045],
-  ].map(([ang, d, r], k) => ({ x: Math.cos(ang) * d, z: Math.sin(ang) * d, r, h: 0.28 + (k % 3) * 0.06 }));
+    [-0.95, -0.62, 0.045], [-0.98, 0.1, 0.05], [-0.9, 0.72, 0.045], [-0.2, 0.86, 0.05], [0.3, 0.72, 0.045], [0.9, 0.62, 0.05], [0.94, -0.5, 0.045], [0.2, -0.82, 0.05], [-0.45, -0.78, 0.045],
+  ].map(([x, z, r], k) => ({ x, z, r, h: 0.28 + (k % 3) * 0.06 }));
+  world.isle = new Uint8Array(N * N);
+  const lobeField = (wx: number, wz: number, lobes: typeof mainLobes) => {
+    let m = -10;
+    for (const L of lobes) {
+      const dx = wx - L.x, dz = wz - L.z;
+      const ca = Math.cos(L.a), sa = Math.sin(L.a);
+      const u = dx * ca + dz * sa, w = -dx * sa + dz * ca;
+      m = smax(m, 1 - Math.sqrt((u / L.rx) ** 2 + (w / L.rz) ** 2), 0.22);
+    }
+    return m;
+  };
 
   const v = new Float32Array(N * N);
   const massif = new Float32Array(N * N);
   const knollM = new Float32Array(N * N);
+  const plainM = new Float32Array(N * N);
   for (let cz = 0; cz < N; cz++) {
     for (let cx = 0; cx < N; cx++) {
       const i = cz * N + cx;
       const nx = ((cx + 0.5) / N) * 2 - 1;
       const nz = ((cz + 0.5) / N) * 2 - 1;
-      const rx = nx * cr - nz * sr;
-      const rz = nx * sr + nz * cr;
-      const wx = rx + 0.11 * sA.fbm(rx * 1.8 + 3.1, rz * 1.8 - 5.7, 4);
-      const wz = rz + 0.11 * sA.fbm(rx * 1.8 - 9.2, rz * 1.8 + 2.4, 4);
-      let m = -10;
-      for (const L of lobes) {
-        const dx = wx - L.x, dz = wz - L.z;
-        const ca = Math.cos(L.a), sa = Math.sin(L.a);
-        const u = dx * ca + dz * sa, w = -dx * sa + dz * ca;
-        m = smax(m, 1 - Math.sqrt((u / L.rx) ** 2 + (w / L.rz) ** 2), 0.22);
-      }
-      // Ragged coast: bays and points.
-      m += sB.fbm(nx * 4.2 + 11, nz * 4.2 - 7, 4) * 0.17;
+      const wx = nx + 0.09 * sA.fbm(nx * 1.8 + 3.1, nz * 1.8 - 5.7, 4);
+      const wz = nz + 0.09 * sA.fbm(nx * 1.8 - 9.2, nz * 1.8 + 2.4, 4);
+      const coast = sB.fbm(nx * 4.2 + 11, nz * 4.2 - 7, 4) * 0.15;
+      const mMain = lobeField(wx, wz, mainLobes) + coast;
+      const mWild = lobeField(wx, wz, wildLobes) + coast;
+      let m = Math.max(mMain, mWild);
+      // Keep a shallow strait open between the two islands.
+      const sd = Math.abs(nx - straitX + sA.noise(nz * 3, 7) * 0.012) / straitW;
+      if (sd < 1 && m > -0.08) m = Math.min(m, -0.04 - (1 - sd) * 0.05);
+      if (m > 0) world.isle[i] = mWild > mMain ? 2 : 1;
 
       let h: number;
       if (m > 0) {
         // Gently rolling lowland rising inland.
         h = 0.06 + Math.pow(m, 0.8) * 0.4 + sA.fbm(nx * 3 + 2, nz * 3, 4) * 0.07;
       } else {
-        // Wide shallow reef shelf, then a drop-off into the deep.
+        // Wide shallow reef shelf, then a drop-off into the deep (always shallow in the strait).
         const shelfW = 0.36 + sC.noise(nx * 2.3 + 5, nz * 2.3) * 0.1;
-        if (m > -shelfW) h = -0.012 + (m / shelfW) * 0.1 + sC.fbm(nx * 9, nz * 9, 2) * 0.018;
+        if (m > -shelfW || sd < 1.6) h = -0.012 + (Math.max(m, -shelfW) / shelfW) * 0.1 + sC.fbm(nx * 9, nz * 9, 2) * 0.018;
         else h = -0.112 - (-shelfW - m) * 1.7;
+        if (sd < 1.6) h = Math.max(h, -0.05);
       }
-      // Mountain massif: ridged peaks, only on land.
+      // Mountain massif on the main island: ridged peaks, only on land.
       const mx = nx - mc.x, mz = nz - mc.z;
       const mu = mx * mcs + mz * msn, mw = -mx * msn + mz * mcs;
-      const md = Math.sqrt((mu / (0.4 * S)) ** 2 + (mw / (0.21 * S)) ** 2) + sC.fbm(nx * 3.5 + 1, nz * 3.5 - 1, 3) * 0.2;
-      const mm = (1 - smoothstep(0.25, 1.0, md)) * smoothstep(0.04, 0.26, m);
+      const md = Math.sqrt((mu / 0.36) ** 2 + (mw / 0.17) ** 2) + sC.fbm(nx * 3.5 + 1, nz * 3.5 - 1, 3) * 0.2;
+      const mm = (1 - smoothstep(0.25, 1.0, md)) * smoothstep(0.04, 0.26, mMain);
       massif[i] = mm;
-      // Tall, jagged peaks along the ridge.
       const rid = sB.ridge(nx * 2.5 + 4, nz * 2.5 + 8, 4);
       h += mm * (0.45 + rid * 1.3 + Math.pow(rid, 2) * 1.1 * mm);
-      // Knolls.
+      // Hills and knolls.
       for (const k of knolls) {
         const dk = Math.hypot(nx - k.x, nz - k.z) / k.r;
         if (dk < 1.4) {
@@ -104,6 +128,9 @@ export function generateIsland(world: World, seed: number): void {
           knollM[i] = Math.max(knollM[i], 1 - dk / 1.4);
         }
       }
+      // The village plain: wide, level grassland.
+      const dp = Math.hypot(nx - plain.x, nz - plain.z) / plain.r;
+      plainM[i] = 1 - smoothstep(0.85, 1.25, dp);
       // Islets, each with its own ring of shallows.
       for (const it of islets) {
         const di = Math.hypot(nx - it.x, nz - it.z) / it.r;
@@ -153,7 +180,7 @@ export function generateIsland(world: World, seed: number): void {
     }
   }
 
-  placeMeadow(world, rng, massif);
+  placeMeadow(world, plain, plainM);
 
   // Vegetation: jungle broken by large open grasslands; bare rock high up; beaches and the meadow clear.
   for (let cz = 0; cz < N; cz++) {
@@ -169,6 +196,9 @@ export function generateIsland(world: World, seed: number): void {
       f *= 1 - world.sandy[i];
       const dm = Math.hypot(world.centerX(cx) - world.meadow.x, world.centerZ(cz) - world.meadow.z);
       f *= smoothstep(world.meadow.r, world.meadow.r + 8, dm);
+      // The wild island is thick jungle; the main island keeps open grassland between its woods.
+      if (world.isle[i] === 2) f = Math.max(f, 0.62 + sA.noise(nx * 9, nz * 9) * 0.25) * smoothstep(1.5, 3.5, world.distWater[i]) * (1 - world.rocky[i] * 0.6);
+      else f *= 0.8;
       world.forest[i] = f;
     }
   }
@@ -193,42 +223,20 @@ export function generateIsland(world: World, seed: number): void {
   world.version++;
 }
 
-function placeMeadow(world: World, rng: RNG, hl: Float32Array): void {
+function placeMeadow(world: World, plain: { x: number; z: number; r: number }, plainM: Float32Array): void {
   const N = world.N;
-  let best = -1, bestScore = -1e9;
-  for (let k = 0; k < 4000; k++) {
-    const cx = rng.int(8, N - 9), cz = rng.int(8, N - 9);
-    const i = cz * N + cx;
-    const L = world.layer[i];
-    if (L < 2 || L > 6 || hl[i] > 0.15 || world.rocky[i] > 0) continue;
-    const dw = world.distWater[i];
-    if (dw < 11 || dw > 26) continue;
-    const score = -Math.abs(dw - 15) - Math.abs(L - 3) * 1.5 + rng.next() * 3;
-    if (score > bestScore) {
-      bestScore = score;
-      best = i;
-    }
-  }
-  if (best < 0) {
-    // Fallback: highest-distance land cell near the middle.
-    for (let i = 0; i < N * N; i++) if (world.layer[i] >= 2 && world.distWater[i] > (best < 0 ? 0 : world.distWater[best])) best = i;
-  }
-  const mcx = best % N, mcz = (best / N) | 0;
-  const mL = clamp(world.layer[best], 2, 5);
+  const mcx = Math.round(((plain.x + 1) / 2) * N - 0.5), mcz = Math.round(((plain.z + 1) / 2) * N - 0.5);
+  const mL = 3;
   const r = world.meadow.r;
   world.meadow = { x: world.centerX(mcx), z: world.centerZ(mcz), r, layer: mL };
-  for (let cz = mcz - r - 4; cz <= mcz + r + 4; cz++) {
-    for (let cx = mcx - r - 4; cx <= mcx + r + 4; cx++) {
-      if (!world.inBounds(cx, cz)) continue;
-      const i = world.idx(cx, cz);
-      if (world.layer[i] < 1) continue;
-      const d = Math.hypot(cx - mcx, cz - mcz);
-      const w = 1 - smoothstep(r * 0.7, r + 3, d);
-      world.layer[i] = Math.round(lerp(world.layer[i], mL, w));
-      if (d < r) {
-        world.rocky[i] = 0;
-        world.sandy[i] = 0;
-      }
+  // Level the plain to one layer, easing into the surrounding land.
+  for (let i = 0; i < N * N; i++) {
+    const k = plainM[i];
+    if (k <= 0 || world.layer[i] < 1) continue;
+    world.layer[i] = Math.round(lerp(world.layer[i], mL, k));
+    if (k > 0.6) {
+      world.rocky[i] = 0;
+      world.sandy[i] = 0;
     }
   }
   // Direction to the sea (for the jetty and camera composition).

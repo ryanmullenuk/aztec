@@ -16,6 +16,9 @@ export interface RiverData {
   points: { x: number; z: number; y: number }[];
 }
 
+/** Height of rope bridge decks above the sea. */
+export const BRIDGE_DECK_Y = 0.3;
+
 export interface WaterfallData {
   x: number;
   z: number;
@@ -74,6 +77,10 @@ export class World {
   /** Direction (unit XZ) from the meadow towards the nearest sea. */
   seaDir = { x: 0, z: 1 };
   islets: { x: number; z: number; r: number }[] = [];
+  /** Which island each land cell belongs to: 0 sea, 1 the main island, 2 the wild island. */
+  isle = new Uint8Array(this.N * this.N);
+  /** Rope bridges built across shallow water (1 = deck). */
+  bridge = new Uint8Array(this.N * this.N);
 
   /** Monotonic counter bumped whenever terrain changes (for caches). */
   version = 0;
@@ -209,7 +216,9 @@ export class World {
 
   /** Height islanders and animals stand at (river beds are wadeable, never below 0 in the sea). */
   groundY(x: number, z: number): number {
-    return this.heightAt(x, z);
+    const h = this.heightAt(x, z);
+    const i = this.cellIndexAt(x, z);
+    return i >= 0 && this.bridge[i] ? Math.max(h, BRIDGE_DECK_Y) : h;
   }
 
   /** True if all cells in the rectangle share a layer, are dry land and unoccupied. */
