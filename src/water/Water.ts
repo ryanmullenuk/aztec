@@ -110,7 +110,9 @@ const waterFrag = /* glsl */ `
     float ndl = max(dot(n, L), 0.0);
     vec3 lit = col * (0.6 + 0.4 * ndl) * mix(vec3(1.0), uSunCol, 0.2) * dayK;
     // Light scattering through the crests (teal glow on wave tops, strongest looking toward the sun).
-    float back = pow(max(dot(-V, L) * 0.5 + 0.5, 0.0), 3.0);
+    // (Every pow() base is clamped to 0..1: pow of a tiny negative rounding error is NaN on some GPUs,
+    // and one NaN pixel turns the whole frame black once bloom spreads it.)
+    float back = pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
     lit += vec3(0.05, 0.28, 0.3) * max(crest, 0.0) * (0.35 + back) * dayK * smoothstep(0.8, 3.0, depth);
     // Troughs a touch darker.
     lit *= 0.9 + 0.2 * clamp(crest + 0.5, 0.0, 1.0);
@@ -118,24 +120,24 @@ const waterFrag = /* glsl */ `
     // Sky reflection (Fresnel): brighter toward the horizon, deeper blue overhead.
     vec3 R = reflect(-V, n);
     vec3 skyR = mix(uSkyCol * 0.95 + vec3(0.04), uSkyCol * vec3(0.42, 0.56, 0.75), clamp(R.y, 0.0, 1.0)) * mix(0.28, 1.0, uDay);
-    float F = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+    float F = 0.02 + 0.98 * pow(clamp(1.0 - dot(n, V), 0.0, 1.0), 5.0);
     F = clamp(F * 1.5 + 0.02, 0.0, 0.8);
     lit = mix(lit, skyR, F);
 
     // Sun (or moon) glitter: a tight core, a wider sheen, and scattered sparkles on the chop.
-    vec3 H = normalize(L + V);
-    float nh = max(dot(n, H), 0.0);
+    vec3 H = normalize(L + V + vec3(0.0, 1e-4, 0.0));
+    float nh = clamp(dot(n, H), 0.0, 1.0);
     float glare = pow(nh, 1400.0) * 16.0 + pow(nh, 200.0) * 1.8 + pow(nh, 40.0) * 0.12 + pow(nh, 8.0) * 0.012;
     vec2 cell = floor(p * 16.0);
     // Each glint twinkles smoothly on its own timing (no sea-wide blinking).
     float r1 = hsh(cell);
-    float twinkle = pow(0.5 + 0.5 * sin(t * (1.1 + r1 * 1.4) + r1 * 40.0), 4.0);
+    float twinkle = pow(clamp(0.5 + 0.5 * sin(t * (1.1 + r1 * 1.4) + r1 * 40.0), 0.0, 1.0), 4.0);
     vec3 nn = normalize(n + vec3(hsh(cell + 3.1) - 0.5, 0.0, hsh(cell + 7.7) - 0.5) * 0.8);
     // Round glints inside each cell (not square), only on crests facing the light.
     // Glints sit at a random spot and size inside each cell, so no grid shows.
     vec2 fc = fract(p * 16.0) - 0.5 - (vec2(hsh(cell + 11.3), hsh(cell + 5.9)) - 0.5) * 0.5;
     float dot1 = smoothstep(0.1 + 0.18 * hsh(cell + 2.2), 0.02, length(fc));
-    float spark = step(0.8, hsh(cell + 9.1)) * twinkle * dot1 * pow(max(dot(nn, H), 0.0), 500.0) * 10.0 * (1.0 - smoothstep(0.04, 0.16, fw)) * smoothstep(-0.2, 0.3, crest);
+    float spark = step(0.8, hsh(cell + 9.1)) * twinkle * dot1 * pow(clamp(dot(nn, H), 0.0, 1.0), 500.0) * 10.0 * (1.0 - smoothstep(0.04, 0.16, fw)) * smoothstep(-0.2, 0.3, crest);
     float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y);
     lit += uSunCol * (glare + spark) * uSunI * 0.32 * sunVis;
 
