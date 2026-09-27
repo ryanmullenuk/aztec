@@ -202,3 +202,41 @@ export function peopleMaterial(): THREE.MeshStandardMaterial {
   people = mat;
   return mat;
 }
+
+/**
+ * Fish material: the stylised patches plus a swimming body bend. Each vertex's `aFish`
+ * attribute (from fishGeometry) gives its sideways swing (growing toward the tail), a fin-flap
+ * weight for the pectoral fins, and a phase so the bend travels down the body as a wave.
+ * Each instance swims out of step with the others (phase from its position).
+ */
+export function fishMaterial(rate: number, params: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
+  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.05, ...params }), 0.5);
+  const base = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    base.call(mat, shader, r);
+    shader.uniforms.uSwim = { value: rate };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute vec3 aFish;
+        uniform float uSwim;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vec3 fo = instanceMatrix[3].xyz;
+          #else
+            vec3 fo = modelMatrix[3].xyz;
+          #endif
+          float fph = fo.x * 7.3 + fo.z * 5.1 + fo.y * 3.0;
+          // Swim speed wobbles a little per fish so a school doesn't beat in unison.
+          float rate = uSwim * (0.85 + 0.3 * fract(sin(fph) * 43758.5));
+          float wave = sin(uTime * rate + fph - aFish.z);
+          transformed.x += wave * aFish.x;
+          // Pectoral fins scull: their tips swing out and back, a beat out of step with the tail.
+          float flap = sin(uTime * rate * 0.7 + fph * 1.7);
+          transformed.x += sign(position.x) * flap * aFish.y * 0.006;
+          transformed.z += flap * aFish.y * 0.008;
+        }`);
+  };
+  mat.customProgramCacheKey = () => 'fish';
+  return mat;
+}
