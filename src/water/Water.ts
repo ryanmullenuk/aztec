@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { COLORS, WORLD } from '../config';
 import { World } from '../world/World';
+import { GeoBuilder, M, P, lumpy } from '../render/GeoBuilder';
+import { stylisedMaterial } from '../render/materials';
+import { Particles } from '../render/Particles';
+import { RNG } from '../world/rng';
 
 /** GLSL shared by the ocean, rivers and pool. */
 const waterVert = /* glsl */ `
@@ -210,12 +214,16 @@ const waterFrag = /* glsl */ `
   }
 `;
 
-/** Waterfall curtain: fast scrolling streaks. */
+/**
+ * Waterfall curtain: glassy teal water sliding over the lip, breaking into falling ropes of
+ * white water that accelerate and aerate toward the bottom, with ragged, wind-torn edges.
+ */
 const fallFrag = /* glsl */ `
   #include <common>
   #include <fog_pars_fragment>
   uniform float uTime;
   uniform float uDay;
+  uniform float uLayer;
   varying vec2 vUv;
   float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float vnoise(vec2 p){
@@ -223,12 +231,28 @@ const fallFrag = /* glsl */ `
     return mix(mix(hsh(i), hsh(i + vec2(1.0, 0.0)), u.x), mix(hsh(i + vec2(0.0, 1.0)), hsh(i + vec2(1.0, 1.0)), u.x), u.y);
   }
   void main() {
-    float s = vnoise(vec2(vUv.x * 14.0, vUv.y * 3.0 + uTime * 3.2));
-    float s2 = vnoise(vec2(vUv.x * 30.0, vUv.y * 6.0 + uTime * 4.5));
-    vec3 col = mix(vec3(0.35, 0.8, 0.85), vec3(0.97, 1.0, 1.0), smoothstep(0.35, 0.8, s * 0.6 + s2 * 0.5 + vUv.y * 0.15));
-    float edge = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
-    float a = edge * (0.75 + 0.25 * s) * smoothstep(0.0, 0.08, 1.0 - vUv.y);
-    gl_FragColor = vec4(col * mix(0.35, 1.0, uDay), a);
+    float u = vUv.x, v = vUv.y; // v: 0 at the lip, 1 at the pool
+    float t = uTime + uLayer * 7.3;
+    // Falling water speeds up: scroll position grows faster than linearly down the fall.
+    float fall = pow(v, 0.65) * 4.0 - t * (1.6 + uLayer * 0.3);
+    float ropes = vnoise(vec2(u * (16.0 + uLayer * 6.0), fall)) * 0.6 + vnoise(vec2(u * 34.0, fall * 2.1 + 3.0)) * 0.4;
+    float streak = vnoise(vec2(u * 60.0, fall * 3.5 + 9.0));
+    // Aeration: glassy at the lip, turning white as it falls.
+    float aer = smoothstep(0.05, 0.7, v) * 0.75 + ropes * 0.35;
+    vec3 glass = vec3(0.24, 0.72, 0.76);
+    vec3 white = vec3(0.95, 0.99, 1.0);
+    vec3 col = mix(glass, white, clamp(aer + streak * 0.25, 0.0, 1.0));
+    col *= 0.88 + 0.2 * streak;
+    // Ragged, wobbling side edges and gaps between the ropes lower down.
+    float wob = (vnoise(vec2(v * 6.0 - t * 1.2, uLayer * 5.0)) - 0.5) * 0.12 * (0.3 + v);
+    float edge = smoothstep(0.0, 0.1 + 0.08 * v, u + wob) * smoothstep(0.0, 0.1 + 0.08 * v, 1.0 - u - wob);
+    float gaps = mix(1.0, smoothstep(0.25, 0.55, ropes), smoothstep(0.15, 0.8, v) * (0.55 + uLayer * 0.35));
+    float a = edge * gaps * mix(0.72, 0.95, aer);
+    // Blend in from the river at the top; soften into the plunge foam at the bottom.
+    a *= smoothstep(0.0, 0.06, v) * (1.0 - smoothstep(0.93, 1.0, v));
+    a *= mix(1.0, 0.7, uLayer);
+    if (a < 0.02) discard;
+    gl_FragColor = vec4(col * mix(0.32, 1.0, uDay), a);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     #include <fog_fragment>
@@ -243,6 +267,42 @@ const fallVert = /* glsl */ `
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     #include <fog_vertex>
+  }
+`;
+
+/** Churning white water and ripples spreading from where the fall hits the pool. */
+const plungeFrag = /* glsl */ `
+  #include <common>
+  #include <fog_pars_fragment>
+  uniform float uTime;
+  uniform float uDay;
+  varying vec2 vUv;
+  float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p){
+    vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hsh(i), hsh(i + vec2(1.0, 0.0)), u.x), mix(hsh(i + vec2(0.0, 1.0)), hsh(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    // Stretched along the flow: the foam trails away downstream.
+    p.y = p.y > 0.0 ? p.y * 0.75 : p.y * 1.5;
+    float r = length(p);
+    float t = uTime;
+    float ang = atan(p.y, p.x);
+    float churn = vnoise(vec2(ang * 3.0 + t * 0.7, r * 7.0 - t * 2.4)) * 0.6 + vnoise(p * 9.0 + vec2(t * 0.9, -t * 1.3)) * 0.4;
+    float core = 1.0 - smoothstep(0.1, 0.62, r + (churn - 0.5) * 0.3);
+    float rings = smoothstep(0.75, 0.95, sin(r * 22.0 - t * 4.2 + churn * 2.0) * 0.5 + 0.5) * smoothstep(0.25, 0.5, r) * (1.0 - smoothstep(0.7, 1.0, r));
+    // Round bubbles drifting away from the churn.
+    vec2 bq = (p + vec2(0.0, -t * 0.06)) * 14.0;
+    vec2 bc = floor(bq);
+    vec2 bf = fract(bq) - 0.5 - (vec2(hsh(bc + 1.3), hsh(bc + 7.1)) - 0.5) * 0.6;
+    float bubbles = step(0.72, hsh(bc)) * smoothstep(0.22, 0.12, length(bf)) * smoothstep(0.95, 0.35, r);
+    float a = clamp(core * (0.55 + churn * 0.6) + rings * 0.28 + bubbles * 0.55 * (1.0 - core), 0.0, 1.0);
+    if (a < 0.02) discard;
+    gl_FragColor = vec4(vec3(0.95, 0.99, 1.0) * mix(0.32, 1.0, uDay), a * 0.92);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #include <fog_fragment>
   }
 `;
 
@@ -273,9 +333,10 @@ export class Water {
   private heightData: Uint16Array;
   private res: number;
   private fallMat: THREE.ShaderMaterial | null = null;
-  private mist: THREE.Points | null = null;
-  private mistVel: Float32Array | null = null;
-  private mistLife: Float32Array | null = null;
+  private spray: Particles | null = null;
+  private fallMist: Particles | null = null;
+  private plungeAt = new THREE.Vector3();
+  private sprayAcc = 0;
   readonly shared = {
     uTime: { value: 0 },
     uWorld: { value: WORLD.size },
@@ -407,51 +468,116 @@ export class Water {
   private buildWaterfall(): void {
     const f = this.world.waterfall;
     if (!f) return;
-    const height = Math.max(0.5, f.topY - f.bottomY);
-    const geo = new THREE.PlaneGeometry(2.4, height + 0.4, 6, 12);
-    // Curve the curtain outward over the lip.
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      const v = 1 - (y + (height + 0.4) / 2) / (height + 0.4);
-      pos.setZ(i, Math.sin(v * Math.PI * 0.5) * 0.9 + (1 - v) * 0.1);
-    }
-    geo.computeVertexNormals();
-    this.fallMat = new THREE.ShaderMaterial({
-      uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: this.shared.uTime, uDay: this.shared.uDay },
-      vertexShader: fallVert,
-      fragmentShader: fallFrag,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: true,
-    });
-    const curtain = new THREE.Mesh(geo, this.fallMat);
-    curtain.position.set(f.x, f.bottomY + (height + 0.4) / 2 - 0.1, f.z);
-    curtain.rotation.y = Math.atan2(f.dx, f.dz);
-    curtain.renderOrder = 12;
-    this.group.add(curtain);
+    const H = Math.max(0.5, f.topY - f.bottomY);
+    const px = -f.dz, pz = f.dx; // across the fall
+    const yaw = Math.atan2(f.dx, f.dz);
+    const mkMat = (layer: number) =>
+      new THREE.ShaderMaterial({
+        uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: this.shared.uTime, uDay: this.shared.uDay, uLayer: { value: layer } },
+        vertexShader: fallVert,
+        fragmentShader: fallFrag,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: true,
+      });
+    // Curtain: over the rounded lip, then a falling arc that spreads a little toward the bottom.
+    const curtain = (width: number, spread: number, throwK: number, layer: number) => {
+      const cols = 14, rows = 22;
+      const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+      for (let j = 0; j <= rows; j++) {
+        const v = j / rows;
+        // First 12% of the curtain wraps over the lip; the rest falls.
+        const lip = Math.min(1, v / 0.12);
+        const s = Math.max(0, (v - 0.12) / 0.88);
+        const fwd = -0.45 * (1 - lip) + (lip < 1 ? Math.sin(lip * Math.PI * 0.5) * 0.3 : 0.3 + throwK * Math.sqrt(s) + s * 0.25);
+        const y = lip < 1 ? f.topY + 0.02 - (1 - Math.cos(lip * Math.PI * 0.5)) * 0.2 : f.topY - 0.18 - (H - 0.18) * s;
+        const w = width * (1 + spread * s * s);
+        for (let i = 0; i <= cols; i++) {
+          const u = i / cols;
+          const across = (u - 0.5) * w + Math.sin(u * 9.0 + layer * 3) * 0.04 * s;
+          // Slight bulge in the middle, where most of the water goes.
+          const bul = Math.sin(u * Math.PI) * 0.12 * s;
+          pos.push(f.x + px * across + f.dx * (fwd + bul), y, f.z + pz * across + f.dz * (fwd + bul));
+          uv.push(u, v);
+          if (i < cols && j < rows) {
+            const a = j * (cols + 1) + i;
+            idx.push(a, a + cols + 1, a + 1, a + 1, a + cols + 1, a + cols + 2);
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mkMat(layer));
+      m.renderOrder = 12 + layer;
+      m.frustumCulled = false;
+      this.group.add(m);
+    };
+    curtain(2.3, 0.35, 0.8, 0);
+    curtain(1.6, 0.25, 1.05, 1);
+    this.fallMat = null;
 
-    // Mist spray at the base.
-    const count = 140;
-    const g = new THREE.BufferGeometry();
-    const p = new Float32Array(count * 3);
-    this.mistVel = new Float32Array(count * 3);
-    this.mistLife = new Float32Array(count);
-    for (let i = 0; i < count; i++) this.mistLife[i] = Math.random() * 2;
-    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-    const mat = new THREE.PointsMaterial({
-      size: 0.9,
-      map: makeSoftSprite(64, 'rgba(255,255,255,0.8)', 'rgba(255,255,255,0)'),
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.55,
-      sizeAttenuation: true,
-    });
-    this.mist = new THREE.Points(g, mat);
-    this.mist.frustumCulled = false;
-    this.mist.renderOrder = 13;
-    this.group.add(this.mist);
+    // Plunge pool: churning foam and rings where the water lands.
+    const land = 0.3 + 0.8 * 1.0 + 0.25 + 0.2;
+    this.plungeAt.set(f.x + f.dx * land, f.poolY + 0.03, f.z + f.dz * land);
+    const plunge = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.4, 4.4).rotateX(-Math.PI / 2).rotateY(yaw + Math.PI),
+      new THREE.ShaderMaterial({
+        uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: this.shared.uTime, uDay: this.shared.uDay },
+        vertexShader: fallVert,
+        fragmentShader: plungeFrag,
+        transparent: true,
+        depthWrite: false,
+        fog: true,
+      })
+    );
+    plunge.position.copy(this.plungeAt).addScaledVector(new THREE.Vector3(f.dx, 0, f.dz), 0.6);
+    plunge.renderOrder = 12;
+    this.group.add(plunge);
+
+    // Boulders framing the lip and scattered around the plunge pool, wet near the water, mossy on top.
+    const rng = new RNG(this.world.seed * 17 + 5);
+    const b = new GeoBuilder();
+    const rock = (x: number, z: number, y: number, r: number, squash: number, wetY: number) => {
+      const g = lumpy(P.sphere(r, 1), 0.2, Math.floor(rng.next() * 1e6), squash);
+      b.add(g, {
+        color: (p, n) => {
+          let c = new THREE.Color(0x7d7078).lerp(new THREE.Color(0xa99c96), n.y * 0.5 + 0.35);
+          if (n.y > 0.55 && Math.sin(p.x * 13 + p.z * 9) > -0.1) c.lerp(new THREE.Color(0x6f8f38), 0.6);
+          if (p.y < wetY + 0.25) c.multiplyScalar(0.72);
+          return c;
+        },
+        ao: { y0: y - r * squash, y1: y + r * squash * 0.4, min: 0.62 },
+      }, M.t(x, y, z, rng.next(), rng.next() * 3, rng.next()));
+    };
+    const lipW = 1.55;
+    for (const side of [-1, 1]) {
+      // Big shoulder boulders either side of the lip, and a smaller one tucked in.
+      rock(f.x + px * side * (lipW + 0.35) - f.dx * 0.2, f.z + pz * side * (lipW + 0.35) - f.dz * 0.2, f.topY - 0.05, 0.75, 0.75, f.topY - 1);
+      rock(f.x + px * side * (lipW - 0.1) + f.dx * 0.1, f.z + pz * side * (lipW - 0.1) + f.dz * 0.1, f.topY - 0.3, 0.42, 0.7, f.topY - 1);
+      rock(f.x + px * side * (lipW + 0.9) - f.dx * 0.9, f.z + pz * side * (lipW + 0.9) - f.dz * 0.9, f.topY - 0.2, 0.5, 0.7, f.topY - 1);
+      // Rocks the river splits around just before the drop.
+      rock(f.x + px * side * 0.75 - f.dx * 0.95, f.z + pz * side * 0.75 - f.dz * 0.95, f.topY - 0.2, 0.26, 0.6, f.topY - 0.2);
+      // Base: tumbled boulders at the foot of the cliff and a few in the pool.
+      rock(f.x + px * side * (lipW + 0.4) + f.dx * 0.8, f.z + pz * side * (lipW + 0.4) + f.dz * 0.8, f.poolY + 0.1, 0.8, 0.75, f.poolY);
+      rock(f.x + px * side * (lipW + 1.3) + f.dx * 1.7, f.z + pz * side * (lipW + 1.3) + f.dz * 1.7, f.poolY + 0.05, 0.55, 0.7, f.poolY);
+      // A couple of stones at the pool's edge, half in the water.
+      const ex = f.x + px * side * 3.0 + f.dx * 3.4, ez = f.z + pz * side * 3.0 + f.dz * 3.4;
+      rock(ex, ez, Math.max(f.poolY - 0.02, this.world.heightAt(ex, ez) + 0.05), 0.42, 0.6, f.poolY);
+    }
+    const rocks = new THREE.Mesh(b.build(), stylisedMaterial());
+    rocks.castShadow = true;
+    rocks.receiveShadow = true;
+    rocks.name = 'waterfallRocks';
+    this.group.add(rocks);
+
+    // Spray droplets thrown up in arcs and soft mist rolling downstream.
+    this.spray = new Particles(520, 0xf4fcff);
+    this.fallMist = new Particles(160, 0xeef8ff, 0.32);
+    this.group.add(this.spray.points, this.fallMist.points);
   }
 
   /** Waves at a point in world space (used for boats bobbing). */
@@ -472,27 +598,27 @@ export class Water {
   update(dt: number, time: number): void {
     this.shared.uTime.value = time;
     const f = this.world.waterfall;
-    if (this.mist && f && this.mistVel && this.mistLife) {
-      const pos = this.mist.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const a = pos.array as Float32Array;
-      for (let i = 0; i < this.mistLife.length; i++) {
-        this.mistLife[i] -= dt;
-        if (this.mistLife[i] <= 0) {
-          this.mistLife[i] = 1.5 + Math.random() * 1.5;
-          const side = (Math.random() - 0.5) * 2.2;
-          a[i * 3] = f.x + f.dx * 1.1 + -f.dz * side;
-          a[i * 3 + 1] = f.bottomY + 0.1;
-          a[i * 3 + 2] = f.z + f.dz * 1.1 + f.dx * side;
-          this.mistVel[i * 3] = f.dx * (0.4 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.5;
-          this.mistVel[i * 3 + 1] = 0.3 + Math.random() * 0.8;
-          this.mistVel[i * 3 + 2] = f.dz * (0.4 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.5;
+    if (f && this.spray && this.fallMist && dt > 0) {
+      const px = -f.dz, pz = f.dx;
+      const P0 = this.plungeAt;
+      this.sprayAcc += dt;
+      // Droplets: a steady fountain of small splashes along the line where the curtain lands.
+      while (this.sprayAcc > 0.008) {
+        this.sprayAcc -= 0.008;
+        const across = (Math.random() - 0.5) * 2.0;
+        const out = 0.4 + Math.random() * 1.6;
+        const a = (Math.random() - 0.5) * 1.6;
+        this.spray.spawn(P0.x + px * across, P0.y, P0.z + pz * across, f.dx * out * Math.cos(a) + px * Math.sin(a) * out * 0.6, 1.4 + Math.random() * 2.4, f.dz * out * Math.cos(a) + pz * Math.sin(a) * out * 0.6, 0.55 + Math.random() * 0.55, 0.05 + Math.random() * 0.07);
+        if (Math.random() < 0.09) {
+          // Mist: slow soft billows drifting downstream and rising, growing as they go.
+          this.fallMist.spawn(P0.x + px * (Math.random() - 0.5) * 2.4, P0.y + 0.1 + Math.random() * 0.4, P0.z + pz * (Math.random() - 0.5) * 2.4, f.dx * (0.3 + Math.random() * 0.5), 0.25 + Math.random() * 0.45, f.dz * (0.3 + Math.random() * 0.5), 2.2 + Math.random() * 1.6, 0.7 + Math.random() * 0.5, 0.9);
         }
-        a[i * 3] += this.mistVel[i * 3] * dt;
-        a[i * 3 + 1] += this.mistVel[i * 3 + 1] * dt;
-        a[i * 3 + 2] += this.mistVel[i * 3 + 2] * dt;
-        this.mistVel[i * 3 + 1] *= 0.985;
       }
-      pos.needsUpdate = true;
+      this.spray.update(dt, 6.5);
+      this.fallMist.update(dt, -0.05);
+      const day = 0.35 + 0.65 * this.shared.uDay.value;
+      ((this.spray.points.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).setRGB(0.96 * day, 0.99 * day, day);
+      ((this.fallMist.points.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).setRGB(0.93 * day, 0.97 * day, day);
     }
   }
 }
