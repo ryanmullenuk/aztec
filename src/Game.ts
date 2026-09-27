@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE } from './config';
+import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE, isFarm } from './config';
 import { World } from './world/World';
 import { generateIsland } from './world/generator';
 import { GameTime } from './world/Time';
@@ -970,7 +970,7 @@ export class Game {
     const checks: Record<string, boolean> = {
       firstHut: has('hut') || has('home'),
       firstTemple: has('temple'),
-      firstFarm: has('farm'),
+      firstFarm: this.buildings.list.some((b) => b.complete && isFarm(b.key)),
       pop10: pop >= 10,
       pop20: pop >= 20,
       firstBoat: this.stats.boats > 0,

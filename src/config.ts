@@ -235,7 +235,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'butcher' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -263,7 +263,10 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   hut: { key: 'hut', name: 'Hut', description: 'Level 1 house: a small adobe home for 2 islanders.', size: [2, 2], cost: { wood: 12, stone: 0, belief: 0 }, buildTime: 22, builders: 2, workers: 0, housing: 2, upgradeTo: 'home', placeable: true },
   home: { key: 'home', name: 'Home', description: 'Adobe family house (level 2, 4 people). Upgrade it up to level 5 for 16. Couples living here have children.', size: [3, 3], cost: { wood: 26, stone: 14, belief: 0 }, buildTime: 45, builders: 3, workers: 0, housing: 4, maxTier: 4, placeable: true },
   temple: { key: 'temple', name: 'Temple', description: 'Stepped pyramid that generates Belief. Upgrade twice to raise the Great Pyramid.', size: [4, 4], cost: { wood: 20, stone: 36, belief: 20 }, buildTime: 70, builders: 4, workers: 2, maxTier: 3, placeable: true },
-  farm: { key: 'farm', name: 'Farm', description: 'Maize fields in neat rows. Farmers tend and harvest grain, and catch wild chickens to keep in the pen.', size: [4, 4], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 25, builders: 2, workers: 2, placeable: true },
+  farm: { key: 'farm', name: 'Vegetable Farm', description: 'Beans climbing poles, squash and chillies. Quick to grow; farmers also catch wild chickens for the pen.', size: [4, 4], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 25, builders: 2, workers: 2, placeable: true },
+  maizefarm: { key: 'maizefarm', name: 'Maize Farm', description: 'A big field of tall maize with a granary crib. Slower to ripen but the richest grain harvest.', size: [5, 5], cost: { wood: 26, stone: 4, belief: 0 }, buildTime: 35, builders: 2, workers: 3, placeable: true },
+  chinampa: { key: 'chinampa', name: 'Chinampa', description: 'Raised garden beds between water channels, built beside a river, pool or shore. Rich, wet soil grows crops fast in every season.', size: [4, 4], cost: { wood: 20, stone: 8, belief: 0 }, buildTime: 40, builders: 2, workers: 2, placeable: true },
+  smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
   woodstore: { key: 'woodstore', name: 'Wood Store', description: 'Stores wood and stone. Logs stack up as it fills.', size: [3, 2], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 20, builders: 2, workers: 0, woodCap: 120, placeable: true },
   grainstore: { key: 'grainstore', name: 'Grain Store', description: 'Stores grain, fruit, meat and fish. Baskets fill visibly.', size: [2, 2], cost: { wood: 18, stone: 4, belief: 0 }, buildTime: 24, builders: 2, workers: 0, foodCap: 140, placeable: true },
@@ -304,6 +307,17 @@ export const TEMPLE = {
   upgradeTime: [0, 0, 90, 140],
   prayBelief: 0.06,
 };
+
+/** Per farm type: growth speed multiplier, grain per harvest, lowest seasonal growth, crop label. */
+export const FARM_TYPES: Partial<Record<BuildingKey, { grow: number; yield: number; seasonFloor: number; crop: 'veg' | 'maize' | 'chinampa'; label: string }>> = {
+  farm: { grow: 1.35, yield: 12, seasonFloor: 0, crop: 'veg', label: 'Beans and squash' },
+  maizefarm: { grow: 0.85, yield: 28, seasonFloor: 0, crop: 'maize', label: 'Maize' },
+  chinampa: { grow: 1.6, yield: 18, seasonFloor: 0.85, crop: 'chinampa', label: 'Chinampa crops' },
+};
+export const isFarm = (k: BuildingKey): boolean => k in FARM_TYPES;
+
+/** Smokehouse batches: raw fish or meat in, more (preserved) food out. */
+export const SMOKE = { batchSeconds: 20, input: 4, output: 7, wood: 1 };
 
 export const FARM = {
   growSeconds: 260,
