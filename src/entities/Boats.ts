@@ -6,7 +6,7 @@ import { Economy } from '../economy/Economy';
 import { GeoBuilder, M, P } from '../render/GeoBuilder';
 import { patchStylised, stylisedMaterial } from '../render/materials';
 import { Vegetation } from '../vegetation/Vegetation';
-import { Water } from '../water/Water';
+import { SEA_SURFACE, Water } from '../water/Water';
 import { Particles } from '../render/Particles';
 export { Particles };
 import { World } from '../world/World';
@@ -368,7 +368,7 @@ export class Boats {
       }
       const y = this.water.waveHeight(a.x, a.z, time);
       const yF = this.water.waveHeight(a.x + Math.sin(a.heading) * 0.6, a.z + Math.cos(a.heading) * 0.6, time);
-      a.mesh.position.set(a.x, (a.state === 'beached' ? 0.06 : 0.03) + (a.state === 'sail' ? y * 0.12 : 0), a.z);
+      a.mesh.position.set(a.x, (a.state === 'beached' ? 0.06 : 0.03 + SEA_SURFACE) + (a.state === 'sail' ? y * 0.12 : 0), a.z);
       a.mesh.rotation.set(a.state === 'sail' ? (y - yF) * 0.8 : -0.05, a.heading, 0, 'YXZ');
       a.rowers.forEach((r, k) => (r.rotation.z = Math.sin(a.phase + k * 0.7) * 0.25 * (k % 2 ? -1 : 1)));
     }
@@ -493,7 +493,7 @@ export class Boats {
     const y = this.water.waveHeight(b.x, b.z, time);
     const yF = this.water.waveHeight(b.x + Math.sin(b.heading) * 0.6, b.z + Math.cos(b.heading) * 0.6, time);
     const yS = this.water.waveHeight(b.x + Math.cos(b.heading) * 0.3, b.z - Math.sin(b.heading) * 0.3, time);
-    b.mesh.position.set(b.x, 0.03 + y * 0.12, b.z);
+    b.mesh.position.set(b.x, 0.03 + SEA_SURFACE + y * 0.12, b.z);
     b.mesh.rotation.set((y - yF) * 0.8, b.heading, (yS - y) * 1.0, 'YXZ');
     b.paddlePhase += dt * (b.state === 'docked' || b.state === 'netting' ? 0 : 3);
     b.rower.rotation.z = Math.sin(b.paddlePhase) * 0.25;

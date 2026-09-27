@@ -4,7 +4,7 @@ import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Economy } from '../economy/Economy';
 import { GeoBuilder, M, P } from '../render/GeoBuilder';
 import { patchStylised } from '../render/materials';
-import { Water } from '../water/Water';
+import { SEA_SURFACE, Water } from '../water/Water';
 import { World } from '../world/World';
 import { BOAT_SCALE, Boats, boatGeometry } from './Boats';
 
@@ -177,7 +177,7 @@ export class TradeFleet {
       }
       const y = this.water.waveHeight(s.x, s.z, time);
       const yF = this.water.waveHeight(s.x + Math.sin(s.heading) * 0.8, s.z + Math.cos(s.heading) * 0.8, time);
-      s.mesh.position.set(s.x, 0.03 + y * 0.12, s.z);
+      s.mesh.position.set(s.x, 0.03 + SEA_SURFACE + y * 0.12, s.z);
       s.mesh.rotation.set((y - yF) * 0.6, s.heading, Math.sin(time * 0.8 + s.sail) * 0.03, 'YXZ');
     }
   }
