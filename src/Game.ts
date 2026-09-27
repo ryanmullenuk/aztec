@@ -13,7 +13,7 @@ import { CameraRig } from './render/CameraRig';
 import { FX } from './render/materials';
 import { Input } from './ui/Input';
 import { UI } from './ui/UI';
-import { TOOLS, ToolId } from './ui/tools';
+import { PAINT_TOOLS, TOOLS, ToolId } from './ui/tools';
 import { Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { PeakClouds } from './render/PeakClouds';
@@ -198,6 +198,10 @@ export class Game {
     this.colony = new Colony(this.world, this.veg, this.eco, this.buildings, this.pathfinder, this.time, () => this.rng.next());
     this.colony.hooks.notify = (t) => this.ui?.toast(t);
     this.colony.hooks.sfx = (n, x, z) => this.audio?.sfx(n, x, z);
+    this.colony.hooks.viewer = () => {
+      const c = this.rig.camera.position, t = this.rig.target;
+      return { x: c.x, y: c.y, z: c.z, tx: t.x, tz: t.z, r: this.rig.viewRadius };
+    };
     this.rig3d = new IslanderRig();
     this.scene.add(this.rig3d.group);
     this.sculptor = new Sculptor(this.world, this.terrain, this.water, this.veg, this.eco);
@@ -245,7 +249,7 @@ export class Game {
     this.input = new Input(canvas, this.rig, {
       onTap: (x, y) => this.onTap(x, y),
       onCancel: () => this.cancel(),
-      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal',
+      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || PAINT_TOOLS.includes(this.tool),
       onToolDragStart: (x, y) => this.toolDrag(x, y, true),
       onToolDrag: (x, y) => this.toolDrag(x, y, false),
       onToolDragEnd: () => this.toolDragEnd(),
@@ -337,6 +341,10 @@ export class Game {
       if (b.key === 'tradedock') this.trade.removeDock(b);
     };
     this.trade.notify = (t) => this.ui?.toast(t);
+    this.buildings.onMoved = (b) => {
+      this.wildlife.animals.movePen(b);
+      this.tufts.refresh();
+    };
     this.completeHandler = (b) => {
       if (b.key === 'farm' || b.key === 'butcher') this.wildlife.registerPen(b);
       // The first boat at each jetty is free.
@@ -597,6 +605,7 @@ export class Game {
     if (this.tool === id && id !== 'select' && !this.placing) id = 'select';
     this.tool = id;
     this.placing = null;
+    this.moving = null;
     this.buildings.showGhost(null);
     this.brush.visible = false;
     const hints: Partial<Record<ToolId, string>> = {
@@ -608,11 +617,48 @@ export class Game {
       rain: 'Tap anywhere to summon rain',
       calm: 'Tap anywhere to calm a storm',
       path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
+      dirtpath: 'Hold and drag to tread a <b>dirt path</b> · free · Esc to finish',
       unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
       canal: `Hold and drag outward from water to dig a <b>canal</b> into the village · ${PATHS.canalWood} wood per section · Esc to finish`,
       bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
     };
     this.ui.setHint(hints[id] ?? null);
+  }
+
+  /** A building picked up to be moved (placement mode, with its own cells counting as free). */
+  moving: Building | null = null;
+
+  startMove(b: Building): void {
+    if (!this.buildings.canRelocate(b)) {
+      this.ui.toast('Docks are tied to their shore and cannot be moved.', 'warn');
+      return;
+    }
+    this.audio?.sfx('click');
+    this.select(null);
+    this.tool = 'build';
+    this.placing = b.key;
+    this.moving = b;
+    this.placeRot = b.rot;
+    this.ui.setHint(`Tap to move the <b>${b.label}</b> · <b>R</b> rotates · right-click or Esc cancels`);
+    if (this.hoverPoint) this.updateGhost(this.hoverPoint);
+  }
+
+  private endMove(): void {
+    this.moving = null;
+    this.placing = null;
+    this.buildings.showGhost(null);
+    this.tool = 'select';
+    this.ui.setHint(null);
+  }
+
+  rotateBuilding(b: Building): void {
+    const r = this.buildings.rotate(b);
+    if (!r.ok) {
+      this.ui.toast(r.reason === 'Something is already built here' ? 'No room to turn it here.' : r.reason, 'warn');
+      this.audio?.sfx('deny');
+      return;
+    }
+    this.audio?.sfx('place', b.x, b.z);
   }
 
   startPlacing(key: BuildingKey): void {
@@ -633,6 +679,12 @@ export class Game {
   private cancel(): void {
     // The founding fire can't be cancelled; there is nowhere else to go.
     if (this.placing === 'campfire' && this.awaitingFire) return;
+    if (this.moving) {
+      const b = this.moving;
+      this.endMove();
+      this.select({ building: b.id });
+      return;
+    }
     if (this.placing) {
       this.placing = null;
       this.buildings.showGhost(null);
@@ -657,10 +709,11 @@ export class Game {
   private updateGhost(p: THREE.Vector3): void {
     if (!this.placing) return;
     const [cx, cz, rot] = this.footprintAt(p, this.placing);
-    const res = this.buildings.showGhost(this.placing, cx, cz, rot);
+    const res = this.buildings.showGhost(this.placing, cx, cz, rot, this.moving ?? undefined);
     if (!res.ok && res.reason) this.ui.setHint(`<b>${res.reason}</b> · R rotates · Esc cancels`);
+    else if (this.moving) this.ui.setHint(`Tap to move the <b>${this.moving.label}</b> here · <b>R</b> rotates · right-click or Esc cancels`);
     else if (this.placing === 'campfire') this.ui.setHint('Tap to light the <b>campfire</b> here: your village will grow around it');
-    else this.ui.setHint(`Tap to place the <b>${BUILDINGS[this.placing].name}</b> · <b>R</b> rotates · right-click or Esc cancels`);
+    else this.ui.setHint(`Tap to place a <b>${BUILDINGS[this.placing].name}</b> · keep tapping to place more · <b>R</b> rotates · right-click or Esc to finish`);
   }
 
   private onHover(x: number, y: number): void {
@@ -671,10 +724,10 @@ export class Game {
     this.cursorWorld.copy(p);
     if (this.placing) this.updateGhost(p);
     const sculpt = this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten';
-    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal';
+    const area = this.tool === 'harvest' || this.tool === 'bless' || PAINT_TOOLS.includes(this.tool);
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : PAINT_TOOLS.includes(this.tool) ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -709,13 +762,32 @@ export class Game {
         this.ui.setHint(null);
         return;
       }
+      if (this.moving) {
+        // Moving an existing building: drop it at the new spot.
+        const mb = this.moving;
+        const r = this.buildings.relocate(mb, cx, cz, rot);
+        if (!r.ok) {
+          this.ui.toast(r.reason, 'warn');
+          this.audio?.sfx('deny');
+          return;
+        }
+        this.audio?.sfx('place', mb.x, mb.z);
+        this.endMove();
+        this.select({ building: mb.id });
+        return;
+      }
       const b = this.buildings.place(this.placing, cx, cz, rot);
       this.audio?.sfx('place', b.x, b.z);
-      this.ui.toast(`${b.def.name} site placed. Builders are on their way.`);
-      this.placing = null;
-      this.buildings.showGhost(null);
-      this.setTool('select');
-      this.select({ building: b.id });
+      // Stay in placement so rows of huts, farms or torches can go down one after another.
+      if (this.eco.canAfford(b.def.cost)) {
+        if (this.hoverPoint) this.updateGhost(this.hoverPoint);
+      } else {
+        this.ui.toast(`${b.def.name} site placed. Not enough resources for another.`);
+        this.placing = null;
+        this.buildings.showGhost(null);
+        this.setTool('select');
+        this.select({ building: b.id });
+      }
       return;
     }
     switch (this.tool) {
@@ -742,8 +814,9 @@ export class Game {
       case 'flatten':
         return;
       case 'path':
+      case 'dirtpath':
       case 'unpath':
-        if (p) this.paintPath(p, this.tool === 'path');
+        if (p) this.paintPath(p, this.tool !== 'unpath', this.tool === 'dirtpath');
         return;
       case 'bridge':
         if (p) this.paintBridge(p);
@@ -839,8 +912,8 @@ export class Game {
     });
   }
 
-  /** Lay (or lift) stone paths on the cells under the brush. */
-  private paintPath(p: THREE.Vector3, add: boolean): void {
+  /** Lay (or lift) stone or dirt paths on the cells under the brush (path = 1 stone, 2 dirt). */
+  private paintPath(p: THREE.Vector3, add: boolean, dirt = false): void {
     const w = this.world;
     const ccx = Math.floor(p.x + w.half), ccz = Math.floor(p.z + w.half);
     let changed = 0, short = false;
@@ -851,14 +924,15 @@ export class Game {
         if (Math.hypot(w.centerX(cx) - p.x, w.centerZ(cz) - p.z) > PATHS.radius) continue;
         const i = w.idx(cx, cz);
         if (add) {
-          if (w.path[i] || !w.isLandCell(i) || w.occ[i] !== 0) continue;
-          const cost = { wood: 0, stone: PATHS.stonePerCell, belief: 0 };
+          // A stone path can be laid over dirt (upgrading it), not the other way round.
+          if (w.path[i] === 1 || (dirt && w.path[i]) || !w.isLandCell(i) || w.occ[i] !== 0) continue;
+          const cost = { wood: 0, stone: dirt ? PATHS.dirtCost : PATHS.stonePerCell, belief: 0 };
           if (!this.eco.canAfford(cost)) {
             short = true;
             continue;
           }
           this.eco.spend(cost);
-          w.path[i] = 1;
+          w.path[i] = dirt ? 2 : 1;
           changed++;
         } else if (w.canal[i]) {
           // Fill the canal back in.
@@ -983,7 +1057,7 @@ export class Game {
       this.markAt(p, false);
       return;
     }
-    if (this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal') {
+    if (PAINT_TOOLS.includes(this.tool)) {
       // Fill in between pointer samples so a quick drag still lays a continuous path.
       const last = start ? null : this.pathLast;
       const n = last ? Math.max(1, Math.ceil(Math.hypot(p.x - last.x, p.z - last.z) / 0.4)) : 1;
@@ -992,7 +1066,7 @@ export class Game {
         _pathP.set(last ? last.x + (p.x - last.x) * t : p.x, p.y, last ? last.z + (p.z - last.z) * t : p.z);
         if (this.tool === 'bridge') this.paintBridge(_pathP);
         else if (this.tool === 'canal') this.paintCanal(_pathP);
-        else this.paintPath(_pathP, this.tool === 'path');
+        else this.paintPath(_pathP, this.tool !== 'unpath', this.tool === 'dirtpath');
       }
       this.pathLast = { x: p.x, z: p.z };
       return;

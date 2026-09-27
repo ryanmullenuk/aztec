@@ -296,6 +296,10 @@ export const SETTLERS = {
 export const PATHS = {
   /** Stone per paved cell. */
   stonePerCell: 1,
+  /** Dirt paths are free: villagers just clear and tread the ground. */
+  dirtCost: 0,
+  /** Walking speed bonus on a dirt path, as a share of the stone path bonus. */
+  dirtSpeedShare: 0.6,
   /** Brush radius in cells (about two cells wide). */
   radius: 0.85,
   /** Wood per rope bridge deck cell. */
