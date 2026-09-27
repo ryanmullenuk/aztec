@@ -22,7 +22,7 @@ const C = {
   grass: col(COLORS.grass),
   grassBright: col(COLORS.grassBright),
   olive: col(COLORS.grassOlive),
-  jungleFloor: col(0x55822c),
+  jungleFloor: col(0x4d6a2e),
   earth: col(0x9a7a4a),
   rock: col(COLORS.rock),
   rockLight: col(COLORS.rockLight),
