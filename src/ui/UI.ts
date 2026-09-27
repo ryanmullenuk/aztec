@@ -1,4 +1,4 @@
-import { PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR } from '../config';
+import { PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE } from '../config';
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
 import { ROLE_LABEL } from '../entities/Islander';
@@ -18,6 +18,7 @@ const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${Math.fl
 const BUILD_ICON: Record<BuildingKey, string> = {
   campfire: 'belief', hut: 'b_hut', home: 'b_home', temple: 'b_temple', farm: 'b_farm', butcher: 'b_butcher',
   woodstore: 'b_woodstore', grainstore: 'b_grainstore', warroom: 'b_warroom', jetty: 'b_jetty',
+  maizefarm: 'b_maize', chinampa: 'b_chinampa', smokehouse: 'b_smoke',
 };
 
 interface TutorialStep {
@@ -633,7 +634,8 @@ export class UI {
     if (b.complete && b.def.housing) body += `<div class="kv"><span>Residents</span><b>${b.residents.map((id) => g.colony.byId(id)?.name).filter(Boolean).join(', ') || 'Empty'} (${b.residents.length}/${b.housing})</b></div>`;
     const workers = g.colony.list.filter((i) => i.workplace === b.id && b.complete);
     if (b.complete && b.def.workers) body += `<div class="kv"><span>Workers</span><b>${workers.map((w) => w.name).join(', ') || 'None yet'}</b></div>`;
-    if (b.key === 'farm' && b.complete) body += this.bar(b.growth >= 1 ? 'Ready to harvest' : `Maize growing ${Math.round(b.growth * 100)}%`, b.growth, 'good') + (b.blessTimer > 0 ? '<div class="kv"><span>Blessed</span><b>Growing faster</b></div>' : '');
+    if (b.key === 'smokehouse' && b.complete) body += `<div class="kv"><span>Smoking</span><b>${b.tendTimer > 0 ? 'Fire lit, racks full' : g.eco.res.fish >= SMOKE.input || g.eco.res.meat >= SMOKE.input ? 'Waiting for a keeper' : 'Needs raw fish or meat'}</b></div><p class="muted small">${SMOKE.input} raw fish or meat + ${SMOKE.wood} wood → ${SMOKE.output} smoked.</p>`;
+    if (FARM_TYPES[b.key] && b.complete) body += this.bar(b.growth >= 1 ? 'Ready to harvest' : `${FARM_TYPES[b.key]!.label} growing ${Math.round(b.growth * 100)}%`, b.growth, 'good') + (b.blessTimer > 0 ? '<div class="kv"><span>Blessed</span><b>Growing faster</b></div>' : '');
     if (b.key === 'temple' && b.complete) body += `<div class="kv"><span>Belief</span><b>+${(0.25 * b.tier * 60).toFixed(0)}/min and more from priests</b></div>`;
     if (b.key === 'woodstore' || b.key === 'campfire') body += `<div class="kv"><span>Wood / Stone</span><b>${Math.floor(g.eco.res.wood)} · ${Math.floor(g.eco.res.stone)} of ${g.eco.woodCap}</b></div>`;
     if (b.key === 'grainstore' || b.key === 'campfire') body += `<div class="kv"><span>Food</span><b>${Math.floor(g.eco.food)} of ${g.eco.foodCap}</b></div>`;
