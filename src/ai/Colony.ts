@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Economy } from '../economy/Economy';
 import { Islander, Role, Task, makeIslander } from '../entities/Islander';
@@ -467,7 +467,13 @@ export class Colony {
   // ---------------- Decision making ----------------
 
   private think(isl: Islander): void {
-    const night = this.time.isNight;
+    // Test mode: nobody tires or goes hungry, so orders are carried out day and night.
+    const god = this.eco.godMode;
+    if (god) {
+      isl.rest = 1;
+      isl.hunger = 1;
+    }
+    const night = this.time.isNight && !god;
     // Target happiness.
     const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
     let target = 0.3;
@@ -475,6 +481,10 @@ export class Colony {
     if (isl.hunger > 0.45) target += 0.2;
     if (this.bld.of('temple').length) target += 0.1 + Math.min(0.1, this.bld.of('temple').reduce((s, b) => s + b.tier, 0) * 0.03);
     if (FOOD_KEYS.filter((k) => this.eco.res[k] > 0).length >= 3) target += ECONOMY.varietyHappiness;
+    // Fresh water close to home.
+    const hx = home ? home.x : isl.x, hz = home ? home.z : isl.z;
+    const r2 = COMFORTS.wellRadius * COMFORTS.wellRadius;
+    if (this.bld.list.some((w) => w.key === 'well' && w.complete && (w.x - hx) ** 2 + (w.z - hz) ** 2 < r2)) target += COMFORTS.wellHappy;
     isl.happy += (Math.min(1, target) - isl.happy) * 0.08;
 
     if (isl.child) {
@@ -491,6 +501,24 @@ export class Colony {
     if (isl.hunger < ISLANDER.eatThreshold && this.eco.food >= 1) {
       const store = this.bld.nearestStore(isl.x, isl.z, true);
       if (store) return this.setTask(isl, 'eat', store.id, store.door.x, store.door.z);
+    }
+    // Evenings: gather round a bonfire to sing and tell stories before bed.
+    const hr = this.time.hour;
+    if (!god && isl.role !== 'warrior' && isl.lastBonfire !== this.time.day && hr >= COMFORTS.bonfireHours[0] && hr < COMFORTS.bonfireHours[1] && isl.rest > 0.15) {
+      let fire: Building | null = null, fd = Infinity;
+      for (const b of this.bld.list) {
+        if (b.key !== 'bonfire' || !b.complete) continue;
+        const d = (b.x - isl.x) ** 2 + (b.z - isl.z) ** 2;
+        if (d < fd) {
+          fd = d;
+          fire = b;
+        }
+      }
+      if (fire && fd < 70 * 70) {
+        isl.lastBonfire = this.time.day;
+        const a = this.rnd() * Math.PI * 2;
+        return this.setTask(isl, 'bonfire', fire.id, fire.x + Math.cos(a) * 1.25, fire.z + Math.sin(a) * 1.25);
+      }
     }
     if ((night && isl.role !== 'warrior') || isl.rest < ISLANDER.sleepThreshold) return this.goSleep(isl);
     if (night && isl.role === 'warrior' && isl.rest < 0.5) return this.goSleep(isl);
@@ -935,7 +963,7 @@ export class Colony {
         const before = t.timer;
         t.timer -= dt;
         if (Math.floor(before * 1.5) !== Math.floor(t.timer * 1.5)) this.hooks.sfx?.('build', isl.x, isl.z);
-        if (t.timer <= 0 || b.complete) this.releaseTask(isl);
+        if (t.timer <= 0 || (b.complete && !b.upgrading)) this.releaseTask(isl);
         break;
       }
       case 'farm': {
@@ -1087,9 +1115,10 @@ export class Colony {
             return this.releaseTask(isl);
           }
           if (this.hooks.catchable?.(t.target, isl)) {
+            // Look it up before the grab: a hunted animal is gone afterwards.
+            const info = this.hooks.animalInfo?.(t.target);
             const mode = this.hooks.grab!(t.target, isl);
             this.hooks.sfx?.('harvest', isl.x, isl.z);
-            const info = this.hooks.animalInfo?.(t.target);
             if (mode === 'hunt') {
               t.phase = 2;
               isl.carry = { kind: 'meat', res: 'meat', n: info?.meat ?? 10 };
@@ -1210,6 +1239,26 @@ export class Colony {
         }
         break;
       }
+      case 'bonfire': {
+        const b = this.bld.byId(t.target);
+        if (!b || !b.complete) return this.releaseTask(isl);
+        isl.tool = 'none';
+        if (t.stage < 2) {
+          const r = this.travel(isl, dt, t.x, t.z, { goalRadius: 0.6 });
+          if (r === 'failed') return this.fail(isl);
+          if (r !== 'arrived') return;
+          t.stage = 2;
+          t.timer = COMFORTS.bonfireSeconds[0] + this.rnd() * (COMFORTS.bonfireSeconds[1] - COMFORTS.bonfireSeconds[0]);
+        }
+        // Sit facing the fire; now and then someone stands to dance or pray.
+        this.faceTo(isl, b.x - isl.x, b.z - isl.z, dt);
+        isl.anim = Math.sin(t.timer * 0.7 + isl.id) > 0.85 ? 'pray' : 'eat';
+        isl.happy = Math.min(1, isl.happy + COMFORTS.bonfireHappy * dt);
+        this.eco.add('belief', COMFORTS.bonfireBelief * dt);
+        t.timer -= dt;
+        if (t.timer <= 0) this.releaseTask(isl);
+        break;
+      }
       case 'eat': {
         const b = this.bld.byId(t.target);
         if (!b) return this.releaseTask(isl);
@@ -1220,6 +1269,11 @@ export class Colony {
           const meal = this.eco.takeMeal(isl.lastMeal);
           if (!meal) return this.releaseTask(isl);
           if (meal !== isl.lastMeal) isl.happy = Math.min(1, isl.happy + 0.03);
+          // Meat roasted at a firepit: more filling, and a treat.
+          if (meal === 'meat' && this.bld.list.some((f) => f.key === 'firepit' && f.complete)) {
+            isl.hunger = Math.min(1, isl.hunger + COMFORTS.firepitMeal);
+            isl.happy = Math.min(1, isl.happy + COMFORTS.firepitHappy);
+          }
           isl.lastMeal = meal;
           t.stage = 2;
           t.timer = 3;
@@ -1269,6 +1323,31 @@ export class Colony {
   }
 
   onWarrior: (isl: Islander) => void = () => {};
+
+  /**
+   * The player calls for help on a building site: the nearest free adults drop what they're
+   * doing and come to build it (back to their usual work once it's finished).
+   */
+  callHelpers(b: Building): Islander[] {
+    const r2 = COMFORTS.helpersRadius * COMFORTS.helpersRadius;
+    const cand = this.list
+      .filter((i) => !i.child && i.role !== 'warrior' && !i.hidden && !(i.role === 'builder' && i.workplace === b.id))
+      .map((i) => ({ i, d: (i.x - b.x) ** 2 + (i.z - b.z) ** 2 }))
+      .filter((c) => c.d < r2)
+      .sort((a, c) => a.d - c.d)
+      .slice(0, COMFORTS.helpersMax)
+      .map((c) => c.i);
+    for (const i of cand) {
+      if (i.task?.kind === 'fish' && i.task.stage >= 3) continue; // out in a boat
+      this.releaseTask(i);
+      i.role = 'builder';
+      i.workplace = b.id;
+      // Manual until the site is done; then assignJobs returns them to automatic work.
+      i.manualRole = true;
+      i.think = 0;
+    }
+    return cand;
+  }
 
   /** Send an islander walking to a point (new settlers heading to the village). */
   walkTo(isl: Islander, x: number, z: number): void {
@@ -1322,6 +1401,16 @@ export class Colony {
       isl.age += dt;
       isl.hunger = Math.max(0, isl.hunger - ISLANDER.hungerDrain * dt * (isl.child ? 0.6 : 1));
       if (!isl.sleeping) isl.rest = Math.max(0, isl.rest - ISLANDER.restDrain * dt);
+      if (this.eco.godMode) {
+        isl.hunger = 1;
+        isl.rest = 1;
+        // Anyone already in bed gets straight back up to work.
+        if (isl.task?.kind === 'sleep') {
+          this.releaseTask(isl);
+          isl.sleeping = false;
+          isl.hidden = false;
+        }
+      }
       if (isl.child && isl.age > ISLANDER.childGrowDays * 600) {
         isl.child = false;
         isl.role = 'idle';
@@ -1338,7 +1427,7 @@ export class Colony {
       } else {
         // Night falls: stop heading to work and go to bed.
         const t = isl.task;
-        if (this.time.isNight && !isl.child && isl.role !== 'warrior' && t.stage <= 1 && (t.kind === 'chop' || t.kind === 'mine' || t.kind === 'gather' || t.kind === 'farm' || t.kind === 'smoke' || t.kind === 'wander' || t.kind === 'pray' || t.kind === 'spearfish')) {
+        if (this.time.isNight && !this.eco.godMode && !isl.child && isl.role !== 'warrior' && t.stage <= 1 && (t.kind === 'chop' || t.kind === 'mine' || t.kind === 'gather' || t.kind === 'farm' || t.kind === 'smoke' || t.kind === 'wander' || t.kind === 'pray' || t.kind === 'spearfish')) {
           this.releaseTask(isl);
           this.goSleep(isl);
         } else this.runTask(isl, dt);
@@ -1386,6 +1475,7 @@ export class Colony {
       case 'smoke': return 'Smoking fish and meat';
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
+      case 'bonfire': return 'Singing and telling stories at the bonfire';
       case 'sleep': return 'Going to bed';
       case 'wander': return 'Strolling';
       case 'spearfish': return (t.stage ?? 0) < 2 ? 'Heading to the shore to fish' : 'Spear fishing';
