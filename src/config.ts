@@ -416,7 +416,7 @@ export const CRITTERS = {
 };
 
 export const MARINE = {
-  whales: 3,
+  whales: 1,
   /** Whale length in world units (islanders are ~0.62 tall). */
   whaleLength: 5.2,
   whaleSpeed: 1.5,
@@ -425,7 +425,7 @@ export const MARINE = {
   /** Seconds until the first breach, then a random gap between breaches per whale. */
   firstBreach: 12,
   breachEvery: [45, 95] as [number, number],
-  pods: 4,
+  pods: 2,
   dolphinsPerPod: 6,
   dolphinLength: 1.15,
   dolphinSpeed: 3.2,
