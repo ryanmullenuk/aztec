@@ -2,7 +2,7 @@ import { ResourceKey } from '../config';
 
 export type Gender = 'm' | 'f';
 
-export type Role = 'idle' | 'builder' | 'woodcutter' | 'miner' | 'gatherer' | 'farmer' | 'priest' | 'fisher' | 'butcher' | 'warrior';
+export type Role = 'idle' | 'builder' | 'woodcutter' | 'miner' | 'gatherer' | 'farmer' | 'priest' | 'fisher' | 'butcher' | 'smoker' | 'warrior';
 
 export const ROLE_LABEL: Record<Role, string> = {
   idle: 'Resting',
@@ -11,6 +11,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   miner: 'Stonecutter',
   gatherer: 'Fruit gatherer',
   farmer: 'Farmer',
+  smoker: 'Smokehouse keeper',
   priest: 'Priest',
   fisher: 'Fisher',
   butcher: 'Butcher',
@@ -38,7 +39,7 @@ export type CarryKind = ResourceKey | 'log' | 'chicken';
 
 /** A task is a small state machine the AI steps through. */
 export interface Task {
-  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish';
+  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke';
   stage: number;
   /** Plant id, building id or islander id depending on kind. */
   target: number;
