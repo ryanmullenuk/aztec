@@ -45,19 +45,6 @@ export function chickenHead(rooster: boolean): THREE.BufferGeometry {
 
 // ---------------- Pigs ----------------
 
-export function pigBody(spotted: boolean): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(new THREE.CapsuleGeometry(0.11, 0.18, 3, 7), COAT, M.t(0, 0.17, 0, Math.PI / 2, 0, 0, 1, 1, 0.95));
-  // Curly tail.
-  b.add(P.torus(0.016, 0.006, 3, 8), coat(0.85), M.t(0, 0.2, -0.21, 0, Math.PI / 2, 0));
-  if (spotted) {
-    for (const [x, y, z, r] of [[0.08, 0.22, 0.05, 0.05], [-0.06, 0.24, -0.08, 0.06], [0.05, 0.16, -0.12, 0.04], [-0.09, 0.15, 0.1, 0.035]]) {
-      b.add(P.sphere(r, 0), C(0x2e2622), M.t(x * 1.25, y, z, 0, 0, 0, 1, 0.5, 1));
-    }
-  }
-  return facet(b.build());
-}
-
 export function pigHead(): THREE.BufferGeometry {
   const b = new GeoBuilder();
   b.add(P.sphere(0.085, 1), COAT, M.t(0, 0, 0.03, 0, 0, 0, 1, 0.92, 1));
@@ -71,17 +58,6 @@ export function pigHead(): THREE.BufferGeometry {
 }
 
 // ---------------- Goats ----------------
-
-export function goatBody(patched: boolean): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(new THREE.CapsuleGeometry(0.085, 0.2, 3, 7), COAT, M.t(0, 0.25, 0, Math.PI / 2, 0, 0));
-  b.add(P.cone(0.03, 0.06, 4), COAT, M.t(0, 0.29, -0.2, -2.2, 0, 0));
-  if (patched) {
-    b.add(P.sphere(0.075, 0), C(0xf0ebe0), M.t(0, 0.24, 0.1, 0, 0, 0, 1.05, 0.95, 1.1));
-    b.add(P.sphere(0.06, 0), C(0xf0ebe0), M.t(0, 0.19, -0.06, 0, 0, 0, 1.2, 0.6, 1.4));
-  }
-  return facet(b.build());
-}
 
 export function goatHead(curly: boolean): THREE.BufferGeometry {
   const b = new GeoBuilder();
@@ -98,15 +74,6 @@ export function goatHead(curly: boolean): THREE.BufferGeometry {
 }
 
 // ---------------- Tapirs ----------------
-
-export function tapirBody(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(new THREE.CapsuleGeometry(0.2, 0.42, 3, 8), COAT, M.t(0, 0.34, 0, Math.PI / 2, 0, 0, 1, 1.05, 1));
-  // Pale saddle across the chest and shoulders, as in the reference.
-  b.add(P.cyl(0.205, 0.205, 0.16, 8), C(0xc8b8a2), M.t(0, 0.33, 0.22, Math.PI / 2, 0, 0, 1.01, 1, 1.06));
-  b.add(P.cone(0.03, 0.06, 4), COAT, M.t(0, 0.38, -0.42, -2.3, 0, 0));
-  return facet(b.build());
-}
 
 export function tapirHead(): THREE.BufferGeometry {
   const b = new GeoBuilder();
@@ -134,26 +101,11 @@ export function legGeometry(len: number, r: number, hoof: number, mat: 'coat' | 
 
 const MONKEY = 0x2a2220, MONKEY_TAN = 0xb8935e;
 
-export function monkeyTorso(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(new THREE.CapsuleGeometry(0.05, 0.1, 3, 6), C(MONKEY), M.t(0, 0.08, 0));
-  b.add(P.sphere(0.04, 1), C(MONKEY_TAN), M.t(0, 0.085, 0.024, 0, 0, 0, 0.85, 1.35, 0.55));
-  // Shoulders and hips a touch wider than the capsule.
-  b.add(P.sphere(0.05, 1), C(MONKEY), M.t(0, 0.145, 0, 0, 0, 0, 1.25, 0.6, 0.9));
-  b.add(P.sphere(0.048, 1), C(MONKEY), M.t(0, 0.03, -0.005, 0, 0, 0, 1.1, 0.7, 1));
-  return facet(b.build());
-}
 export function monkeyHead(): THREE.BufferGeometry {
   const b = new GeoBuilder();
   b.add(P.sphere(0.045, 1), C(MONKEY), M.t(0, 0.04, 0));
   b.add(P.sphere(0.028, 0), C(0x6e5a48), M.t(0, 0.03, 0.03, 0, 0, 0, 1, 0.9, 0.7));
   for (const x of [-1, 1]) b.add(P.sphere(0.007, 0), C(0x080606), M.t(x * 0.014, 0.045, 0.045));
-  return facet(b.build());
-}
-export function monkeyLimb(len: number): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(P.cyl(0.012, 0.016, len, 5), C(MONKEY), M.t(0, -len / 2, 0));
-  b.add(P.sphere(0.017, 0), C(MONKEY), M.t(0, -len, 0.005));
   return facet(b.build());
 }
 /** Long prehensile tail with a curl at the tip. Pivot at the base, trailing along -z. */
@@ -209,6 +161,131 @@ export function gullBody(): THREE.BufferGeometry {
 export function birdLegs(color: number): THREE.BufferGeometry {
   const b = new GeoBuilder();
   for (const x of [-1, 1]) b.add(P.cyl(0.004, 0.004, 0.05, 3), C(color), M.t(x * 0.015, -0.045, 0));
+  return facet(b.build());
+}
+
+// ---------------- Jointed quadrupeds (pig, goat, tapir) ----------------
+
+/**
+ * Split a faceted body into front and rear halves around the mid-body joint at z = 0 (the
+ * halves overlap a little so no gap opens when the spine bends). Geometry must be non-indexed.
+ */
+export function splitBody(g: THREE.BufferGeometry, spineY: number, ov = 0.035): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  g.translate(0, -spineY, 0);
+  const pos = g.getAttribute('position');
+  const pick = (keep: (cz: number) => boolean) => {
+    const out = new THREE.BufferGeometry();
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
+      const arr: number[] = [];
+      for (let i = 0; i < pos.count; i += 3) {
+        const cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+        if (!keep(cz)) continue;
+        for (let k = 0; k < 3; k++) for (let c = 0; c < a.itemSize; c++) arr.push(a.getComponent(i + k, c));
+      }
+      out.setAttribute(name, new THREE.Float32BufferAttribute(arr, a.itemSize));
+    }
+    out.computeBoundingSphere();
+    return out;
+  };
+  return [pick((cz) => cz > -ov), pick((cz) => cz < ov)];
+}
+
+/** Pig body with shoulders, hams and belly; split at the spine joint. */
+export function pigBodyHalves(spotted: boolean, spineY: number): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const b = new GeoBuilder();
+  b.add(new THREE.CapsuleGeometry(0.11, 0.2, 4, 8), COAT, M.t(0, 0.17, 0, Math.PI / 2, 0, 0, 1, 1, 0.95));
+  b.add(P.sphere(0.1, 1), COAT, M.t(0, 0.18, 0.1, 0, 0, 0, 1.12, 1, 1.05));
+  b.add(P.sphere(0.105, 1), COAT, M.t(0, 0.18, -0.11, 0, 0, 0, 1.15, 1, 1));
+  b.add(P.sphere(0.1, 1), coat(0.9), M.t(0, 0.125, 0, 0, 0, 0, 0.95, 0.55, 1.7));
+  b.add(P.torus(0.016, 0.006, 3, 8), coat(0.85), M.t(0, 0.21, -0.235, 0, Math.PI / 2, 0));
+  if (spotted) {
+    for (const [x, y, z, r] of [[0.08, 0.22, 0.05, 0.05], [-0.06, 0.24, -0.08, 0.06], [0.05, 0.16, -0.12, 0.04], [-0.09, 0.15, 0.1, 0.035]]) {
+      b.add(P.sphere(r, 0), C(0x2e2622), M.t(x * 1.3, y, z, 0, 0, 0, 1, 0.5, 1));
+    }
+  }
+  return splitBody(facet(b.build()), spineY);
+}
+
+/** Goat body: deep chest, lean haunch, short upturned tail, shaggy belly fringe. */
+export function goatBodyHalves(patched: boolean, spineY: number): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const b = new GeoBuilder();
+  b.add(new THREE.CapsuleGeometry(0.085, 0.22, 4, 8), COAT, M.t(0, 0.26, 0, Math.PI / 2, 0, 0));
+  b.add(P.sphere(0.09, 1), COAT, M.t(0, 0.265, 0.12, 0, 0, 0, 0.95, 1.08, 1));
+  b.add(P.sphere(0.086, 1), COAT, M.t(0, 0.275, -0.12, 0, 0, 0, 1.02, 1, 1));
+  b.add(P.cone(0.028, 0.07, 4), COAT, M.t(0, 0.31, -0.21, -2.4, 0, 0));
+  for (let k = 0; k < 5; k++) b.add(P.box(0.08, 0.035, 0.035), coat(0.85), M.t(0, 0.185, -0.1 + k * 0.05, 0.2, 0, 0));
+  if (patched) {
+    b.add(P.sphere(0.075, 0), C(0xf0ebe0), M.t(0, 0.25, 0.1, 0, 0, 0, 1.12, 0.95, 1.1));
+    b.add(P.sphere(0.06, 0), C(0xf0ebe0), M.t(0, 0.2, -0.06, 0, 0, 0, 1.3, 0.6, 1.4));
+  }
+  return splitBody(facet(b.build()), spineY);
+}
+
+/** Tapir body: heavy barrel, high rounded rump, pale saddle, stubby tail. */
+export function tapirBodyHalves(spineY: number): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const b = new GeoBuilder();
+  b.add(new THREE.CapsuleGeometry(0.2, 0.42, 4, 9), COAT, M.t(0, 0.35, 0, Math.PI / 2, 0, 0, 1, 1.05, 1));
+  b.add(P.sphere(0.205, 1), COAT, M.t(0, 0.39, -0.22, 0, 0, 0, 1.02, 1.02, 1));
+  b.add(P.sphere(0.19, 1), COAT, M.t(0, 0.35, 0.25, 0, 0, 0, 1, 1, 1.05));
+  b.add(P.cyl(0.207, 0.207, 0.18, 9), C(0xc8b8a2), M.t(0, 0.35, 0.2, Math.PI / 2, 0, 0, 1.01, 1, 1.06));
+  b.add(P.cone(0.03, 0.06, 4), COAT, M.t(0, 0.42, -0.44, -2.3, 0, 0));
+  return splitBody(facet(b.build()), spineY);
+}
+
+/** Upper or lower leg segment hanging from its joint (rounded joint at the top). */
+export function legSegment(len: number, r0: number, r1: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.sphere(r0 * 1.08, 0), COAT, M.t(0, 0, 0));
+  b.add(P.cyl(r1, r0, len, 6), COAT, M.t(0, -len / 2, 0));
+  return facet(b.build());
+}
+
+/** Foot below the wrist / ankle: short pastern and a hoof (split for pigs and goats, toes for tapirs). */
+export function footSegment(len: number, r: number, hoof: number, kind: 'split' | 'toes'): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.sphere(r * 1.05, 0), COAT, M.t(0, 0, 0));
+  b.add(P.cyl(r * 0.9, r, len * 0.6, 6), COAT, M.t(0, -len * 0.3, 0));
+  if (kind === 'split') {
+    for (const x of [-1, 1]) b.add(P.box(r * 0.95, len * 0.42, r * 1.9), C(hoof), M.t(x * r * 0.52, -len * 0.79, r * 0.25, 0.12, 0, 0));
+  } else {
+    b.add(P.cyl(r * 1.15, r * 1.25, len * 0.35, 7), C(hoof), M.t(0, -len * 0.82, r * 0.15));
+    for (const x of [-0.6, 0, 0.6]) b.add(P.sphere(r * 0.42, 0), C(0x2a2420), M.t(x * r, -len * 0.92, r * 1.05));
+  }
+  return facet(b.build());
+}
+
+// ---------------- Jointed monkey parts ----------------
+
+/** Pelvis (hips) with the joint to the chest at y = 0.08. */
+export function monkeyPelvis(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(new THREE.CapsuleGeometry(0.046, 0.04, 3, 6), C(MONKEY), M.t(0, 0.05, 0));
+  b.add(P.sphere(0.048, 1), C(MONKEY), M.t(0, 0.03, -0.005, 0, 0, 0, 1.1, 0.7, 1));
+  b.add(P.sphere(0.03, 0), C(MONKEY_TAN), M.t(0, 0.05, 0.028, 0, 0, 0, 0.9, 1.1, 0.5));
+  return facet(b.build());
+}
+/** Chest and shoulders above the waist joint (origin at the waist). */
+export function monkeyChest(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(new THREE.CapsuleGeometry(0.05, 0.04, 3, 6), C(MONKEY), M.t(0, 0.035, 0));
+  b.add(P.sphere(0.034, 0), C(MONKEY_TAN), M.t(0, 0.03, 0.026, 0, 0, 0, 0.9, 1.2, 0.55));
+  b.add(P.sphere(0.05, 1), C(MONKEY), M.t(0, 0.065, 0, 0, 0, 0, 1.25, 0.6, 0.9));
+  return facet(b.build());
+}
+/** One limb segment (upper arm, forearm, thigh or shin) from its joint. */
+export function monkeySeg(len: number, r0: number, r1: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.sphere(r0 * 1.1, 0), C(MONKEY), M.t(0, 0, 0));
+  b.add(P.cyl(r1, r0, len, 5), C(MONKEY), M.t(0, -len / 2, 0));
+  return facet(b.build());
+}
+/** Long-fingered hand or foot from the wrist / ankle. */
+export function monkeyHand(len: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.sphere(0.012, 0), C(MONKEY), M.t(0, 0, 0));
+  b.add(P.box(0.022, len, 0.012), C(0x3a302a), M.t(0, -len / 2, 0.004));
+  for (const x of [-0.007, 0, 0.007]) b.add(P.box(0.005, len * 0.45, 0.006), C(0x3a302a), M.t(x, -len * 1.1, 0.007, 0.3, 0, 0));
   return facet(b.build());
 }
 

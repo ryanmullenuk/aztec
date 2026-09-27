@@ -60,6 +60,9 @@ const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const TAU = Math.PI * 2;
+/** Segment lengths: upper arm, forearm; thigh, shin. */
+const ARM = [0.068, 0.062];
+const LEG = [0.058, 0.052];
 
 function local(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
   _e.set(rx, ry, rz, 'YXZ');
@@ -99,10 +102,16 @@ export class Monkeys {
       this.group.add(m);
     };
     const n = this.list.length;
-    mk('torso', models.monkeyTorso(), n);
+    // Jointed: pelvis + chest (waist joint), upper arm / forearm / hand, thigh / shin / foot.
+    mk('pelvis', models.monkeyPelvis(), n);
+    mk('chest', models.monkeyChest(), n);
     mk('head', models.monkeyHead(), n);
-    mk('arm', models.monkeyLimb(0.13), n * 2);
-    mk('leg', models.monkeyLimb(0.11), n * 2);
+    mk('uarm', models.monkeySeg(ARM[0], 0.013, 0.011), n * 2);
+    mk('farm', models.monkeySeg(ARM[1], 0.011, 0.009), n * 2);
+    mk('hand', models.monkeyHand(0.028), n * 2);
+    mk('thigh', models.monkeySeg(LEG[0], 0.016, 0.012), n * 2);
+    mk('shin', models.monkeySeg(LEG[1], 0.012, 0.009), n * 2);
+    mk('foot', models.monkeyHand(0.03), n * 2);
     mk('tail', models.monkeyTail(), n);
   }
 
@@ -370,17 +379,24 @@ export class Monkeys {
 
   private render(): void {
     const ms = this.meshes;
-    const cnt: Record<string, number> = { torso: 0, head: 0, arm: 0, leg: 0, tail: 0 };
+    const cnt: Record<string, number> = {};
+    for (const k of Object.keys(ms)) cnt[k] = 0;
     const put = (key: string, parent: THREE.Matrix4, l: THREE.Matrix4) => {
       _m.multiplyMatrices(parent, l);
       ms[key].setMatrixAt(cnt[key]++, _m);
+      return _m;
     };
     const L = new THREE.Matrix4();
+    const chest = new THREE.Matrix4(), J = new THREE.Matrix4(), T = new THREE.Matrix4();
     for (const m of this.list) {
       const t = this.time + m.phase;
       let pitch = 0, roll = 0, bodyY = 0;
       let armL = -0.25, armR = -0.25, armLz = 0.25, armRz = -0.25;
       let legL = -1.4, legR = -1.4, legSpread = 0.35;
+      // Elbows (forearm forward −), wrists, knees (shin back +), ankles, and the waist.
+      let elbL = -0.35, elbR = -0.35, wriL = 0.1, wriR = 0.1;
+      let kneeL = 1.7, kneeR = 1.7, ankL = -0.6, ankR = -0.6;
+      let waistX = 0.12, waistY = 0;
       let tailX = -1.25, tailY = Math.sin(t * 0.8) * 0.25;
       let headX = 0, headY = m.look;
       let yaw = m.heading;
@@ -391,11 +407,22 @@ export class Monkeys {
           headY = m.look + Math.sin(t * 0.6) * 0.5;
           headX = Math.sin(t * 0.37) * 0.15;
           armL = -0.4 + Math.sin(t * 0.3) * 0.05;
+          // Forearms resting over the knees, now and then scratching.
+          elbL = -0.9;
+          elbR = -0.7 + Math.max(0, Math.sin(t * 0.21)) * Math.sin(t * 9) * 0.25;
+          kneeL = 1.9;
+          kneeR = 1.8;
+          waistX = 0.2 + Math.sin(t * 0.4) * 0.04;
+          waistY = Math.sin(t * 0.25) * 0.15;
           break;
         case 'eat':
-          armR = -2.4 + Math.sin(t * 5) * 0.15;
+          armR = -2.2 + Math.sin(t * 5) * 0.12;
           armRz = 0.3;
+          elbR = -1.7 + Math.sin(t * 5) * 0.2;
+          wriR = -0.6;
+          elbL = -1.0;
           headX = 0.2 + Math.sin(t * 5) * 0.05;
+          waistX = 0.22;
           break;
         case 'walk': {
           const g = t * 9;
@@ -405,10 +432,20 @@ export class Monkeys {
           armR = -pitch - Math.sin(g) * 0.55;
           legL = -pitch - Math.sin(g) * 0.55;
           legR = -pitch + Math.sin(g) * 0.55;
+          // Limbs flex as they swing forward, straighten as they push.
+          elbL = -0.15 - Math.max(0, Math.cos(g)) * 0.7;
+          elbR = -0.15 - Math.max(0, -Math.cos(g)) * 0.7;
+          kneeL = 0.35 + Math.max(0, -Math.cos(g)) * 0.9;
+          kneeR = 0.35 + Math.max(0, Math.cos(g)) * 0.9;
+          wriL = wriR = pitch * 0.6;
+          ankL = ankR = -0.9;
           legSpread = 0.1;
           armLz = 0.1;
           armRz = -0.1;
           headX = -1.0;
+          // Spine swings side to side with the stride.
+          waistX = 0;
+          waistY = Math.sin(g) * 0.14;
           // Tail up in an S curve for balance.
           tailX = -pitch + 0.9 + Math.sin(g * 0.5) * 0.1;
           break;
@@ -417,8 +454,17 @@ export class Monkeys {
           const g = t * 7;
           armL = -2.6 + Math.sin(g) * 0.4;
           armR = -2.6 - Math.sin(g) * 0.4;
+          // Reaching arm straight, pulling arm bent.
+          elbL = -0.15 - Math.max(0, -Math.sin(g)) * 1.3;
+          elbR = -0.15 - Math.max(0, Math.sin(g)) * 1.3;
+          wriL = wriR = -0.4;
           legL = -1.0 - Math.sin(g) * 0.35;
           legR = -1.0 + Math.sin(g) * 0.35;
+          kneeL = 1.3 + Math.sin(g) * 0.5;
+          kneeR = 1.3 - Math.sin(g) * 0.5;
+          ankL = ankR = -0.9;
+          waistX = -0.1;
+          waistY = Math.sin(g) * 0.12;
           pitch = 0.15;
           headX = -0.3;
           tailX = -1.4;
@@ -430,8 +476,15 @@ export class Monkeys {
           armL = armR = Math.PI;
           armLz = -0.15;
           armRz = 0.15;
+          elbL = elbR = -0.1;
+          wriL = wriR = -0.9;
           legL = Math.sin(t * 1.6 + 0.6) * 0.25;
           legR = Math.sin(t * 1.6 + 0.9) * 0.25;
+          kneeL = 0.3 + Math.sin(t * 1.6 + 1.2) * 0.25;
+          kneeR = 0.35 + Math.sin(t * 1.6 + 1.5) * 0.25;
+          ankL = ankR = -0.4;
+          waistX = Math.sin(t * 1.6 + 0.4) * 0.12;
+          waistY = 0;
           legSpread = 0.2;
           tailX = 1.1;
           headX = -0.25;
@@ -442,7 +495,10 @@ export class Monkeys {
           bodyY = -0.05 * k;
           pitch = 0.6 * k;
           legL = legR = -1.9 * k;
+          kneeL = kneeR = 1.7 + 0.6 * k;
           armL = armR = -1.2 * k;
+          elbL = elbR = -0.35 - 0.6 * k;
+          waistX = 0.12 + 0.2 * k;
           headX = -0.5 * k;
           const dx = m.to.x - m.x, dz = m.to.z - m.z;
           yaw = Math.atan2(dx, dz);
@@ -453,9 +509,14 @@ export class Monkeys {
           const k = Math.min(1, m.t);
           pitch = 1.0 + (k - 0.5) * 0.6;
           armL = armR = -pitch - 1.4 + k * 0.4;
+          elbL = elbR = -0.05;
+          wriL = wriR = -0.3 + k * 0.5;
           armLz = 0.25;
           armRz = -0.25;
           legL = legR = -pitch + 0.9 - k * 0.8;
+          kneeL = kneeR = 0.3 + k * 0.9;
+          ankL = ankR = -0.3;
+          waistX = -0.2 + k * 0.3;
           legSpread = 0.25;
           tailX = -pitch + 0.2;
           tailY = Math.sin(t * 6) * 0.15;
@@ -467,7 +528,10 @@ export class Monkeys {
           bodyY = -0.06 * k;
           pitch = 0.6 * k;
           legL = legR = -1.4 - 0.5 * k;
+          kneeL = kneeR = 1.7 + 0.5 * k;
           armL = armR = -0.8 * k - 0.3;
+          elbL = elbR = -0.3 - 0.6 * k;
+          waistX = 0.12 + 0.25 * k;
           break;
         }
       }
@@ -477,16 +541,32 @@ export class Monkeys {
         local(_b, m.x, m.y + 0.02, m.z, 0, yaw, 0, s);
         L.copy(_b);
         _b.multiply(local(new THREE.Matrix4(), 0, 0, 0, hangSwing, 0, 0));
-        _b.multiply(local(new THREE.Matrix4(), 0, -0.28, 0, 0, 0, 0));
+        _b.multiply(local(new THREE.Matrix4(), 0, -0.3, 0, 0, 0, 0));
       } else {
         local(_b, m.x, m.y + bodyY * s, m.z, pitch, yaw, roll, s);
       }
-      put('torso', _b, local(L, 0, 0, 0, 0, 0, 0));
-      put('head', _b, local(L, 0, 0.17, 0.01, headX, headY, 0));
-      put('arm', _b, local(L, 0.055, 0.145, 0, armL, 0, armLz));
-      put('arm', _b, local(L, -0.055, 0.145, 0, armR, 0, armRz));
-      put('leg', _b, local(L, 0.035, 0.03, 0.01, legL, 0, legSpread * 0.4));
-      put('leg', _b, local(L, -0.035, 0.03, 0.01, legR, 0, -legSpread * 0.4));
+      put('pelvis', _b, local(L, 0, 0, 0, 0, 0, 0));
+      chest.multiplyMatrices(_b, local(L, 0, 0.08, 0, waistX, waistY, 0));
+      put('chest', chest, local(L, 0, 0, 0, 0, 0, 0));
+      put('head', chest, local(L, 0, 0.09, 0.01, headX - waistX, headY - waistY, 0));
+      // Arms: shoulder → elbow → wrist.
+      for (const [side, ax, az, el, wr] of [[1, armL, armLz, elbL, wriL], [-1, armR, armRz, elbR, wriR]] as const) {
+        J.multiplyMatrices(chest, local(T, side * 0.055, 0.065, 0, ax - waistX, 0, az));
+        ms.uarm.setMatrixAt(cnt.uarm++, J);
+        J.multiply(local(T, 0, -ARM[0], 0, el, 0, 0));
+        ms.farm.setMatrixAt(cnt.farm++, J);
+        J.multiply(local(T, 0, -ARM[1], 0, wr, 0, 0));
+        ms.hand.setMatrixAt(cnt.hand++, J);
+      }
+      // Legs: hip → knee → ankle.
+      for (const [side, lg, kn, an] of [[1, legL, kneeL, ankL], [-1, legR, kneeR, ankR]] as const) {
+        J.multiplyMatrices(_b, local(T, side * 0.035, 0.03, 0.01, lg, 0, side * legSpread * 0.4));
+        ms.thigh.setMatrixAt(cnt.thigh++, J);
+        J.multiply(local(T, 0, -LEG[0], 0, kn, 0, 0));
+        ms.shin.setMatrixAt(cnt.shin++, J);
+        J.multiply(local(T, 0, -LEG[1], 0, an, 0, 0));
+        ms.foot.setMatrixAt(cnt.foot++, J);
+      }
       put('tail', _b, local(L, 0, 0.035, -0.04, tailX, tailY, 0));
       void roll;
     }

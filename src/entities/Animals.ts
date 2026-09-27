@@ -46,6 +46,12 @@ export interface Animal {
   flap: number;
   /** Wings 0 folded … 1 spread (smoothed). */
   wingOpen: number;
+  /** Gait cycle position (advances with distance walked), heading last frame, smoothed turn rate. */
+  gait: number;
+  prevHeading: number;
+  turn: number;
+  /** 0 standing … 1 lying down (smoothed). */
+  lie: number;
   chasedBy: Islander | null;
   heldBy: Islander | null;
   heldMode: 'carry' | 'lead' | null;
@@ -88,6 +94,40 @@ const RIG: Record<SpeciesKey, { legs: [number, number, number][]; legLen: number
   goat: { legs: [[-0.05, 0.18, 0.12], [0.05, 0.18, 0.12], [-0.05, 0.18, -0.12], [0.05, 0.18, -0.12]], legLen: 0.18, head: [0, 0.3, 0.2], wings: false },
   tapir: { legs: [[-0.11, 0.2, 0.24], [0.11, 0.2, 0.24], [-0.11, 0.2, -0.24], [0.11, 0.2, -0.24]], legLen: 0.2, head: [0, 0.4, 0.42], wings: false },
 };
+
+/**
+ * Jointed quadruped skeletons: a spine joint mid-body (front and rear halves bend when turning
+ * and flex at speed), and legs of three segments: hip/shoulder → knee/elbow → ankle/wrist → foot.
+ */
+type Quad = 'pig' | 'goat' | 'tapir';
+interface QuadRig {
+  spineY: number;
+  /** Shoulder / hip joint height above the ground (front legs stand straight). */
+  hipY: number;
+  x: number;
+  zF: number;
+  zR: number;
+  /** Head joint in the front half's frame. */
+  head: [number, number, number];
+  /** Segment length ratios (upper, lower, foot) and radii. */
+  seg: [number, number, number];
+  r: number;
+  /** Distance covered per gait cycle. */
+  stride: number;
+  hoof: number;
+  foot: 'split' | 'toes';
+}
+const QUAD: Record<Quad, QuadRig> = {
+  pig: { spineY: 0.17, hipY: 0.12, x: 0.066, zF: 0.12, zR: -0.13, head: [0, 0.03, 0.22], seg: [0.42, 0.36, 0.22], r: 0.03, stride: 0.26, hoof: 0x3a2a22, foot: 'split' },
+  goat: { spineY: 0.26, hipY: 0.21, x: 0.05, zF: 0.13, zR: -0.13, head: [0, 0.04, 0.2], seg: [0.38, 0.38, 0.24], r: 0.021, stride: 0.34, hoof: 0x2a2018, foot: 'split' },
+  tapir: { spineY: 0.35, hipY: 0.25, x: 0.11, zF: 0.24, zR: -0.24, head: [0, 0.05, 0.42], seg: [0.4, 0.37, 0.23], r: 0.052, stride: 0.5, hoof: 0x1e1814, foot: 'toes' },
+};
+/** Hind legs stand with the thigh forward, shin back and cannon upright; their hip sits a little lower. */
+const HIND0 = [-0.32, 0.64, -0.32];
+const hindHipY = (q: QuadRig) => q.hipY * (q.seg[0] * Math.cos(HIND0[0]) + q.seg[1] * Math.cos(HIND0[0] + HIND0[1]) + q.seg[2]);
+/** Gait phase offsets per leg (LF, RF, LH, RH): lateral-sequence walk and diagonal trot. */
+const WALK = [0.25, 0.75, 0, 0.5];
+const TROT = [0, 0.5, 0.5, 0];
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
@@ -157,18 +197,26 @@ export class Animals {
     // Jointed wings (arm, forearm, hand; right then left), tinted with the coat colour.
     wingParts(CHICKEN_WING, 2).forEach((g, k) => add(`wing_chicken${k}`, g, cap));
     add('leg_chicken', models.legGeometry(0.055, 0.008, 0xe8b030, 0xe8b030), cap * 2);
-    add('pig_plain', models.pigBody(false), cap);
-    add('pig_spotted', models.pigBody(true), cap);
+    // Quadrupeds: front / rear body halves (split at the spine joint) and three-segment legs.
+    const halves = (key: string, h: [THREE.BufferGeometry, THREE.BufferGeometry], n: number) => {
+      add(`${key}_F`, h[0], n);
+      add(`${key}_R`, h[1], n);
+    };
+    halves('pig_plain', models.pigBodyHalves(false, QUAD.pig.spineY), cap);
+    halves('pig_spotted', models.pigBodyHalves(true, QUAD.pig.spineY), cap);
     add('head_pig', models.pigHead(), cap);
-    add('leg_pig', models.legGeometry(0.1, 0.025, 0x3a2a22, 'coat'), cap * 4);
-    add('goat_plain', models.goatBody(false), cap);
-    add('goat_patched', models.goatBody(true), cap);
+    halves('goat_plain', models.goatBodyHalves(false, QUAD.goat.spineY), cap);
+    halves('goat_patched', models.goatBodyHalves(true, QUAD.goat.spineY), cap);
     add('head_straight', models.goatHead(false), cap);
     add('head_curly', models.goatHead(true), cap);
-    add('leg_goat', models.legGeometry(0.18, 0.016, 0x3a2a22, 'coat'), cap * 4);
-    add('tapir_plain', models.tapirBody(), 12);
+    halves('tapir_plain', models.tapirBodyHalves(QUAD.tapir.spineY), 12);
     add('head_tapir', models.tapirHead(), 12);
-    add('leg_tapir', models.legGeometry(0.2, 0.045, 0x1e1814, 'coat'), 48);
+    for (const sp of ['pig', 'goat', 'tapir'] as Quad[]) {
+      const q = QUAD[sp], L = q.hipY, n = sp === 'tapir' ? 48 : cap * 4;
+      add(`legU_${sp}`, models.legSegment(L * q.seg[0], q.r, q.r * 0.78), n);
+      add(`legL_${sp}`, models.legSegment(L * q.seg[1], q.r * 0.74, q.r * 0.6), n);
+      add(`legP_${sp}`, models.footSegment(L * q.seg[2], q.r * 0.62, q.hoof, q.foot), n);
+    }
   }
 
   // ---------------- Spawning ----------------
@@ -263,7 +311,7 @@ export class Animals {
       scale: this.rng.range(v.scale[0], v.scale[1]) * (juvenile ? 0.55 : 1),
       x, z, y: this.world.groundY(x, z), heading: this.rng.range(0, 6.28), speed: 0,
       state: 'idle', feed: 'graze', timer: this.rng.range(0.5, 6), tx: x, tz: z, group, pen: -1, alive: true, respawn: 0,
-      stamina: def.stamina, caught: 0, lookYaw: 0, phase: this.rng.range(0, 10), flap: 0, wingOpen: 0,
+      stamina: def.stamina, caught: 0, lookYaw: 0, phase: this.rng.range(0, 10), flap: 0, wingOpen: 0, gait: this.rng.next(), prevHeading: 0, turn: 0, lie: 0,
       chasedBy: null, heldBy: null, heldMode: null, tick: this.rng.next() * 0.3, tempo: this.rng.range(0.8, 1.25),
     };
   }
@@ -429,7 +477,7 @@ export class Animals {
         this.step(a, d, cursor, people);
       }
     }
-    this.draw();
+    this.draw(dt);
   }
 
   private walkable(a: Animal, x: number, z: number): boolean {
@@ -731,6 +779,17 @@ export class Animals {
 
   // ---------------- Drawing ----------------
 
+  /** Rope from the islander leading this animal to its neck. */
+  private leashLine(a: Animal, rig: (typeof RIG)[SpeciesKey], lineArr: Float32Array, lines: number): boolean {
+    if (a.heldMode !== 'lead' || !a.heldBy || lines >= 64) return false;
+    const l = a.heldBy;
+    const hx2 = l.x, hy2 = l.y + 0.25, hz2 = l.z;
+    const ax = a.x + Math.sin(a.heading) * 0.15 * a.scale, ay = a.y + rig.head[1] * a.scale, az = a.z + Math.cos(a.heading) * 0.15 * a.scale;
+    const mx = (hx2 + ax) / 2, my = (hy2 + ay) / 2 - 0.08, mz = (hz2 + az) / 2;
+    lineArr.set([hx2, hy2, hz2, mx, my, mz, mx, my, mz, ax, ay, az], lines * 12);
+    return true;
+  }
+
   private put(key: string, m: THREE.Matrix4, col: THREE.Color): void {
     const e = this.meshes.get(key);
     if (!e || e.n >= e.mesh.instanceMatrix.count) return;
@@ -739,7 +798,82 @@ export class Animals {
     e.n++;
   }
 
-  private draw(): void {
+  /** Pig, goat or tapir: spine bend, gait-driven jointed legs, head on the front half. */
+  private drawQuad(a: Animal, dt: number): void {
+    const q = QUAD[a.sp as Quad];
+    const moving = a.speed > 0.05;
+    const fast = a.state === 'flee' || a.speed > 1;
+    // Gait advances with distance travelled, so feet don't skate.
+    a.gait = (a.gait + (a.speed * dt) / q.stride / (fast ? 1.5 : 1)) % 1;
+    let dh = a.heading - a.prevHeading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    a.prevHeading = a.heading;
+    if (dt > 0) a.turn += (THREE.MathUtils.clamp(dh / dt, -4, 4) - a.turn) * Math.min(1, dt * 6);
+    a.lie += ((a.state === 'rest' ? 1 : 0) - a.lie) * Math.min(1, dt * 2.5);
+    const lie = a.lie;
+    const G = a.gait * Math.PI * 2;
+    // Spine: bends into turns, sways a little with each step, flexes and extends when running.
+    const bendYaw = THREE.MathUtils.clamp(a.turn * 0.11, -0.32, 0.32) + (moving && !fast ? Math.sin(G) * 0.05 : 0);
+    const flex = fast ? Math.sin(G * 2) * 0.09 : 0;
+    let headTilt = 0, frontPitch = 0;
+    if (a.state === 'feed') {
+      headTilt = a.feed === 'sniff' ? 0.6 + Math.sin(a.phase * 6) * 0.2 : 0.8 + Math.sin(a.phase * 1.7) * 0.1;
+      frontPitch = 0.1;
+    }
+    if (a.state === 'alert') headTilt = -0.25;
+    const bob = moving ? (fast ? Math.abs(Math.sin(G * 2)) * 0.022 : Math.abs(Math.sin(G * 2)) * 0.008) * a.scale : Math.sin(a.phase * 2) * 0.002;
+    const drop = lie * (q.spineY - q.hipY * 0.35);
+    compose(_m, a.x, a.y + (q.spineY - drop) * a.scale + bob, a.z, 0, a.heading, lie * 0.08, a.scale);
+    const front = new THREE.Matrix4().multiplyMatrices(_m, compose(new THREE.Matrix4(), 0, 0, 0, frontPitch + flex, bendYaw * 0.5, 0));
+    const rear = new THREE.Matrix4().multiplyMatrices(_m, compose(new THREE.Matrix4(), 0, 0, 0, -flex, -bendYaw * 0.5, 0));
+    this.put(`${a.bodyKey}_F`, front, a.color);
+    this.put(`${a.bodyKey}_R`, rear, a.color);
+    const [hx, hy, hz] = q.head;
+    _m2.multiplyMatrices(front, compose(new THREE.Matrix4(), hx, hy, hz, headTilt - frontPitch, a.lookYaw + bendYaw * 0.5, 0));
+    this.put(a.headKey, _m2, a.color);
+    // Legs.
+    const L = q.hipY, l1 = L * q.seg[0], l2 = L * q.seg[1];
+    const amp = moving ? (fast ? 0.62 : 0.34) * Math.min(1, a.speed * 2 + 0.3) : 0;
+    const offs = fast ? TROT : WALK;
+    const hindY = hindHipY(q);
+    const J = new THREE.Matrix4(), T = new THREE.Matrix4();
+    for (let k = 0; k < 4; k++) {
+      const isFront = k < 2, side = k % 2 === 0 ? 1 : -1;
+      const ph = G + offs[k] * Math.PI * 2;
+      const sw = Math.sin(ph);
+      const lift = Math.max(0, -Math.cos(ph)) * (amp > 0 ? 1 : 0);
+      let a1: number, a2: number, a3: number;
+      if (isFront) {
+        // Shoulder swings; elbow and wrist fold the foot back and up as it swings forward.
+        a1 = amp * sw - (a.state === 'feed' ? 0.12 : 0);
+        a2 = lift * 0.75 * (amp / 0.34);
+        a3 = lift * 1.25 * (amp / 0.34) - a1 * 0.3;
+        // Lying down: forelegs folded under the chest.
+        a1 = a1 * (1 - lie) - 1.1 * lie;
+        a2 = a2 * (1 - lie) + 2.5 * lie;
+        a3 = a3 * (1 - lie) - 1.2 * lie;
+      } else {
+        // Hip swings; knee and hock flex through the swing.
+        a1 = HIND0[0] + amp * sw;
+        a2 = HIND0[1] + lift * 0.7 * (amp / 0.34);
+        a3 = HIND0[2] - lift * 0.8 * (amp / 0.34);
+        a1 = a1 * (1 - lie) - 1.5 * lie;
+        a2 = a2 * (1 - lie) + 2.7 * lie;
+        a3 = a3 * (1 - lie) - 0.9 * lie;
+      }
+      const half = isFront ? front : rear;
+      const hipYo = (isFront ? L : hindY) - q.spineY;
+      J.multiplyMatrices(half, compose(T, side * q.x, hipYo, isFront ? q.zF : q.zR, a1, 0, side * 0.03));
+      this.put(`legU_${a.sp}`, J, a.color);
+      J.multiply(compose(T, 0, -l1, 0, a2, 0, 0));
+      this.put(`legL_${a.sp}`, J, a.color);
+      J.multiply(compose(T, 0, -l2, 0, a3, 0, 0));
+      this.put(`legP_${a.sp}`, J, a.color);
+    }
+  }
+
+  private draw(dt = 0.016): void {
     for (const e of this.meshes.values()) e.n = 0;
     const lineArr = (this.leash.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
     let lines = 0;
@@ -747,6 +881,11 @@ export class Animals {
       if (!a.alive) continue;
       if (a.heldMode === 'carry') continue; // drawn in the islander's arms
       const rig = RIG[a.sp];
+      if (a.sp !== 'chicken') {
+        this.drawQuad(a, dt);
+        this.leashLine(a, rig, lineArr, lines) && lines++;
+        continue;
+      }
       const moving = a.speed > 0.05;
       const fast = a.state === 'flee' || a.speed > 1;
       const ph = a.phase * (fast ? 16 : 8);
@@ -785,14 +924,7 @@ export class Animals {
           for (let k = 0; k < 3; k++) this.put(`wing_chicken${side === 1 ? k : k + 3}`, _wm[k], a.color);
         }
       }
-      if (a.heldMode === 'lead' && a.heldBy && lines < 64) {
-        const l = a.heldBy;
-        const hx2 = l.x, hy2 = l.y + 0.25, hz2 = l.z;
-        const ax = a.x + Math.sin(a.heading) * 0.15 * a.scale, ay = a.y + rig.head[1] * a.scale, az = a.z + Math.cos(a.heading) * 0.15 * a.scale;
-        const mx = (hx2 + ax) / 2, my = (hy2 + ay) / 2 - 0.08, mz = (hz2 + az) / 2;
-        lineArr.set([hx2, hy2, hz2, mx, my, mz, mx, my, mz, ax, ay, az], lines * 12);
-        lines++;
-      }
+      if (this.leashLine(a, rig, lineArr, lines)) lines++;
     }
     this.leash.geometry.setDrawRange(0, lines * 4);
     (this.leash.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
