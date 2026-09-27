@@ -34,6 +34,26 @@ import type { Islander } from './entities/Islander';
 
 const _pathP = new THREE.Vector3();
 
+/**
+ * The real screen area in CSS pixels. iOS home-screen (standalone) apps with a translucent status
+ * bar report a window/100vh height short by the status bar, which left a strip at the bottom; there
+ * the app owns the whole screen, so use the screen size. Also publishes it as --app-h for the CSS.
+ */
+export function appViewport(): [number, number] {
+  let w = window.innerWidth, h = window.innerHeight;
+  const nav = navigator as Navigator & { standalone?: boolean };
+  const standalone = nav.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+  const ios = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (standalone && ios) {
+    const a = Math.min(screen.width, screen.height), b = Math.max(screen.width, screen.height);
+    const portrait = h >= w;
+    w = portrait ? a : b;
+    h = portrait ? b : a;
+  }
+  document.documentElement.style.setProperty('--app-h', `${h}px`);
+  return [w, h];
+}
+
 export interface GameOptions {
   seed: number;
   preset: PresetName;
@@ -474,7 +494,7 @@ export class Game {
   }
 
   resize(): void {
-    const w = window.innerWidth, h = window.innerHeight;
+    const [w, h] = appViewport();
     // Hidden or collapsed views report zero size; keep the last good size.
     if (w < 2 || h < 2) return;
     if (this.settings.pixel) this.renderer.setPixelRatio(this.pixelRatio());

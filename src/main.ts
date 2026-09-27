@@ -1,5 +1,5 @@
 import './ui/style.css';
-import { Game } from './Game';
+import { Game, appViewport } from './Game';
 import { PresetName, WORLD } from './config';
 
 /** Everyone plays the same hand-designed island; old ?seed= links are tidied away. */
@@ -17,6 +17,10 @@ const text = (t: string) => {
   const el = document.getElementById('loading-text');
   if (el) el.textContent = t;
 };
+
+// Size the splash to the real screen straight away (iOS home-screen apps under-report 100vh).
+appViewport();
+addEventListener('resize', () => appViewport());
 
 async function boot(): Promise<void> {
   // Relative URL so the splash works when hosted under a sub-path (GitHub Pages).
