@@ -504,6 +504,8 @@ export class UI {
 
   setHint(text: string | null): void {
     this.hint.classList.toggle('hidden', !text);
+    // Phones: lift the tutorial card clear of the hint above the toolbar.
+    this.root.classList.toggle('has-hint', !!text);
     if (text) this.hint.innerHTML = text;
   }
 
