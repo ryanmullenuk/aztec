@@ -301,7 +301,7 @@ export function templeModel(tier: number): BuildingModel {
 }
 
 /** Farm: fence with a gate, a small shelter and a scarecrow. Crops are a separate mesh. */
-export function farmModel(w: number, d: number): BuildingModel {
+export function farmModel(w: number, d: number, kind: 'veg' | 'maize' = 'veg'): BuildingModel {
   const b = new GeoBuilder();
   const hw = w / 2 - 0.1, hd = d / 2 - 0.1;
   const post = (x: number, z: number) => b.add(P.cyl(0.035, 0.04, 0.42, 5), { color: K.timber }, M.t(x, 0.21, z));
@@ -321,13 +321,21 @@ export function farmModel(w: number, d: number): BuildingModel {
       rail(-0.5, z0, x1, z1);
     } else rail(x0, z0, x1, z1);
   }
+  if (kind === 'maize') {
+    // Cuexcomatl: a raised maize crib of woven cane on a stone base, with a thatched cap.
+    const gx = -hw + 0.6, gz = -hd + 0.6;
+    b.add(P.cyl(0.36, 0.4, 0.2, 8), { color: K.stone }, M.t(gx, 0.1, gz));
+    b.add(P.cyl(0.33, 0.36, 0.62, 10), { color: (p) => ((p.y * 12) % 1 < 0.5 ? K.thatchDark : K.adobe).clone() }, M.t(gx, 0.51, gz));
+    b.add(P.cone(0.46, 0.38, 10), { color: thatchColor, leaf: 0.2 }, M.t(gx, 1.0, gz));
+    for (let k = 0; k < 5; k++) b.add(P.cyl(0.035, 0.03, 0.12, 5), { color: k % 2 ? K.gold : c(0xd88a2a) }, M.t(gx + 0.36 + (k % 3) * 0.07, 0.07, gz + 0.1 + Math.floor(k / 3) * 0.08, Math.PI / 2, k, 0));
+  }
   // Shelter in a corner.
-  const sx = -hw + 0.45, sz = -hd + 0.45;
+  const sx = kind === 'maize' ? hw - 0.45 : -hw + 0.45, sz = -hd + 0.45;
   for (const [ox, oz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) b.add(P.cyl(0.03, 0.03, 0.75, 5), { color: K.timber }, M.t(sx + ox, 0.37, sz + oz));
   b.add(P.cone(0.6, 0.4, 4), { color: thatchColor, leaf: 0.2 }, M.t(sx, 0.95, sz, 0, Math.PI / 4, 0));
   b.add(P.uvSphere(0.1, 8, 6), { color: K.terracotta }, M.t(sx + 0.1, 0.1, sz));
   // Scarecrow.
-  const cx = hw - 0.5, cz = -hd + 0.6;
+  const cx = kind === 'maize' ? 0 : hw - 0.5, cz = -hd + 0.6;
   b.add(P.cyl(0.02, 0.02, 0.8, 4), { color: K.timber }, M.t(cx, 0.4, cz));
   b.add(P.cyl(0.015, 0.015, 0.5, 4), { color: K.timber }, M.t(cx, 0.6, cz, 0, 0, Math.PI / 2));
   b.add(P.sphere(0.07, 1), { color: K.thatch }, M.t(cx, 0.85, cz));
@@ -335,8 +343,167 @@ export function farmModel(w: number, d: number): BuildingModel {
   return { finished: b.build(), torches: [], height: 1.1 };
 }
 
+/** Crops for each farm type (scaled vertically by growth); `ripe` colours the harvest. */
+export function cropModel(w: number, d: number, ripe: boolean, crop: 'veg' | 'maize' | 'chinampa' = 'maize'): THREE.BufferGeometry {
+  if (crop === 'veg') return vegCrops(w, d, ripe);
+  if (crop === 'chinampa') return chinampaCrops(w, d, ripe);
+  return maizeCrops(w, d, ripe, 1.55);
+}
+
+/** Beans twining up pole tripods, rows of squash vines with fruit, and chilli bushes. */
+function vegCrops(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const rng = new RNG(ripe ? 17 : 18);
+  const leaf = c(0x5fa83a), leafDark = c(0x3f8a2e), pole = c(0x8a6a44);
+  const rows = Math.max(3, Math.floor(w * 1.5));
+  for (let r = 0; r < rows; r++) {
+    const x = -w / 2 + 0.6 + (r / Math.max(1, rows - 1)) * (w - 1.2);
+    const n = Math.floor((d - 1.2) / 0.42);
+    const kind = r % 3;
+    for (let k = 0; k <= n; k++) {
+      const z = -d / 2 + 0.6 + k * 0.42 + (kind === 1 ? 0.12 : 0);
+      if (z > d / 2 - 0.5) continue;
+      if (kind === 0) {
+        // Bean tripod, the vines climbing it.
+        for (let l = 0; l < 3; l++) {
+          const a = (l / 3) * Math.PI * 2 + r;
+          b.add(P.cyl(0.01, 0.014, 0.78, 3), { color: pole, sway: (p) => p.y * 0.2 }, M.t(x + Math.cos(a) * 0.09, 0.38, z + Math.sin(a) * 0.09, Math.sin(a) * 0.2, 0, -Math.cos(a) * 0.2));
+        }
+        for (let l = 0; l < 6; l++) {
+          const a = rng.range(0, Math.PI * 2), y = 0.12 + l * 0.11;
+          b.add(P.sphere(0.075 - l * 0.005, 0), { color: (l % 2 ? leaf : leafDark).clone(), leaf: 1, sway: (p) => p.y * 0.5 }, M.t(x + Math.cos(a) * 0.07, y, z + Math.sin(a) * 0.07, 0, a, 0, 1, 0.65, 1));
+          if (ripe && l % 2 === 0) b.add(P.cyl(0.01, 0.007, 0.1, 3), { color: c(0x9fc85a), sway: 0.4 }, M.t(x + Math.cos(a) * 0.11, y - 0.04, z + Math.sin(a) * 0.11));
+        }
+      } else if (kind === 1) {
+        // Squash: sprawling broad leaves with fruit among them.
+        for (let l = 0; l < 4; l++) {
+          const a = rng.range(0, Math.PI * 2);
+          b.add(P.sphere(0.12, 0), { color: (l % 2 ? leaf : leafDark).clone(), leaf: 1, sway: 0.15 }, M.t(x + Math.cos(a) * 0.13, 0.06, z + Math.sin(a) * 0.13, 0, a, 0, 1.35, 0.4, 1.1));
+        }
+        if (ripe || rng.next() < 0.35) b.add(P.uvSphere(0.1, 8, 6), { color: ripe ? (rng.next() < 0.5 ? c(0xe8902a) : c(0xe8c24a)) : c(0x7fae4a) }, M.t(x + 0.09, 0.08, z - 0.06, 0, 0, 0, 1.25, 0.85, 1));
+      } else {
+        // Chilli bushes with red (ripe) or green pods.
+        b.add(P.sphere(0.13, 1), { color: leafDark, leaf: 1, sway: (p) => p.y * 0.4 }, M.t(x, 0.15, z, 0, 0, 0, 1, 0.95, 1));
+        for (let l = 0; l < 7; l++) {
+          const a = rng.range(0, Math.PI * 2);
+          b.add(P.cone(0.018, 0.065, 4), { color: ripe ? c(0xd8342a) : c(0x6fae3a), sway: 0.4 }, M.t(x + Math.cos(a) * 0.12, 0.12 + rng.next() * 0.1, z + Math.sin(a) * 0.12, Math.PI, 0, 0));
+        }
+      }
+    }
+  }
+  return b.build();
+}
+
+/** Raised chinampa beds (three strips along z): maize, marigolds, beans and greens. */
+function chinampaCrops(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const rng = new RNG(ripe ? 27 : 28);
+  const bedY = CHINAMPA_BED_Y;
+  for (const bx of chinampaBeds(w)) {
+    const n = Math.floor((d - 1.0) / 0.34);
+    for (let k = 0; k <= n; k++) {
+      const z = -d / 2 + 0.5 + k * 0.34;
+      for (const ox of [-0.18, 0.18]) {
+        const x = bx + ox;
+        const pick = (k + (ox > 0 ? 1 : 0)) % 4;
+        if (pick === 0) {
+          const h = rng.range(0.38, 0.5);
+          b.add(P.cyl(0.013, 0.017, h, 4), { color: ripe ? c(0xc8b04a) : c(0x6fae3a), sway: (p) => (p.y - bedY) * 0.4 }, M.t(x, bedY + h / 2, z));
+          b.add(P.box(0.02, 0.18, 0.045), { color: c(0x5f9a34), leaf: 1, sway: (p) => (p.y - bedY) * 0.4 }, M.t(x + 0.04, bedY + h * 0.5, z, 0.5, 0, 0.6));
+          if (ripe) b.add(P.cyl(0.022, 0.018, 0.09, 5), { color: K.gold, sway: 0.3 }, M.t(x + 0.03, bedY + h * 0.62, z, 0, 0, 0.4));
+        } else if (pick === 1) {
+          // Cempasuchil marigolds.
+          b.add(P.sphere(0.07, 0), { color: c(0x4f8f30), leaf: 1, sway: 0.2 }, M.t(x, bedY + 0.07, z, 0, 0, 0, 1, 0.7, 1));
+          if (ripe || k % 2) b.add(P.sphere(0.045, 0), { color: rng.next() < 0.6 ? c(0xf29a2e) : c(0xf2c230), sway: 0.3 }, M.t(x, bedY + 0.14, z));
+        } else {
+          // Leafy greens and beans.
+          b.add(P.sphere(0.075, 0), { color: pick === 2 ? c(0x6fb84a) : c(0x3f8a2e), leaf: 1, sway: 0.2 }, M.t(x, bedY + 0.05, z, 0, rng.next() * 3, 0, 1.2, 0.55, 1.2));
+        }
+      }
+    }
+  }
+  return b.build();
+}
+
+export const CHINAMPA_BED_Y = 0.14;
+/** Centre x of each raised bed (three beds with two channels between them). */
+export function chinampaBeds(w: number): number[] {
+  const bw = (w - 0.6) / 3;
+  return [-bw - 0.1, 0, bw + 0.1].map((x) => x * 1);
+}
+
+/**
+ * Chinampa: three raised beds of dark lake mud edged with woven reed wattle, separated by water
+ * channels, tall slim ahuejote willows at the corners and a canoe moored in a channel.
+ */
+export function chinampaModel(w: number, d: number): BuildingModel {
+  const b = new GeoBuilder();
+  const hw = w / 2 - 0.05, hd = d / 2 - 0.05;
+  const bw = (w - 0.6) / 3 - 0.12;
+  // Water between and around the beds.
+  b.add(P.box(w - 0.1, 0.04, d - 0.1), { color: (p) => c(0x2f9fac).lerp(c(0x56c4c8), Math.sin(p.x * 5 + p.z * 3) * 0.25 + 0.3) }, M.t(0, 0.02, 0));
+  for (const bx of chinampaBeds(w)) {
+    b.add(P.rbox(bw, CHINAMPA_BED_Y, d - 0.5, 0.03), { color: (p) => (p.y > CHINAMPA_BED_Y - 0.02 ? c(0x4a3322) : c(0x5e4630)) }, M.t(bx, CHINAMPA_BED_Y / 2, 0));
+    // Woven wattle edging with stakes.
+    for (const side of [-1, 1]) {
+      b.add(P.box(0.03, 0.1, d - 0.45), { color: (p) => ((p.z * 10) % 1 < 0.5 ? K.timber : K.rope).clone() }, M.t(bx + side * (bw / 2 + 0.01), CHINAMPA_BED_Y - 0.03, 0));
+      for (let k = 0; k <= 5; k++) b.add(P.cyl(0.012, 0.012, 0.22, 4), { color: K.timberDark }, M.t(bx + side * (bw / 2 + 0.02), 0.1, -hd + 0.3 + (k / 5) * (d - 0.8)));
+    }
+  }
+  // Ahuejote willows: tall, slim columns of foliage anchoring the corners.
+  for (const [x, z] of [[-hw + 0.12, -hd + 0.12], [hw - 0.12, -hd + 0.12], [-hw + 0.12, hd - 0.12], [hw - 0.12, hd - 0.12]]) {
+    b.add(P.cyl(0.035, 0.05, 1.2, 5), { color: K.timberDark, sway: (p) => p.y * 0.05 }, M.t(x, 0.6, z));
+    for (let k = 0; k < 4; k++) b.add(P.sphere(0.16 - k * 0.02, 1), { color: c(0x4f8f38).lerp(c(0x8cbf4a), k * 0.25), leaf: 1, sway: (p) => 0.1 + p.y * 0.08 }, M.t(x, 1.05 + k * 0.28, z, 0, k, 0, 1, 1.5, 1));
+  }
+  // Canoe in a channel.
+  const cx = (chinampaBeds(w)[0] + chinampaBeds(w)[1]) / 2;
+  b.add(P.sphere(0.5, 1), { color: K.timber }, M.t(cx, 0.06, hd * 0.35, 0, 0, 0, 0.12, 0.08, 0.7));
+  b.add(P.cyl(0.008, 0.008, 0.7, 3), { color: K.timberDark }, M.t(cx + 0.05, 0.2, hd * 0.35, 0.9, 0, 0));
+  return { finished: b.build(), torches: [], height: 0.6 };
+}
+
+/**
+ * Smokehouse: a low adobe house with a smoke hole, two drying racks hung with fish and strips of
+ * meat over a smouldering fire, and a stack of firewood.
+ */
+export function smokehouseModel(w: number, d: number): BuildingModel {
+  const b = new GeoBuilder();
+  const hx = -w / 2 + 0.95, hz = -0.15;
+  adobeBlock(b, 1.5, 0.85, 1.5, hx, 0, hz);
+  b.add(P.box(1.62, 0.1, 1.62), { color: K.timberDark }, M.t(hx, 0.9, hz));
+  // Smoke hole chimney.
+  b.add(P.cyl(0.14, 0.18, 0.35, 6), { color: K.adobe }, M.t(hx + 0.35, 1.1, hz - 0.3));
+  b.add(P.cyl(0.1, 0.1, 0.02, 6), { color: c(0x2a2220) }, M.t(hx + 0.35, 1.28, hz - 0.3));
+  b.add(P.box(0.34, 0.5, 0.06), { color: K.door }, M.t(hx, 0.25, hz + 0.76));
+  // Drying racks: A-frame ends with two cross poles hung with fish and strips of meat.
+  const rx = w / 2 - 0.7;
+  for (const rz of [-0.55, 0.5]) {
+    for (const ox of [-0.5, 0.5]) {
+      for (const lean of [-0.28, 0.28]) b.add(P.cyl(0.022, 0.028, 1.05, 5), { color: K.timber }, M.t(rx + ox, 0.5, rz + lean * 0.5, lean, 0, 0));
+    }
+    for (const y of [0.72, 0.92]) {
+      b.add(P.cyl(0.018, 0.018, 1.1, 4), { color: K.timberDark }, M.t(rx, y, rz, 0, 0, Math.PI / 2));
+      for (let k = 0; k < 7; k++) {
+        const x = rx - 0.42 + k * 0.14;
+        if ((k + (y > 0.8 ? 1 : 0)) % 2 === 0) {
+          // Fish hanging by the tail: body, head and a smoky golden sheen.
+          b.add(P.sphere(0.06, 0), { color: c(0xc8a46a).lerp(c(0x8a5a30), (k % 3) * 0.2), sway: 0.1 }, M.t(x, y - 0.13, rz, 0, 0, 0, 0.42, 1.55, 0.75));
+          b.add(P.cone(0.04, 0.05, 3), { color: c(0x7a4a28), sway: 0.1 }, M.t(x, y - 0.03, rz, Math.PI, 0, 0, 1, 1, 0.4));
+        } else b.add(P.box(0.05, 0.17, 0.018), { color: c(0x9a3a22).lerp(c(0x5a2a1a), (k % 2) * 0.4), sway: 0.1 }, M.t(x, y - 0.1, rz, 0, 0, (k % 3 - 1) * 0.08));
+      }
+    }
+  }
+  // Smouldering fire pit under the racks.
+  b.add(P.cyl(0.26, 0.3, 0.06, 8), { color: K.stoneDark }, M.t(rx, 0.03, 0));
+  for (let k = 0; k < 3; k++) b.add(P.cyl(0.03, 0.03, 0.4, 5), { color: c(0x3a2820) }, M.t(rx, 0.08, 0, 0, (k / 3) * Math.PI, Math.PI / 2));
+  b.add(P.sphere(0.09, 0), { color: c(0xe8702a) }, M.t(rx, 0.1, 0, 0, 0, 0, 1.3, 0.5, 1.3));
+  // Firewood stack.
+  for (let k = 0; k < 6; k++) b.add(P.cyl(0.045, 0.045, 0.55, 6), { color: K.timber }, M.t(hx - 0.3 + (k % 3) * 0.1, 0.05 + Math.floor(k / 3) * 0.09, d / 2 - 0.3, 0, 0, Math.PI / 2));
+  return { finished: b.build(), torches: [new THREE.Vector3(hx + 0.55, 0, hz + 0.9)], height: 1.35 };
+}
+
 /** Maize plants in neat rows (scaled vertically by growth). Cobs are coloured by `ripe`. */
-export function cropModel(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
+function maizeCrops(w: number, d: number, ripe: boolean, tall = 1): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const rng = new RNG(ripe ? 7 : 8);
   const rows = Math.floor(w * 1.6);
@@ -346,7 +513,9 @@ export function cropModel(w: number, d: number, ripe: boolean): THREE.BufferGeom
     for (let k = 0; k < cols; k++) {
       const x = -w / 2 + 0.55 + (r / Math.max(1, rows - 1)) * (w - 1.1);
       const z = -d / 2 + 0.55 + (k / Math.max(1, cols - 1)) * (d - 1.3);
-      const h = rng.range(0.4, 0.55);
+      // Leave room for the crib and shelter in the back corners of the big maize field.
+      if (tall > 1 && z < -d / 2 + 1.15 && (x < -w / 2 + 1.25 || x > w / 2 - 1.05)) continue;
+      const h = rng.range(0.4, 0.55) * tall;
       const stalk = ripe ? gold : green;
       b.add(P.cyl(0.015, 0.02, h, 4), { color: stalk, sway: (p) => p.y * 0.4 }, M.t(x, h / 2, z));
       for (let l = 0; l < 2; l++) {

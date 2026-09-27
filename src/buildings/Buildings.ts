@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE } from '../config';
+import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE, FARM_TYPES, isFarm } from '../config';
 import { Economy, Cost } from '../economy/Economy';
 import { flameMaterial, stylisedMaterial, FX } from '../render/materials';
 import { Terrain } from '../terrain/Terrain';
@@ -7,6 +7,7 @@ import { Vegetation } from '../vegetation/Vegetation';
 import { World } from '../world/World';
 import { RNG } from '../world/rng';
 import * as models from './models';
+import { Particles } from '../render/Particles';
 
 /** Door direction per rotation (door faces +z at rot 0). */
 export const ROT_DIR: [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
@@ -139,6 +140,9 @@ export class BuildingSystem {
   private lights: THREE.PointLight[] = [];
   private lightTimer = 0;
   private cropGeos = new Map<string, THREE.BufferGeometry>();
+  /** Chimney and rack smoke from smokehouses. */
+  private smoke = new Particles(360, 0xc9c2ba, 0.6);
+  private smokeAcc = 0;
   private logGeos = [models.logPileGeometry(1), models.logPileGeometry(2), models.logPileGeometry(3)];
   private stoneGeos = [models.stonePileGeometry(4), models.stonePileGeometry(5)];
   private basketGeos = [models.basketGeometry(0), models.basketGeometry(1), models.basketGeometry(2)];
@@ -148,6 +152,7 @@ export class BuildingSystem {
   onRemove: (b: Building) => void = () => {};
 
   constructor(private world: World, private veg: Vegetation, private eco: Economy, private terrain: Terrain, private scene: THREE.Scene) {
+    this.group.add(this.smoke.points);
     for (let i = 0; i < 8; i++) {
       const l = new THREE.PointLight(0xffa04a, 0, 8, 1.6);
       l.castShadow = false;
@@ -198,6 +203,21 @@ export class BuildingSystem {
     return n;
   }
 
+  /** Water cells (sea, river or pool) in the two-cell ring around a footprint. */
+  private waterAround(cx: number, cz: number, w: number, d: number): number {
+    const W = this.world;
+    let n = 0;
+    for (let z = cz - 2; z < cz + d + 2; z++) {
+      for (let x = cx - 2; x < cx + w + 2; x++) {
+        if (x >= cx && x < cx + w && z >= cz && z < cz + d) continue;
+        if (!W.inBounds(x, z)) continue;
+        const i = W.idx(x, z);
+        if (W.layer[i] <= 0 || !Number.isNaN(W.riverY[i])) n++;
+      }
+    }
+    return n;
+  }
+
   canPlace(key: BuildingKey, cx: number, cz: number, rot: number): { ok: boolean; reason: string } {
     const def = BUILDINGS[key];
     const [sw, sd] = def.size;
@@ -214,6 +234,7 @@ export class BuildingSystem {
       return { ok: false, reason: 'Needs flat land: sculpt it level first' };
     }
     if (key === 'jetty' && this.jettyWater(cx, cz, rot) < JETTY.length - 2) return { ok: false, reason: 'A jetty must face open water at the shore' };
+    if (key === 'chinampa' && this.waterAround(cx, cz, w, d) < 4) return { ok: false, reason: 'A chinampa must be built right beside water (river, pool or shore)' };
     if (!this.eco.canAfford(def.cost)) return { ok: false, reason: 'Not enough resources' };
     return { ok: true, reason: '' };
   }
@@ -222,10 +243,20 @@ export class BuildingSystem {
     const def = BUILDINGS[key];
     const b = new Building(this.nextId++, key, cx, cz, rot, this.world.layer[this.world.idx(cx, cz)], this.world);
     if (!instant) this.eco.spend(def.cost);
-    for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) this.world.occ[this.world.idx(x, z)] = b.id + 1;
+    let paved = false;
+    for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) {
+      const i = this.world.idx(x, z);
+      this.world.occ[i] = b.id + 1;
+      // Buildings replace any stone path under them.
+      if (this.world.path[i]) {
+        this.world.path[i] = 0;
+        paved = true;
+      }
+    }
+    if (paved) this.terrain.updateWear();
     const wood = this.veg.clearArea(cx, cz, b.w, b.d);
     this.eco.add('wood', wood);
-    if (key === 'farm') {
+    if (isFarm(key)) {
       this.world.passableBuildings.add(b.id);
       for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) this.world.soil[this.world.idx(x, z)] = 1;
       this.terrain.updateWear();
@@ -321,7 +352,7 @@ export class BuildingSystem {
   remove(b: Building, refund = true): void {
     this.onRemove(b);
     for (let z = b.cz; z < b.cz + b.d; z++) for (let x = b.cx; x < b.cx + b.w; x++) this.world.occ[this.world.idx(x, z)] = 0;
-    if (b.key === 'farm') {
+    if (isFarm(b.key)) {
       this.world.passableBuildings.delete(b.id);
       for (let z = b.cz; z < b.cz + b.d; z++) for (let x = b.cx; x < b.cx + b.w; x++) this.world.soil[this.world.idx(x, z)] = 0;
       this.terrain.updateWear();
@@ -346,7 +377,10 @@ export class BuildingSystem {
       case 'hut': return models.hutModel();
       case 'home': return models.homeModel(b.tier);
       case 'temple': return models.templeModel(b.tier);
-      case 'farm': return models.farmModel(sw, sd);
+      case 'farm': return models.farmModel(sw, sd, 'veg');
+      case 'maizefarm': return models.farmModel(sw, sd, 'maize');
+      case 'chinampa': return models.chinampaModel(sw, sd);
+      case 'smokehouse': return models.smokehouseModel(sw, sd);
       case 'butcher': return models.butcherModel(sw, sd);
       case 'woodstore': return models.woodstoreModel(sw, sd);
       case 'grainstore': return models.grainstoreModel();
@@ -371,8 +405,8 @@ export class BuildingSystem {
     b.group.add(b.foundation, b.scaffold, b.finished);
     this.setTorches(b, model.torches);
 
-    if (b.key === 'farm') {
-      b.crops = new THREE.Mesh(this.cropGeo(sw, sd, false), mat);
+    if (isFarm(b.key)) {
+      b.crops = new THREE.Mesh(this.cropGeo(sw, sd, false, FARM_TYPES[b.key]!.crop), mat);
       b.crops.castShadow = true;
       b.crops.receiveShadow = true;
       b.group.add(b.crops);
@@ -422,11 +456,25 @@ export class BuildingSystem {
     }
   }
 
-  private cropGeo(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
-    const k = `${w}x${d}${ripe}`;
+  /** Smoke curling from the smokehouse chimney and racks; thicker while someone is at work. */
+  private smokeFrom(b: Building, dt: number): void {
+    if (b.upgrading) return;
+    const busy = b.tendTimer > 0;
+    this.smokeAcc += dt * (busy ? 9 : 2.5);
+    while (this.smokeAcc > 1) {
+      this.smokeAcc -= 1;
+      const rack = Math.random() < (busy ? 0.55 : 0.2);
+      const [x, z] = rack ? b.local(0.8 + (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.4) : b.local(-0.2, -0.45);
+      const y = b.y + (rack ? 0.25 : 1.32);
+      this.smoke.spawn(x, y, z, (Math.random() - 0.5) * 0.12 + 0.08, 0.35 + Math.random() * 0.25, (Math.random() - 0.5) * 0.12 + 0.05, 3 + Math.random() * 2, 0.34 + Math.random() * 0.16, 0.45);
+    }
+  }
+
+  private cropGeo(w: number, d: number, ripe: boolean, crop: 'veg' | 'maize' | 'chinampa'): THREE.BufferGeometry {
+    const k = `${w}x${d}${ripe}${crop}`;
     let g = this.cropGeos.get(k);
     if (!g) {
-      g = models.cropModel(w, d, ripe);
+      g = models.cropModel(w, d, ripe, crop);
       this.cropGeos.set(k, g);
     }
     return g;
@@ -549,18 +597,24 @@ export class BuildingSystem {
   update(dt: number, time: number, night: number, seasonIndex: number, raining: boolean, camTarget: THREE.Vector3): void {
     for (const b of this.list) {
       if (!b.complete) continue;
-      if (b.key === 'farm') {
+      if (b.key === 'smokehouse') {
+        b.tendTimer = Math.max(0, b.tendTimer - dt);
+        this.smokeFrom(b, dt);
+      }
+      const ft = FARM_TYPES[b.key];
+      if (ft) {
         b.blessTimer = Math.max(0, b.blessTimer - dt);
         b.tendTimer = Math.max(0, b.tendTimer - dt);
         if (b.growth < 1 && b.stock <= 0) {
-          let rate = (FARM.seasonGrowth[seasonIndex] / FARM.growSeconds) * (b.tendTimer > 0 ? FARM.tendBoost : 0.5);
+          const season = Math.max(ft.seasonFloor, FARM.seasonGrowth[seasonIndex]);
+          let rate = ((season * ft.grow) / FARM.growSeconds) * (b.tendTimer > 0 ? FARM.tendBoost : 0.5);
           if (b.blessTimer > 0) rate *= FARM.blessMultiplier;
           if (raining) rate *= 1.3;
           b.growth = Math.min(1, b.growth + rate * dt);
         }
         if (b.crops) {
           const ripe = b.growth >= 0.85;
-          const g = this.cropGeo(b.def.size[0], b.def.size[1], ripe);
+          const g = this.cropGeo(b.def.size[0], b.def.size[1], ripe, ft.crop);
           if (b.crops.geometry !== g) b.crops.geometry = g;
           b.crops.visible = b.growth > 0.02;
           b.crops.scale.y = 0.12 + 0.88 * b.growth;
@@ -568,6 +622,9 @@ export class BuildingSystem {
       }
     }
     this.updateFills();
+    this.smoke.update(dt, -0.02);
+    const day = 0.4 + 0.6 * (1 - night);
+    ((this.smoke.points.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).setRGB(0.79 * day, 0.76 * day, 0.73 * day);
     // Torches: flicker, visible from dusk; the few nearest the camera get real lights.
     const lit = night > 0.12;
     for (const b of this.list) {
@@ -624,7 +681,7 @@ export class BuildingSystem {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.list) {
       if (!b.complete) continue;
-      const ok = b.key === 'campfire' || (food ? b.key === 'grainstore' : b.key === 'woodstore');
+      const ok = b.key === 'campfire' || (food ? b.key === 'grainstore' || b.key === 'smokehouse' : b.key === 'woodstore');
       if (!ok) continue;
       const d = (b.door.x - x) ** 2 + (b.door.z - z) ** 2;
       if (d < bd) {
