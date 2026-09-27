@@ -867,6 +867,7 @@ export class Game {
       if (this.hoverPoint) this.updateGhost(this.hoverPoint);
     } else if (k === 'h' || k === '?') this.ui.toggleHelp();
     else if (k === 'm') this.toggleMute();
+    else if (k === 'o') this.rig.toggleOverview();
     else if (k === 'f' && this.selectedIslander >= 0) this.followId = this.followId === this.selectedIslander ? -1 : this.selectedIslander;
   }
 

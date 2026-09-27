@@ -106,7 +106,10 @@ export const CAMERA = {
   pitch: 53,
   pitchClose: 38,
   minDistance: 6,
+  /** Normal furthest zoom; beyond it the view keeps pulling back to fit the whole map. */
   maxDistance: 230,
+  /** Near top-down angle for the whole-map overview. */
+  overviewPitch: 80,
   startDistance: 62,
   startYaw: -0.62,
   panSpeed: 1.0,
@@ -493,7 +496,7 @@ export const MILESTONES = [
 ];
 
 export const SAVE = {
-  key: 'aztlan-isle-save-v6',
+  key: 'aztlan-isle-save-v7',
   settingsKey: 'aztec-isle-settings-v1',
   tutorialKey: 'aztec-isle-tutorial-v1',
 };
