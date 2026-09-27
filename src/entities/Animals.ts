@@ -229,6 +229,14 @@ export class Animals {
     const f = w.forest[i];
     const m = w.meadow;
     const dm = Math.hypot(x - m.x, z - m.z);
+    // Most wild game lives on the wild island across the strait.
+    const wild = SPECIES[sp].habitat !== 'settlement' ? (w.isle[i] === 2 ? 4 : 0) : 0;
+    return this.habitatBase(sp, i, x, z, f, dm) + wild;
+  }
+
+  private habitatBase(sp: SpeciesKey, i: number, x: number, z: number, f: number, dm: number): number {
+    const w = this.world;
+    const m = w.meadow;
     switch (SPECIES[sp].habitat) {
       case 'settlement': {
         // Around the village, not on top of it: a ring roughly 5–9 units out from the buildings.
@@ -272,15 +280,28 @@ export class Animals {
   }
 
   private spawnAll(): void {
+    // Centre of the wild island, where most game lives.
+    const w = this.world;
+    let wx = 0, wz = 0, wn = 0;
+    for (let i = 0; i < w.N * w.N; i++) {
+      if (w.isle[i] !== 2) continue;
+      wx += w.centerX(i % w.N);
+      wz += w.centerZ((i / w.N) | 0);
+      wn++;
+    }
+    const wild = wn ? { x: wx / wn, z: wz / wn } : null;
     for (const sp of Object.keys(SPECIES) as SpeciesKey[]) {
       const def = SPECIES[sp];
       const total = this.rng.int(def.count[0], def.count[1]);
       let made = 0;
       for (let tries = 0; made < total && tries < 60; tries++) {
-        // Find a good habitat spot for the group.
+        // Find a good habitat spot for the group: chickens by the village, and about three in
+        // four groups of wild game over on the wild island.
         const m = this.world.meadow;
-        const far = def.habitat === 'settlement' ? 14 : def.habitat === 'jungle' ? 70 : 45;
-        const spot = this.pickSpot(sp, m.x, m.z, far, 40);
+        const onWild = def.habitat !== 'settlement' && wild && this.rng.next() < 0.75;
+        const c = onWild ? wild! : m;
+        const far = def.habitat === 'settlement' ? 14 : onWild ? 32 : def.habitat === 'jungle' ? 70 : 45;
+        const spot = this.pickSpot(sp, c.x, c.z, far, 40);
         if (!spot) continue;
         const size = Math.min(total - made, this.rng.int(def.group[0], def.group[1]));
         const gi = this.groups.length;

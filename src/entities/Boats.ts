@@ -101,6 +101,23 @@ function netTexture(): THREE.Texture {
   return t;
 }
 
+/** A canoe bringing new settlers across the sea to the island. */
+interface Arrival {
+  mesh: THREE.Group;
+  rowers: THREE.Mesh[];
+  path: { x: number; z: number }[];
+  idx: number;
+  x: number;
+  z: number;
+  heading: number;
+  genders: ('m' | 'f')[];
+  land: { x: number; z: number };
+  state: 'sail' | 'beached';
+  timer: number;
+  phase: number;
+  onLand?: (people: Islander[]) => void;
+}
+
 /** Canoes and fishing boats: built at jetties, crewed by fishers, sail to fish schools, net and return. */
 export class Boats {
   readonly group = new THREE.Group();
@@ -242,7 +259,123 @@ export class Boats {
     return null;
   }
 
+  private arrivals: Arrival[] = [];
+
+  /** Position of the first canoe still at sea (for the camera during the opening). */
+  get arrivalPos(): { x: number; z: number } | null {
+    const a = this.arrivals.find((x) => x.state === 'sail');
+    return a ? { x: a.x, z: a.z } : null;
+  }
+
+  /** Settlers still on their way (not yet landed). */
+  get arriving(): number {
+    return this.arrivals.filter((a) => a.state === 'sail').reduce((s, a) => s + a.genders.length, 0);
+  }
+
+  /**
+   * Send a canoe of settlers in from the open sea to the main island's shore nearest `to`.
+   * Returns the landing point (for the camera), or null if no shore was found.
+   */
+  sendSettlers(genders: ('m' | 'f')[], to: { x: number; z: number }, onLand?: (people: Islander[]) => void): { x: number; z: number } | null {
+    const w = this.world;
+    const N = w.N;
+    // Landing: the water cell next to a main-island beach closest to the destination.
+    let best = -1, bestLand = -1, bd = Infinity;
+    for (let i = 0; i < N * N; i++) {
+      if (w.layer[i] > 0 || this.blocked[i]) continue;
+      const cx = i % N, cz = (i / N) | 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (!w.inBounds(cx + dx, cz + dz)) continue;
+        const j = w.idx(cx + dx, cz + dz);
+        if (w.layer[j] !== 1 || w.isle[j] !== 1 || w.occ[j]) continue;
+        const d = Math.hypot(w.centerX(cx) - to.x, w.centerZ(cz) - to.z) - w.sandy[j] * 4;
+        if (d < bd) {
+          bd = d;
+          best = i;
+          bestLand = j;
+        }
+      }
+    }
+    if (best < 0) return null;
+    const lx = w.centerX(best % N), lz = w.centerZ((best / N) | 0);
+    const land = { x: w.centerX(bestLand % N), z: w.centerZ((bestLand / N) | 0) };
+    // Start far out at sea, beyond the reef, on the side facing the landing.
+    let dx = lx - to.x, dz = lz - to.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    dx /= dl;
+    dz /= dl;
+    let sx = lx + dx * 45, sz = lz + dz * 45;
+    const lim = w.half - 4;
+    sx = Math.max(-lim, Math.min(lim, sx));
+    sz = Math.max(-lim, Math.min(lim, sz));
+    const path = this.waterPath(sx, sz, lx, lz) ?? [{ x: lx, z: lz }];
+    const mesh = new THREE.Group();
+    const hull = new THREE.Mesh(this.geos[0], this.hullMat);
+    hull.castShadow = true;
+    mesh.add(hull);
+    const rowers: THREE.Mesh[] = [];
+    genders.forEach((_, k) => {
+      const r = new THREE.Mesh(this.rowerGeo, stylisedMaterial());
+      r.castShadow = true;
+      r.position.z = 0.35 - k * (0.7 / Math.max(1, genders.length - 1));
+      mesh.add(r);
+      rowers.push(r);
+    });
+    mesh.scale.setScalar(BOAT_SCALE * 1.1);
+    mesh.position.set(sx, 0.03, sz);
+    this.group.add(mesh);
+    this.arrivals.push({ mesh, rowers, path, idx: 0, x: sx, z: sz, heading: Math.atan2(lx - sx, lz - sz), genders, land, state: 'sail', timer: 0, phase: 0, onLand });
+    return { x: lx, z: lz };
+  }
+
+  private stepArrivals(dt: number, time: number): void {
+    for (const a of this.arrivals.slice()) {
+      if (a.state === 'sail') {
+        const p = a.path[Math.min(a.idx, a.path.length - 1)];
+        const dx = p.x - a.x, dz = p.z - a.z;
+        const d = Math.hypot(dx, dz);
+        // Slow down for the last stretch onto the beach.
+        const sp = Math.min(2.4, 0.6 + d * 0.8) * (a.idx >= a.path.length - 1 ? 1 : 1.2);
+        if (d < 0.3) {
+          a.idx++;
+          if (a.idx >= a.path.length) {
+            // Landed: the settlers step ashore; the canoe is pulled up on the sand.
+            a.state = 'beached';
+            a.timer = 120;
+            for (const r of a.rowers) r.visible = false;
+            const people = a.genders.map((g, k) => this.colony.spawn(g, a.land.x + (k - (a.genders.length - 1) / 2) * 0.5, a.land.z));
+            this.sfx('splash', a.x, a.z);
+            a.onLand?.(people);
+          }
+        } else {
+          const want = Math.atan2(dx, dz);
+          let dh = want - a.heading;
+          while (dh > Math.PI) dh -= Math.PI * 2;
+          while (dh < -Math.PI) dh += Math.PI * 2;
+          a.heading += dh * Math.min(1, dt * 2.5);
+          a.x += Math.sin(a.heading) * sp * dt;
+          a.z += Math.cos(a.heading) * sp * dt;
+          a.phase += dt * 3.2;
+          if (Math.random() < dt * 6) this.wake.spawn(a.x - Math.sin(a.heading) * 0.5, 0.05, a.z - Math.cos(a.heading) * 0.5, 0, 0.05, 0, 1.2, 0.2, 0.25);
+        }
+      } else {
+        a.timer -= dt;
+        if (a.timer <= 0) {
+          this.group.remove(a.mesh);
+          this.arrivals = this.arrivals.filter((x) => x !== a);
+          continue;
+        }
+      }
+      const y = this.water.waveHeight(a.x, a.z, time);
+      const yF = this.water.waveHeight(a.x + Math.sin(a.heading) * 0.6, a.z + Math.cos(a.heading) * 0.6, time);
+      a.mesh.position.set(a.x, (a.state === 'beached' ? 0.06 : 0.03) + (a.state === 'sail' ? y * 0.12 : 0), a.z);
+      a.mesh.rotation.set(a.state === 'sail' ? (y - yF) * 0.8 : -0.05, a.heading, 0, 'YXZ');
+      a.rowers.forEach((r, k) => (r.rotation.z = Math.sin(a.phase + k * 0.7) * 0.25 * (k % 2 ? -1 : 1)));
+    }
+  }
+
   update(dt: number, time: number): void {
+    this.stepArrivals(dt, time);
     // Boat construction at jetties.
     for (const j of this.bld.of('jetty')) {
       if (j.boatBuild > 0) {
