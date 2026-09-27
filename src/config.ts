@@ -152,6 +152,10 @@ export const SUN_AZIMUTH_EVENING = -1.55;
 export const SUN_AZIMUTH_MORNING = 1.55;
 
 export const VEG = {
+  /** Fraction of the LOD distance within which trees and bushes show every leaf, root and vine. */
+  fineDetail: 0.4,
+  /** Most plants of one type drawn at full detail at once (the nearest ones). */
+  fineCap: 36,
   /** Base spawn chance per cell by zone for each plant type. */
   palmBeach: 0.07,
   palmMeadow: 0.018,
