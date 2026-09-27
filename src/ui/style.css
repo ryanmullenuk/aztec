@@ -67,7 +67,8 @@ html, body {
 }
 /* Splash: the artwork fitted to the screen over a blurred, cover-filled copy of itself. */
 .splash-bg { position: absolute; inset: -40px; background-position: center; background-size: cover; background-repeat: no-repeat; filter: blur(28px) saturate(1.2) brightness(0.85); }
-.splash-art { position: absolute; top: 0; left: 50%; transform: translateX(-50%); height: 100%; max-width: 100%; object-fit: contain; object-position: top; box-shadow: 0 0 60px rgba(0, 0, 0, 0.35); }
+/* Full screen: the art covers the whole screen, keeping the logo at the top in view. */
+.splash-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 0%; }
 .splash-ui { position: absolute; left: 0; right: 0; bottom: calc(6vh + var(--safe-b)); display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .splash-ui .loading-sub { background: rgba(20, 16, 24, 0.55); padding: 6px 16px; border-radius: 999px; backdrop-filter: blur(6px); }
 .play {
