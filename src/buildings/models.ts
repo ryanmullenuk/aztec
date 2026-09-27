@@ -72,6 +72,98 @@ export function campfireModel(): BuildingModel {
   return { finished: b.build(), torches: [new THREE.Vector3(0, 0.2, 0)], height: 1.6 };
 }
 
+// ---------------- Village comforts ----------------
+
+/** Torch: a tall post with a woven basket of burning pitch pine at the top. */
+export function torchModel(): BuildingModel {
+  const b = new GeoBuilder();
+  b.add(lumpy(P.sphere(0.12, 0), 0.2, 71, 0.5), { color: K.stoneDark }, M.t(0, 0.03, 0));
+  b.add(P.cyl(0.03, 0.045, 1.25, 6), { color: K.timber }, M.t(0, 0.62, 0));
+  b.add(P.cyl(0.035, 0.035, 0.06, 6), { color: K.rope }, M.t(0, 0.9, 0));
+  b.add(P.cyl(0.085, 0.05, 0.14, 7), { color: (p) => ((p.y * 40) % 1 < 0.5 ? K.timberDark : K.rope).clone() }, M.t(0, 1.28, 0));
+  b.add(P.sphere(0.06, 0), { color: c(0x2a1c14) }, M.t(0, 1.35, 0, 0, 0, 0, 1, 0.5, 1));
+  return { finished: b.build(), torches: [new THREE.Vector3(0, 1.42, 0)], height: 1.5 };
+}
+
+/** Bonfire: a big stone-ringed fire of stacked logs with log benches all round. */
+export function bonfireModel(): BuildingModel {
+  const b = new GeoBuilder();
+  // Beaten earth circle.
+  b.add(P.cyl(1.35, 1.4, 0.03, 18), { color: c(0x9a7a52) }, M.t(0, 0.015, 0));
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    b.add(lumpy(P.sphere(0.14, 1), 0.22, 90 + k, 0.7), { color: K.stoneDark }, M.t(Math.cos(a) * 0.55, 0.06, Math.sin(a) * 0.55));
+  }
+  // A teepee of logs.
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2;
+    b.add(P.cyl(0.045, 0.06, 0.95, 6), { color: k % 2 ? K.timberDark : c(0x3a2820) }, M.t(Math.cos(a) * 0.18, 0.36, Math.sin(a) * 0.18, Math.sin(a) * 0.45, 0, -Math.cos(a) * 0.45));
+  }
+  b.add(P.sphere(0.2, 0), { color: c(0xe8702a) }, M.t(0, 0.1, 0, 0, 0, 0, 1.4, 0.45, 1.4));
+  // Log benches.
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2 + 0.3;
+    b.add(P.cyl(0.11, 0.11, 0.95, 7), { color: K.timber }, M.t(Math.cos(a) * 1.15, 0.11, Math.sin(a) * 1.15, 0, Math.PI / 2 - a, Math.PI / 2));
+  }
+  const fire = [new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(0.12, 0.2, 0.08), new THREE.Vector3(-0.1, 0.2, -0.06)];
+  return { finished: b.build(), torches: fire, height: 1.2 };
+}
+
+/** Firepit: a stone-lined pit with a whole pig roasting on a spit between forked posts. */
+export function firepitModel(): BuildingModel {
+  const b = new GeoBuilder();
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    b.add(lumpy(P.sphere(0.12, 1), 0.2, 120 + k, 0.65), { color: K.stoneDark }, M.t(Math.cos(a) * 0.5, 0.05, Math.sin(a) * 0.36));
+  }
+  b.add(P.cyl(0.45, 0.48, 0.03, 12), { color: c(0x3a2a22) }, M.t(0, 0.015, 0, 0, 0, 0, 1, 1, 0.72));
+  for (let k = 0; k < 4; k++) b.add(P.cyl(0.035, 0.035, 0.5, 5), { color: c(0x2e2018) }, M.t(0, 0.06, 0, Math.PI / 2, (k / 4) * Math.PI, 0));
+  b.add(P.sphere(0.14, 0), { color: c(0xe8702a) }, M.t(0, 0.08, 0, 0, 0, 0, 1.6, 0.4, 1.1));
+  // Forked posts and the spit.
+  for (const x of [-0.72, 0.72]) {
+    b.add(P.cyl(0.03, 0.035, 0.75, 5), { color: K.timber }, M.t(x, 0.37, 0));
+    b.add(P.cyl(0.02, 0.02, 0.16, 4), { color: K.timber }, M.t(x - 0.04, 0.78, 0, 0, 0, 0.5));
+    b.add(P.cyl(0.02, 0.02, 0.16, 4), { color: K.timber }, M.t(x + 0.04, 0.78, 0, 0, 0, -0.5));
+  }
+  b.add(P.cyl(0.015, 0.015, 1.6, 5), { color: K.timberDark }, M.t(0, 0.72, 0, 0, 0, Math.PI / 2));
+  b.add(P.box(0.03, 0.18, 0.03), { color: K.timberDark }, M.t(0.84, 0.64, 0));
+  // Roast pig: golden-brown body, head, snout, ears and trotters.
+  const pig = (p: THREE.Vector3, n: THREE.Vector3) => c(0xb86a32).lerp(c(0xe0a060), Math.max(0, n.y) * 0.6).lerp(c(0x6e3418), Math.max(0, -n.y) * 0.4 + (Math.sin(p.x * 30) > 0.8 ? 0.2 : 0));
+  b.add(P.sphere(0.2, 1), { color: pig }, M.t(0, 0.72, 0, 0, 0, 0, 1.6, 0.85, 0.9));
+  b.add(P.sphere(0.12, 1), { color: pig }, M.t(0.34, 0.74, 0, 0, 0, 0, 1.1, 0.95, 0.95));
+  b.add(P.cyl(0.05, 0.06, 0.07, 6), { color: c(0x9a5028) }, M.t(0.47, 0.73, 0, 0, 0, Math.PI / 2));
+  for (const z of [-1, 1]) b.add(P.cone(0.04, 0.07, 4), { color: c(0x8a4a24) }, M.t(0.32, 0.85, z * 0.06, 0, 0, -0.4));
+  for (const [x, z] of [[0.18, 1], [0.18, -1], [-0.2, 1], [-0.2, -1]]) b.add(P.cyl(0.025, 0.02, 0.14, 5), { color: c(0x7a3e1e) }, M.t(x, 0.6, z * 0.09, z * 0.5, 0, 0));
+  // A basket and a pot beside it.
+  b.add(P.cyl(0.14, 0.11, 0.14, 8), { color: K.rope }, M.t(-0.75, 0.07, 0.6));
+  b.add(P.uvSphere(0.11, 8, 6), { color: K.terracotta }, M.t(0.8, 0.1, 0.6, 0, 0, 0, 1, 0.9, 1));
+  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.18, 0)], height: 1.0 };
+}
+
+/** Well: a round stone well with a timber frame, rope and bucket under a little tiled roof. */
+export function wellModel(): BuildingModel {
+  const b = new GeoBuilder();
+  b.add(P.cyl(1.0, 1.0, 0.03, 16), { color: c(0xb8a890) }, M.t(0, 0.015, 0));
+  b.add(P.cyl(0.46, 0.5, 0.5, 12), { color: (p) => ((Math.floor(p.y * 8) + Math.floor(Math.atan2(p.z, p.x) * 3)) % 2 ? K.stone : K.stoneDark).clone() }, M.t(0, 0.25, 0));
+  b.add(P.cyl(0.5, 0.5, 0.06, 12), { color: K.stoneDark }, M.t(0, 0.52, 0));
+  b.add(P.cyl(0.36, 0.36, 0.02, 12), { color: c(0x1f5a78) }, M.t(0, 0.4, 0));
+  for (const x of [-0.52, 0.52]) b.add(P.cyl(0.035, 0.04, 1.05, 6), { color: K.timber }, M.t(x, 0.8, 0));
+  b.add(P.cyl(0.04, 0.04, 1.14, 6), { color: K.timberDark }, M.t(0, 1.12, 0, 0, 0, Math.PI / 2));
+  b.add(P.cyl(0.07, 0.07, 0.22, 8), { color: K.rope }, M.t(0, 1.12, 0, 0, 0, Math.PI / 2));
+  b.add(P.cyl(0.008, 0.008, 0.36, 3), { color: K.rope }, M.t(0, 0.92, 0));
+  b.add(P.cyl(0.08, 0.065, 0.12, 8), { color: K.timber }, M.t(0, 0.7, 0));
+  b.add(P.box(0.04, 0.04, 0.2), { color: K.timberDark }, M.t(0.62, 1.12, 0.1));
+  // Little roof.
+  for (const s of [-1, 1]) b.add(P.box(1.3, 0.05, 0.62), { color: (p) => ((p.x * 8) % 1 < 0.5 ? K.terracotta : c(0x9a3a26)).clone() }, M.t(0, 1.42, s * 0.24, s * 0.62, 0, 0));
+  b.add(P.box(1.34, 0.06, 0.06), { color: K.timberDark }, M.t(0, 1.58, 0));
+  // A flower pot and a trough.
+  b.add(P.uvSphere(0.1, 8, 6), { color: K.terracotta }, M.t(0.7, 0.08, 0.55));
+  b.add(P.sphere(0.1, 0), { color: c(0x4f8038), leaf: 1 }, M.t(0.7, 0.2, 0.55));
+  b.add(P.box(0.5, 0.14, 0.2), { color: K.stone }, M.t(-0.55, 0.07, 0.62));
+  b.add(P.box(0.44, 0.02, 0.14), { color: c(0x2f7fa0) }, M.t(-0.55, 0.13, 0.62));
+  return { finished: b.build(), torches: [], height: 1.7 };
+}
+
 // ---------------- Adobe houses (levels 1–5) ----------------
 
 const AD = {
@@ -463,18 +555,21 @@ export function chinampaModel(w: number, d: number): BuildingModel {
 }
 
 /**
- * Smokehouse: a low adobe house with a smoke hole, two drying racks hung with fish and strips of
- * meat over a smouldering fire, and a stack of firewood.
+ * Smokehouse: a flat-roofed adobe house with a smoke hole on the roof, two drying racks hung
+ * with fish and strips of meat over a smouldering fire, and a stack of firewood.
  */
 export function smokehouseModel(w: number, d: number): BuildingModel {
   const b = new GeoBuilder();
   const hx = -w / 2 + 0.95, hz = -0.15;
+  baseBand(b, 1.5, 1.5, hx, hz, 0.14);
   adobeBlock(b, 1.5, 0.85, 1.5, hx, 0, hz);
-  b.add(P.box(1.62, 0.1, 1.62), { color: K.timberDark }, M.t(hx, 0.9, hz));
-  // Smoke hole chimney.
-  b.add(P.cyl(0.14, 0.18, 0.35, 6), { color: K.adobe }, M.t(hx + 0.35, 1.1, hz - 0.3));
-  b.add(P.cyl(0.1, 0.1, 0.02, 6), { color: c(0x2a2220) }, M.t(hx + 0.35, 1.28, hz - 0.3));
-  b.add(P.box(0.34, 0.5, 0.06), { color: K.door }, M.t(hx, 0.25, hz + 0.76));
+  // Soot-darkened chimney on the flat roof.
+  b.add(P.rbox(0.34, 0.34, 0.34, 0.03), { color: (p) => AD.wall.clone().lerp(c(0x5a4a40), Math.max(0, p.y - 1.05) * 2.5) }, M.t(hx + 0.35, 1.1, hz - 0.3));
+  b.add(P.box(0.2, 0.02, 0.2), { color: c(0x2a2220) }, M.t(hx + 0.35, 1.28, hz - 0.3));
+  tealDoor(b, hx, 0.02, hz + 0.76, 0.28, 0.48);
+  adobeWindow(b, hx - 0.5, 0.6, hz + 0.76);
+  adobeWindow(b, hx + 0.76, 0.6, hz - 0.2, true);
+  awning(b, hx, 0.66, hz + 0.72, 0.9, 0.34, false);
   // Drying racks: A-frame ends with two cross poles hung with fish and strips of meat.
   const rx = w / 2 - 0.7;
   for (const rz of [-0.55, 0.5]) {
@@ -486,7 +581,6 @@ export function smokehouseModel(w: number, d: number): BuildingModel {
       for (let k = 0; k < 7; k++) {
         const x = rx - 0.42 + k * 0.14;
         if ((k + (y > 0.8 ? 1 : 0)) % 2 === 0) {
-          // Fish hanging by the tail: body, head and a smoky golden sheen.
           b.add(P.sphere(0.06, 0), { color: c(0xc8a46a).lerp(c(0x8a5a30), (k % 3) * 0.2), sway: 0.1 }, M.t(x, y - 0.13, rz, 0, 0, 0, 0.42, 1.55, 0.75));
           b.add(P.cone(0.04, 0.05, 3), { color: c(0x7a4a28), sway: 0.1 }, M.t(x, y - 0.03, rz, Math.PI, 0, 0, 1, 1, 0.4));
         } else b.add(P.box(0.05, 0.17, 0.018), { color: c(0x9a3a22).lerp(c(0x5a2a1a), (k % 2) * 0.4), sway: 0.1 }, M.t(x, y - 0.1, rz, 0, 0, (k % 3 - 1) * 0.08));
@@ -497,8 +591,9 @@ export function smokehouseModel(w: number, d: number): BuildingModel {
   b.add(P.cyl(0.26, 0.3, 0.06, 8), { color: K.stoneDark }, M.t(rx, 0.03, 0));
   for (let k = 0; k < 3; k++) b.add(P.cyl(0.03, 0.03, 0.4, 5), { color: c(0x3a2820) }, M.t(rx, 0.08, 0, 0, (k / 3) * Math.PI, Math.PI / 2));
   b.add(P.sphere(0.09, 0), { color: c(0xe8702a) }, M.t(rx, 0.1, 0, 0, 0, 0, 1.3, 0.5, 1.3));
-  // Firewood stack.
+  // Firewood stacked against the house.
   for (let k = 0; k < 6; k++) b.add(P.cyl(0.045, 0.045, 0.55, 6), { color: K.timber }, M.t(hx - 0.3 + (k % 3) * 0.1, 0.05 + Math.floor(k / 3) * 0.09, d / 2 - 0.3, 0, 0, Math.PI / 2));
+  pottedPlant(b, hx + 0.62, 0, hz + 0.95, 0.8);
   return { finished: b.build(), torches: [new THREE.Vector3(hx + 0.55, 0, hz + 0.9)], height: 1.35 };
 }
 
@@ -529,17 +624,21 @@ function maizeCrops(w: number, d: number, ripe: boolean, tall = 1): THREE.Buffer
   return b.build();
 }
 
-/** Butcher: small workshop plus an animal pen with a mud wallow. Pen centre is at local (+w/4, 0). */
+/** Butcher: an adobe workshop with a striped awning over the meat counter, beside the animal pen (pen centre at local +w/4). */
 export function butcherModel(w: number, d: number): BuildingModel {
   const b = new GeoBuilder();
   const hx = -w / 4 - 0.1;
-  b.add(P.rbox(1.5, 0.75, 1.6, 0.05), { color: K.adobe }, M.t(hx, 0.38, 0));
-  b.add(P.cone(1.25, 0.7, 4), { color: thatchColor, leaf: 0.2 }, M.t(hx, 1.08, 0, 0, Math.PI / 4, 0));
-  b.add(P.box(0.32, 0.46, 0.06), { color: K.door }, M.t(hx, 0.3, 0.81));
-  // Meat rack.
-  b.add(P.box(0.9, 0.04, 0.04), { color: K.timber }, M.t(hx, 0.75, 1.1));
-  for (const x of [-0.4, 0.4]) b.add(P.cyl(0.025, 0.025, 0.75, 5), { color: K.timber }, M.t(hx + x, 0.37, 1.1));
-  for (let k = 0; k < 3; k++) b.add(P.uvSphere(0.07, 6, 5), { color: 0xb2503a }, M.t(hx - 0.25 + k * 0.25, 0.62, 1.1, 0, 0, 0, 0.8, 1.4, 0.8));
+  baseBand(b, 1.5, 1.5, hx, -0.05, 0.14);
+  adobeBlock(b, 1.5, 0.82, 1.5, hx, 0, -0.05);
+  adobeBlock(b, 0.7, 0.34, 0.7, hx - 0.3, 0.82, -0.3);
+  tealDoor(b, hx + 0.35, 0.02, 0.71, 0.26, 0.46);
+  adobeWindow(b, hx - 0.45, 0.58, 0.71, false, 0.3, 0.12);
+  // Meat counter under a red and cream awning, with cuts hanging from the rail.
+  awning(b, hx - 0.2, 0.7, 0.68, 1.05, 0.4, true);
+  b.add(P.rbox(0.8, 0.32, 0.3, 0.03), { color: AD.wallLight }, M.t(hx - 0.3, 0.16, 0.9));
+  b.add(P.box(0.7, 0.03, 0.22), { color: K.timber }, M.t(hx - 0.3, 0.33, 0.9));
+  for (let k = 0; k < 4; k++) b.add(P.uvSphere(0.06, 6, 5), { color: k % 2 ? 0xb2503a : 0x9a3a2a }, M.t(hx - 0.6 + k * 0.2, 0.52, 1.02, 0, 0, 0, 0.8, 1.5, 0.8));
+  b.add(P.cyl(0.12, 0.1, 0.1, 8), { color: K.terracotta }, M.t(hx - 0.05, 0.39, 0.88));
   // Pen.
   const px = w / 4 + 0.15, pw = w / 2 - 0.4, pd = d - 0.4;
   b.add(P.cyl(pw * 0.32, pw * 0.36, 0.02, 12), { color: K.mud }, M.t(px + 0.2, 0.01, 0.2));
@@ -553,23 +652,31 @@ export function butcherModel(w: number, d: number): BuildingModel {
     for (const y of [0.16, 0.3]) b.add(P.box(0.03, 0.03, len), { color: K.timberDark }, M.t((x0 + x1) / 2, y, (z0 + z1) / 2, 0, a, 0));
   }
   b.add(P.cyl(0.18, 0.16, 0.1, 8), { color: K.timberDark }, M.t(px - 0.3, 0.05, -0.5));
-  const t = torchPole(b, hx + 0.8, 0.95);
+  const t = torchPole(b, hx + 0.85, 0.95);
   return { finished: b.build(), torches: [t], height: 1.5 };
 }
 
-/** Open wood store shed with a sloped thatch roof. Log/stone piles are separate fill meshes. */
+/** Wood store: an open-fronted adobe shed with a flat roof on timber beams. Log/stone piles are separate fill meshes. */
 export function woodstoreModel(w: number, d: number): BuildingModel {
   const b = new GeoBuilder();
-  const hw = w / 2 - 0.2, hd = d / 2 - 0.2;
-  b.add(P.rbox(w - 0.2, 0.08, d - 0.2, 0.03), { color: K.timberDark }, M.t(0, 0.04, 0));
-  for (const [x, z, h] of [[-hw, -hd, 1.25], [hw, -hd, 1.25], [-hw, hd, 0.95], [hw, hd, 0.95]] as const) {
-    b.add(P.cyl(0.05, 0.06, h, 6), { color: K.timber }, M.t(x, h / 2, z));
-  }
-  b.add(P.box(w, 0.08, d + 0.2), { color: thatchColor, leaf: 0.2 }, M.t(0, 1.14, 0, -0.14, 0, 0));
-  b.add(P.box(0.06, 0.06, w), { color: K.timberDark }, M.t(0, 1.2, -hd, 0, Math.PI / 2, 0));
-  // Chopping block with axe.
-  b.add(P.cyl(0.14, 0.16, 0.22, 8), { color: K.timber }, M.t(hw + 0.1, 0.11, hd + 0.3));
-  return { finished: b.build(), torches: [new THREE.Vector3(-hw - 0.1, 0.9, hd + 0.2)], height: 1.4 };
+  const hw = w / 2 - 0.12, hd = d / 2 - 0.12;
+  const H = 0.95;
+  b.add(P.rbox(w - 0.2, 0.06, d - 0.2, 0.03), { color: c(0xb8905e) }, M.t(0, 0.03, 0));
+  // Back and side walls (open at the front).
+  baseBand(b, w - 0.24, 0.2, 0, -hd + 0.1, 0.12);
+  adobeBlock(b, w - 0.24, H, 0.2, 0, 0, -hd + 0.1, false);
+  for (const sx of [-1, 1]) adobeBlock(b, 0.2, H, d - 0.35, sx * (hw - 0.1), 0, 0.05, false);
+  // Flat roof slab with a parapet, resting on vigas whose ends poke out at the front.
+  adobeBlock(b, w - 0.1, 0.1, d - 0.15, 0, H, 0.02);
+  for (let k = 0; k < 5; k++) b.add(P.cyl(0.035, 0.035, d - 0.05, 6), { color: K.timber }, M.t(-hw + 0.2 + k * ((w - 0.64) / 4), H - 0.02, 0.08, Math.PI / 2, 0, 0));
+  for (const sx of [-1, 1]) b.add(P.cyl(0.05, 0.06, H, 6), { color: K.timber }, M.t(sx * (hw - 0.1), H / 2, hd - 0.02));
+  b.add(P.box(w - 0.3, 0.08, 0.08), { color: K.timberDark }, M.t(0, H - 0.05, hd - 0.02));
+  // Chopping block with an axe, and a potted plant.
+  b.add(P.cyl(0.14, 0.16, 0.22, 8), { color: K.timber }, M.t(hw + 0.05, 0.11, hd + 0.3));
+  b.add(P.box(0.03, 0.26, 0.03), { color: K.timberDark }, M.t(hw + 0.05, 0.32, hd + 0.3, 0, 0, 0.5));
+  b.add(P.box(0.1, 0.06, 0.02), { color: K.stoneDark }, M.t(hw - 0.02, 0.44, hd + 0.3, 0, 0, 0.5));
+  pottedPlant(b, -hw - 0.05, 0, hd + 0.25, 0.8);
+  return { finished: b.build(), torches: [new THREE.Vector3(-hw - 0.1, 0.9, hd + 0.2)], height: 1.2 };
 }
 
 export function logPileGeometry(seed: number): THREE.BufferGeometry {
@@ -592,21 +699,22 @@ export function stonePileGeometry(seed: number): THREE.BufferGeometry {
   return b.build();
 }
 
-/** Raised round granary on stilts with a ladder. Baskets/sacks are separate fill meshes. */
+/** Grain store: a two-storey adobe storehouse with a maize-yellow frieze and flat roof. Baskets/sacks are separate fill meshes. */
 export function grainstoreModel(): BuildingModel {
   const b = new GeoBuilder();
-  for (let k = 0; k < 5; k++) {
-    const a = (k / 5) * Math.PI * 2;
-    b.add(P.cyl(0.05, 0.05, 0.45, 6), { color: K.timber }, M.t(Math.cos(a) * 0.45, 0.22, Math.sin(a) * 0.45));
-  }
-  b.add(P.cyl(0.62, 0.62, 0.08, 12), { color: K.timberDark }, M.t(0, 0.48, 0));
-  b.add(P.cyl(0.52, 0.56, 0.7, 12), { color: (p) => ((p.y * 6) % 1 < 0.2 ? K.terracotta : K.adobe) }, M.t(0, 0.87, 0));
-  b.add(P.cone(0.78, 0.7, 12), { color: thatchColor, leaf: 0.2 }, M.t(0, 1.55, 0));
-  b.add(P.box(0.24, 0.3, 0.06), { color: K.door }, M.t(0, 0.9, 0.53));
-  // Ladder.
-  for (const x of [-0.12, 0.12]) b.add(P.box(0.03, 0.8, 0.03), { color: K.timber }, M.t(x, 0.4, 0.78, 0.35, 0, 0));
-  for (let k = 0; k < 4; k++) b.add(P.box(0.24, 0.025, 0.025), { color: K.timber }, M.t(0, 0.12 + k * 0.18, 0.86 - k * 0.065));
-  return { finished: b.build(), torches: [new THREE.Vector3(0.6, 0.8, 0.7)], height: 1.9 };
+  baseBand(b, 1.15, 1.15, 0, 0, 0.16);
+  adobeBlock(b, 1.15, 0.95, 1.15, 0, 0, 0);
+  adobeBlock(b, 0.7, 0.42, 0.7, 0.1, 0.95, -0.1);
+  // Painted frieze of maize cobs around the walls.
+  b.add(P.box(1.17, 0.08, 1.17), { color: K.gold }, M.t(0, 0.74, 0));
+  for (let k = 0; k < 4; k++) b.add(P.cyl(0.03, 0.025, 0.1, 5), { color: c(0xe8c24a) }, M.t(-0.36 + k * 0.24, 0.74, 0.59, Math.PI / 2, 0, 0));
+  tealDoor(b, 0, 0.02, 0.58, 0.28, 0.5);
+  adobeWindow(b, 0.1, 1.18, 0.26);
+  adobeWindow(b, 0.59, 0.5, 0.1, true);
+  // Sacks drying on the roof.
+  for (const [x, z] of [[-0.35, 0.3], [-0.3, 0.05]]) b.add(P.uvSphere(0.1, 7, 5), { color: c(0xd8c08a) }, M.t(x, 1.06, z, 0, 0, 0, 1.2, 0.8, 1));
+  pottedPlant(b, 0.42, 0, 0.66, 0.8);
+  return { finished: b.build(), torches: [new THREE.Vector3(0.6, 0.8, 0.7)], height: 1.6 };
 }
 
 export function basketGeometry(seed: number): THREE.BufferGeometry {
@@ -626,17 +734,20 @@ export function basketGeometry(seed: number): THREE.BufferGeometry {
   return b.build();
 }
 
-/** War room: stone hall with crenellations, jaguar and eagle banners, spear rack and shields. */
+/** War room: a fortified adobe hall with crenellated flat roofs, a red frieze, jaguar and eagle banners, spears and shields. */
 export function warroomModel(): BuildingModel {
   const b = new GeoBuilder();
   b.add(P.rbox(2.6, 0.16, 2.4, 0.04), { color: K.stoneDark }, M.t(0, 0.08, 0));
-  b.add(P.rbox(2.2, 1.0, 1.9, 0.05), { color: K.stone }, M.t(0, 0.66, -0.1));
-  b.add(P.box(2.26, 0.1, 1.96), { color: K.red }, M.t(0, 1.12, -0.1));
-  for (let k = 0; k < 6; k++) {
-    for (const z of [-1.03, 0.83]) b.add(P.box(0.2, 0.2, 0.14), { color: K.stone }, M.t(-0.95 + k * 0.38, 1.26, z));
-  }
-  b.add(P.box(0.5, 0.65, 0.06), { color: K.door }, M.t(0, 0.48, 0.86));
-  b.add(P.box(0.62, 0.1, 0.1), { color: K.gold }, M.t(0, 0.84, 0.88));
+  baseBand(b, 2.2, 1.9, 0, -0.1, 0.34);
+  adobeBlock(b, 2.2, 1.05, 1.9, 0, 0.16, -0.1);
+  adobeBlock(b, 1.0, 0.45, 0.9, -0.4, 1.21, -0.4);
+  // Red frieze and merlons along the parapet.
+  b.add(P.box(2.22, 0.1, 1.92), { color: AD.red }, M.t(0, 1.0, -0.1));
+  for (let k = 0; k < 7; k++) for (const z of [-1.03, 0.83]) b.add(P.box(0.16, 0.16, 0.1), { color: AD.wallLight }, M.t(-0.99 + k * 0.33, 1.38, z));
+  for (let k = 0; k < 5; k++) for (const x of [-1.08, 1.08]) b.add(P.box(0.1, 0.16, 0.16), { color: AD.wallLight }, M.t(x, 1.38, -0.85 + k * 0.33));
+  tealDoor(b, 0, 0.16, 0.86, 0.46, 0.62);
+  b.add(P.box(0.62, 0.1, 0.08), { color: K.gold }, M.t(0, 0.86, 0.88));
+  for (const x of [-0.7, 0.7]) adobeWindow(b, x, 0.72, 0.86, false, 0.1, 0.22);
   // Banners: jaguar (yellow spotted) and eagle (white/brown).
   const banner = (x: number, eagle: boolean) => {
     b.add(P.cyl(0.03, 0.03, 2.1, 5), { color: K.timberDark }, M.t(x, 1.05, 1.0));
@@ -657,7 +768,7 @@ export function warroomModel(): BuildingModel {
     b.add(P.cyl(0.16, 0.16, 0.03, 12), { color: col }, M.t(x, 0.55, 0.87, Math.PI / 2, 0, 0));
     b.add(P.cyl(0.07, 0.07, 0.035, 10), { color: K.gold }, M.t(x, 0.55, 0.88, Math.PI / 2, 0, 0));
   }
-  return { finished: b.build(), torches: [new THREE.Vector3(-0.5, 0.95, 1.05), new THREE.Vector3(0.5, 0.95, 1.05)], height: 1.6 };
+  return { finished: b.build(), torches: [new THREE.Vector3(-0.5, 0.95, 1.05), new THREE.Vector3(0.5, 0.95, 1.05)], height: 1.7 };
 }
 
 /**
@@ -700,6 +811,51 @@ export function jettyModel(landY: number, length: number): BuildingModel {
     b.add(P.cyl(0.07, 0.04, 0.08, 7), { color: K.stoneDark }, M.t(t.x, t.y - 0.08, t.z));
   }
   return { finished: b.build(), torches, height: 1.2 };
+}
+
+/**
+ * Trade Dock: an adobe trading house with a striped awning over crates of goods, and a wide pier
+ * on posts with a big T-end where the trade boats moor. Deck along +z like the jetty.
+ */
+export function tradeDockModel(landY: number, length: number): BuildingModel {
+  const b = new GeoBuilder();
+  const deckY = 0.32 - landY;
+  // Trading house on land (flat roof, parapet, teal door, awning over the goods).
+  baseBand(b, 1.2, 1.0, -0.35, -0.4, 0.12);
+  adobeBlock(b, 1.2, 0.8, 1.0, -0.35, 0, -0.4);
+  adobeBlock(b, 0.55, 0.3, 0.5, -0.55, 0.8, -0.55);
+  tealDoor(b, -0.2, 0.02, 0.11, 0.26, 0.46);
+  adobeWindow(b, -0.7, 0.55, 0.11);
+  awning(b, 0.35, 0.62, 0.05, 0.7, 0.34, true);
+  for (let k = 0; k < 3; k++) b.add(P.rbox(0.22, 0.2, 0.22, 0.03), { color: k % 2 ? K.timber : c(0xa87a4a) }, M.t(0.15 + k * 0.24, 0.1, 0.25, 0, k * 0.3, 0));
+  b.add(P.uvSphere(0.1, 7, 5), { color: c(0xd8c08a) }, M.t(0.55, 0.3, 0.2, 0, 0, 0, 1.1, 0.8, 1));
+  b.add(P.cyl(0.09, 0.08, 0.2, 8), { color: K.terracotta }, M.t(0.72, 0.1, 0.42));
+  // Ramp from land level down to the deck.
+  const rampLen = 1.0;
+  const rampDrop = Math.min(0, deckY);
+  b.add(P.box(1.1, 0.06, rampLen), { color: c(0xa8784a) }, M.t(0.5, rampDrop / 2 + 0.03, 0.75, Math.atan2(-rampDrop, rampLen), 0, 0));
+  // Wide pier.
+  const z0 = 1.2, z1 = 1.2 + length;
+  for (let z = z0; z < z1; z += 0.26) b.add(P.box(1.15, 0.05, 0.22), { color: Math.round(z * 4) % 2 ? c(0xa8784a) : c(0x94663c) }, M.t(0.5, deckY, z + 0.11));
+  for (let z = z0; z <= z1; z += 1.2) for (const x of [-0.05, 1.05]) b.add(P.cyl(0.055, 0.055, 2.6, 6), { color: K.timberDark }, M.t(x, deckY - 1.2, z));
+  // Big T-end with mooring posts, bales and a flag.
+  b.add(P.box(3.4, 0.05, 1.1), { color: c(0xa8784a) }, M.t(0.5, deckY, z1 + 0.4));
+  for (const x of [-1.1, 0.5, 2.1]) b.add(P.cyl(0.055, 0.055, 2.6, 6), { color: K.timberDark }, M.t(x, deckY - 1.2, z1 + 0.4));
+  for (const x of [-1.05, 2.05]) {
+    b.add(P.cyl(0.05, 0.06, 0.35, 6), { color: K.timberDark }, M.t(x, deckY + 0.17, z1 + 0.85));
+    b.add(P.torus(0.07, 0.02, 4, 10), { color: K.rope }, M.t(x, deckY + 0.3, z1 + 0.85, Math.PI / 2, 0, 0));
+  }
+  b.add(P.rbox(0.32, 0.28, 0.32, 0.03), { color: 0xa87a4a }, M.t(0.0, deckY + 0.16, z1 + 0.25));
+  b.add(P.rbox(0.26, 0.22, 0.26, 0.03), { color: 0x94663c }, M.t(0.05, deckY + 0.41, z1 + 0.27, 0, 0.4, 0));
+  b.add(P.uvSphere(0.14, 7, 5), { color: c(0xd8c08a) }, M.t(1.1, deckY + 0.12, z1 + 0.3, 0, 0, 0, 1.2, 0.8, 1));
+  b.add(P.cyl(0.03, 0.035, 1.9, 5), { color: K.timberDark }, M.t(1.7, deckY + 0.95, z1 + 0.2));
+  b.add(P.box(0.02, 0.36, 0.55), { color: (p) => ((p.y * 10) % 1 < 0.33 ? AD.red : (p.y * 10) % 1 < 0.66 ? K.gold : K.jade).clone(), sway: 0.5 }, M.t(1.7, deckY + 1.66, z1 - 0.08));
+  const torches = [new THREE.Vector3(-1.1, deckY + 0.8, z1 + 0.85), new THREE.Vector3(2.1, deckY + 0.8, z1 + 0.85)];
+  for (const t of torches) {
+    b.add(P.cyl(0.025, 0.035, 0.75, 5), { color: K.timberDark }, M.t(t.x, t.y - 0.45, t.z));
+    b.add(P.cyl(0.07, 0.04, 0.08, 7), { color: K.stoneDark }, M.t(t.x, t.y - 0.08, t.z));
+  }
+  return { finished: b.build(), torches, height: 1.3 };
 }
 
 /** Generic construction scaffolding sized to a footprint. */

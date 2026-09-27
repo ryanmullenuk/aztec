@@ -7,6 +7,10 @@ import { Vegetation } from '../vegetation/Vegetation';
 import { World } from '../world/World';
 import { RNG } from '../world/rng';
 import * as models from './models';
+
+/** Flame size per building, and the fires that burn day and night. */
+const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.4, bonfire: 3.2, firepit: 1.7, torch: 1.25 };
+const ALWAYS_LIT = new Set<BuildingKey>(['campfire', 'bonfire', 'firepit']);
 import { Particles } from '../render/Particles';
 
 /** Door direction per rotation (door faces +z at rot 0). */
@@ -61,6 +65,8 @@ export class Building {
   boatBuild = 0;
   boatsWanted = 0;
   boats: number[] = [];
+  /** Trade boats moored at a Trade Dock. */
+  tradeBoats = 0;
   // War room: queued trainees
   training: { id: number; t: number; type: 'jaguar' | 'eagle' }[] = [];
   // Butcher
@@ -249,7 +255,7 @@ export class BuildingSystem {
       }
       return { ok: false, reason: 'Needs flat land: sculpt it level first' };
     }
-    if (key === 'jetty' && this.jettyWater(cx, cz, rot) < JETTY.length - 2) return { ok: false, reason: 'A jetty must face open water at the shore' };
+    if ((key === 'jetty' || key === 'tradedock') && this.jettyWater(cx, cz, rot) < JETTY.length - 2) return { ok: false, reason: `A ${key === 'jetty' ? 'jetty' : 'trade dock'} must face open water at the shore` };
     if (key === 'chinampa' && this.waterAround(cx, cz, w, d) < 4) return { ok: false, reason: 'A chinampa must be built right beside water (river, pool or shore)' };
     if (!this.eco.canAfford(def.cost)) return { ok: false, reason: 'Not enough resources' };
     return { ok: true, reason: '' };
@@ -263,8 +269,8 @@ export class BuildingSystem {
     for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) {
       const i = this.world.idx(x, z);
       this.world.occ[i] = b.id + 1;
-      // Buildings replace any stone path under them.
-      if (this.world.path[i]) {
+      // Buildings replace any stone path under them (torches stand beside the flagstones).
+      if (this.world.path[i] && key !== 'torch') {
         this.world.path[i] = 0;
         paved = true;
       }
@@ -272,12 +278,13 @@ export class BuildingSystem {
     if (paved) this.terrain.updateWear();
     const wood = this.veg.clearArea(cx, cz, b.w, b.d);
     this.eco.add('wood', wood);
+    if (key === 'torch') this.world.passableBuildings.add(b.id);
     if (isFarm(key)) {
       this.world.passableBuildings.add(b.id);
       for (let z = cz; z < cz + b.d; z++) for (let x = cx; x < cx + b.w; x++) this.world.soil[this.world.idx(x, z)] = 1;
       this.terrain.updateWear();
     }
-    if (key === 'jetty') {
+    if (key === 'jetty' || key === 'tradedock') {
       // Boats dock at the T-end of the deck; islanders reach the jetty from the ramp on land.
       [b.dockX, b.dockZ] = b.local(0.5, 1.2 + JETTY.length + 1.0);
       const [rx, rz] = b.local(0.5, 0.4);
@@ -368,6 +375,7 @@ export class BuildingSystem {
   remove(b: Building, refund = true): void {
     this.onRemove(b);
     for (let z = b.cz; z < b.cz + b.d; z++) for (let x = b.cx; x < b.cx + b.w; x++) this.world.occ[this.world.idx(x, z)] = 0;
+    if (b.key === 'torch') this.world.passableBuildings.delete(b.id);
     if (isFarm(b.key)) {
       this.world.passableBuildings.delete(b.id);
       for (let z = b.cz; z < b.cz + b.d; z++) for (let x = b.cx; x < b.cx + b.w; x++) this.world.soil[this.world.idx(x, z)] = 0;
@@ -397,11 +405,16 @@ export class BuildingSystem {
       case 'maizefarm': return models.farmModel(sw, sd, 'maize');
       case 'chinampa': return models.chinampaModel(sw, sd);
       case 'smokehouse': return models.smokehouseModel(sw, sd);
+      case 'torch': return models.torchModel();
+      case 'bonfire': return models.bonfireModel();
+      case 'firepit': return models.firepitModel();
+      case 'well': return models.wellModel();
       case 'butcher': return models.butcherModel(sw, sd);
       case 'woodstore': return models.woodstoreModel(sw, sd);
       case 'grainstore': return models.grainstoreModel();
       case 'warroom': return models.warroomModel();
       case 'jetty': return models.jettyModel(b.y, JETTY.length);
+      case 'tradedock': return models.tradeDockModel(b.y, JETTY.length);
     }
   }
 
@@ -465,7 +478,7 @@ export class BuildingSystem {
     for (const p of points) {
       const flame = new THREE.Mesh(this.flameGeo, flameMaterial());
       flame.position.copy(p);
-      if (b.key === 'campfire') flame.scale.setScalar(2.4);
+      flame.scale.setScalar(FLAME_SCALE[b.key] ?? 1);
       b.group.add(flame);
       const pos = p.clone().applyEuler(new THREE.Euler(0, (b.rot * Math.PI) / 2, 0)).add(b.group.position);
       b.torches.push({ pos, flame, phase: Math.random() * 10 });
@@ -573,7 +586,7 @@ export class BuildingSystem {
       this.ghostKey = null;
       return { ok: false, reason: '' };
     }
-    if (key === 'jetty') rot = this.jettyRot(cx, cz);
+    if (key === 'jetty' || key === 'tradedock') rot = this.jettyRot(cx, cz);
     if (this.ghostKey !== key || this.ghostRot !== rot) {
       if (this.ghost) this.scene.remove(this.ghost);
       const tmp = new Building(0, key, 0, 0, rot, 1, this.world);
@@ -645,11 +658,11 @@ export class BuildingSystem {
     const lit = night > 0.12;
     for (const b of this.list) {
       for (const t of b.torches) {
-        const on = (b.complete && !b.upgrading && (lit || b.key === 'campfire')) as boolean;
+        const on = (b.complete && !b.upgrading && (lit || ALWAYS_LIT.has(b.key))) as boolean;
         t.flame.visible = on;
         if (on) {
           const f = 0.85 + Math.sin(time * 11 + t.phase) * 0.08 + Math.sin(time * 23 + t.phase * 2) * 0.06;
-          const base = b.key === 'campfire' ? 2.4 : 1;
+          const base = FLAME_SCALE[b.key] ?? 1;
           t.flame.scale.set(base * f, base * (0.9 + (1 - f) * 1.5), base * f);
         }
       }
