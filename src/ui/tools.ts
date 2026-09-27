@@ -1,6 +1,6 @@
 import { BuildingKey, POWERS } from '../config';
 
-export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'unpath' | 'bridge';
+export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'unpath' | 'bridge' | 'canal';
 
 export interface ToolDef {
   id: ToolId;
@@ -24,4 +24,4 @@ export const TOOLS: ToolDef[] = [
   { id: 'calm', name: 'Calm', icon: 'calm', hint: 'Calm a storm and bring back the sun.', cost: POWERS.calm.cost },
 ];
 
-export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'chinampa', 'woodstore', 'grainstore', 'smokehouse', 'temple', 'butcher', 'jetty', 'warroom'];
+export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'chinampa', 'woodstore', 'grainstore', 'smokehouse', 'firepit', 'well', 'bonfire', 'torch', 'temple', 'butcher', 'jetty', 'tradedock', 'warroom'];

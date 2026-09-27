@@ -184,6 +184,14 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   background: var(--panel-solid); border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--text);
   box-shadow: var(--shadow); max-width: 92vw; text-align: center;
 }
+.trade { width: min(460px, 94vw); }
+.trows { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.trow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); }
+.trow .tgive, .trow .tget { display: flex; gap: 6px; min-width: 70px; font-weight: 700; }
+.trow .tarrow { color: var(--gold); }
+.trow .tbtns { margin-left: auto; display: flex; gap: 4px; }
+.tg { display: inline-flex; align-items: center; gap: 3px; }
+.tg svg { width: 16px; height: 16px; }
 .found-btn {
   display: inline-flex; align-items: center; gap: 6px; font-weight: 700; padding: 8px 16px; border-radius: 999px;
   background: linear-gradient(180deg, #f2c46b, #d99a2b); color: #2a1a08; box-shadow: var(--shadow); animation: foundPulse 1.6s ease-in-out infinite;

@@ -1,4 +1,5 @@
-import { PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE } from '../config';
+import { FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
+import { MONKEY_BASE } from '../entities/Monkeys';
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
 import { ROLE_LABEL } from '../entities/Islander';
@@ -20,6 +21,7 @@ const BUILD_ICON: Record<BuildingKey, string> = {
   campfire: 'belief', hut: 'b_hut', home: 'b_home', temple: 'b_temple', farm: 'b_farm', butcher: 'b_butcher',
   woodstore: 'b_woodstore', grainstore: 'b_grainstore', warroom: 'b_warroom', jetty: 'b_jetty',
   maizefarm: 'b_maize', chinampa: 'b_chinampa', smokehouse: 'b_smoke',
+  tradedock: 'b_trade', torch: 'b_torch', bonfire: 'b_bonfire', firepit: 'b_firepit', well: 'b_well',
 };
 
 interface TutorialStep {
@@ -201,15 +203,16 @@ export class UI {
       this.buildItems.set(key, b);
     }
     // Paths: drag-to-paint tools rather than a building.
-    const pathItem = (id: 'path' | 'unpath' | 'bridge', name: string, iconKey: string, cost: string, tip: string) => {
+    const pathItem = (id: 'path' | 'unpath' | 'bridge' | 'canal', name: string, iconKey: string, cost: string, tip: string) => {
       const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
       b.onclick = () => this.game.setTool(id);
       this.addTip(b, tip);
       grid.appendChild(b);
     };
     pathItem('path', 'Stone path', 'b_path', `${icon('stone')}${PATHS.stonePerCell}`, `<b>Stone path</b><br>Hold and drag to lay a paved path. Islanders prefer paths and walk faster on them.<br><span class="c">${icon('stone')} ${PATHS.stonePerCell} per cell</span>`);
+    pathItem('canal', 'Water canal', 'b_canal', `${icon('wood')}${PATHS.canalWood}`, `<b>Water canal</b><br>Hold and drag outward from a river, pool or the sea to dig a channel and bring water into the village. Chinampas can be built beside canals.<br><span class="c">${icon('wood')} ${PATHS.canalWood} per section</span>`);
     pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
-    pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path or bridge</b><br>Hold and drag over a path or bridge to take it apart.');
+    pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path, bridge or canal</b><br>Hold and drag over a path, bridge or canal to take it away (canals are filled back in).');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
   }
@@ -500,9 +503,66 @@ export class UI {
     this.toggle(this.help);
   }
 
+  // ---------------- Trade menu ----------------
+
+  private tradeModal?: HTMLDivElement;
+  private tradeDock: Building | null = null;
+  private tradeTimer = 0;
+
+  /** The Trade Dock's market: pick a bargain and how many loads to send with a boat. */
+  openTrade(dock: Building): void {
+    if (!this.tradeModal) {
+      this.tradeModal = el('div', 'modal hidden') as HTMLDivElement;
+      this.tradeModal.onclick = (e) => {
+        if (e.target === this.tradeModal) this.toggle(this.tradeModal!, false);
+      };
+      this.root.appendChild(this.tradeModal);
+    }
+    this.tradeDock = dock;
+    this.renderTrade();
+    this.toggle(this.tradeModal, true);
+  }
+
+  private renderTrade(): void {
+    const m = this.tradeModal, dock = this.tradeDock;
+    if (!m || !dock) return;
+    const g = this.game;
+    const goods = (r: Partial<Record<ResourceKey, number>>, k = 1) => (Object.entries(r) as [ResourceKey, number][]).map(([key, n]) => `<span class="tg">${icon(key)} ${n * k}</span>`).join(' ');
+    const ships = g.trade.of(dock);
+    const docked = ships.filter((s) => s.state === 'docked').length;
+    const away = ships.filter((s) => s.state !== 'docked');
+    const status = !ships.length ? 'No trade boats yet: build one at the dock first.' : `${docked} boat${docked === 1 ? '' : 's'} ready${away.length ? ` · ${away.length} at sea${away.map((s) => (s.state === 'away' ? ` (back in ~${Math.ceil(s.timer + 15)}s)` : s.state === 'back' ? ' (sailing home)' : ' (sailing out)')).join('')}` : ''}`;
+    const rows = TRADE.offers.map((o: TradeOffer) => {
+      const btn = (k: number) => {
+        const ok = g.trade.canTrade(dock, o, k);
+        return `<button class="btn small" data-o="${o.id}" data-k="${k}" ${ok.ok ? '' : 'disabled'} title="${ok.reason}">×${k}</button>`;
+      };
+      return `<div class="trow"><span class="tgive">${goods(o.give)}</span><span class="tarrow">→</span><span class="tget">${goods(o.get)}</span><span class="tbtns">${btn(1)}${btn(3)}</span></div>`;
+    }).join('');
+    m.innerHTML = `<div class="panel card trade">
+      <div class="card-head"><span>${ICONS.boat} Trade Dock market</span></div>
+      <p class="muted small">Load a boat with spare goods and send it to trade. It sails over the horizon and returns with what you bargained for.</p>
+      <div class="kv"><span>Boats</span><b>${status}</b></div>
+      <div class="trows">${rows}</div>
+      <p class="muted small">Traders speak of new goods soon: ${TRADE.comingSoon.join(', ')}.</p>
+    </div>`;
+    const close = el('button', 'ib small close', ICONS.close);
+    close.onclick = () => this.toggle(m, false);
+    m.querySelector('.card-head')!.appendChild(close);
+    m.querySelectorAll<HTMLButtonElement>('button[data-o]').forEach((b) => {
+      b.onclick = () => {
+        const o = TRADE.offers.find((x) => x.id === b.dataset.o)!;
+        const msg = g.trade.send(dock, o, parseInt(b.dataset.k ?? '1', 10));
+        g.audio?.sfx('click');
+        this.toast(msg);
+        this.renderTrade();
+      };
+    });
+  }
+
   closeModals(): boolean {
     let closed = false;
-    for (const m of [this.settings, this.help]) {
+    for (const m of [this.settings, this.help, this.tradeModal].filter(Boolean) as HTMLElement[]) {
       if (!m.classList.contains('hidden')) {
         m.classList.add('hidden');
         closed = true;
@@ -551,6 +611,15 @@ export class UI {
 
   update(dt: number): void {
     const g0 = this.game;
+    // Keep the open trade menu's boat timers fresh.
+    if (this.tradeModal && !this.tradeModal.classList.contains('hidden')) {
+      this.tradeTimer -= dt;
+      if (this.tradeTimer <= 0) {
+        this.tradeTimer = 1;
+        if (this.tradeDock && !g0.buildings.byId(this.tradeDock.id)) this.toggle(this.tradeModal, false);
+        else this.renderTrade();
+      }
+    }
     this.foundBtn.classList.toggle('hidden', !(g0.awaitingFire && g0.colony.list.length > 0 && g0.placing !== 'campfire'));
     this.timer -= dt;
     if (this.timer <= 0) {
@@ -597,7 +666,7 @@ export class UI {
     this.beliefText.textContent = `${Math.floor(e.res.belief)} / ${e.beliefCap}`;
     this.slots.forEach((b, i) => {
       const tool = TOOLS[i];
-      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath' || g.tool === 'bridge')));
+      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && (g.tool === 'path' || g.tool === 'unpath' || g.tool === 'bridge' || g.tool === 'canal')));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
       if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
     });
@@ -622,9 +691,11 @@ export class UI {
     const g = this.game;
     const isl = g.selectedIslander >= 0 ? g.colony.byId(g.selectedIslander) : undefined;
     const b = g.selectedBuilding >= 0 ? g.buildings.byId(g.selectedBuilding) : undefined;
-    const an = g.selectedAnimal >= 0 ? g.wildlife.animals.get(g.selectedAnimal) : undefined;
+    const mk = g.selectedAnimal >= MONKEY_BASE ? g.wildlife.monkeys.get(g.selectedAnimal) : undefined;
+    if (g.selectedAnimal >= MONKEY_BASE && !mk) g.select(null);
+    const an = g.selectedAnimal >= 0 && g.selectedAnimal < MONKEY_BASE ? g.wildlife.animals.get(g.selectedAnimal) : undefined;
     if (an && !an.alive) g.select(null);
-    if (!isl && !b && !(an && an.alive)) {
+    if (!isl && !b && !(an && an.alive) && !mk) {
       this.info.classList.add('hidden');
       this.infoKey = '';
       return;
@@ -651,6 +722,17 @@ export class UI {
           ${isl.manualRole ? '<button class="btn small" data-a="auto">Auto job</button>' : ''}
         </div>
         ${isl.child ? '' : '<p class="muted small">Tip: click a building, tree, rock or fruit bush to give them that job.</p>'}`;
+    } else if (mk) {
+      const M = g.wildlife.monkeys;
+      const doing = M.describe(mk);
+      const free = M.canHunt(g.selectedAnimal);
+      key = `m${mk.id}|${doing}|${free}`;
+      html = `
+        <div class="card-head"><span>Spider monkey</span><span class="tag">${mk.raid ? 'Pest' : 'Wild'}</span></div>
+        <div class="kv"><span>Doing</span><b>${doing}</b></div>
+        <p class="muted small">Monkeys raid food stores by day. Wave the pointer at raiders to scare them back to the trees, keep warriors about, or hunt them for ${FAUNA.monkeyMeat} meat.</p>
+        <div class="actions"><button class="btn small" data-a="capture" ${free ? '' : 'disabled'}>${ICONS.harvest} Hunt</button></div>
+        <p class="muted small">Tip: select an islander first, then tap a monkey to send them after it.</p>`;
     } else if (an) {
       const d = SPECIES[an.sp];
       const A = g.wildlife.animals;
@@ -676,7 +758,7 @@ export class UI {
     const close = el('button', 'ib small close', ICONS.close);
     close.onclick = () => g.select(null);
     this.info.querySelector('.card-head')?.appendChild(close);
-    this.info.querySelectorAll<HTMLButtonElement>('[data-a]').forEach((btn) => (btn.onclick = () => this.infoAction(btn.dataset.a!, isl?.id, b, an?.id)));
+    this.info.querySelectorAll<HTMLButtonElement>('[data-a]').forEach((btn) => (btn.onclick = () => this.infoAction(btn.dataset.a!, isl?.id, b, an?.id ?? (mk ? g.selectedAnimal : undefined))));
   }
 
   private buildingHtml(b: Building): string {
@@ -693,6 +775,11 @@ export class UI {
     if (b.key === 'woodstore' || b.key === 'campfire') body += `<div class="kv"><span>Wood / Stone</span><b>${Math.floor(g.eco.res.wood)} · ${Math.floor(g.eco.res.stone)} of ${g.eco.woodCap}</b></div>`;
     if (b.key === 'grainstore' || b.key === 'campfire') body += `<div class="kv"><span>Food</span><b>${Math.floor(g.eco.food)} of ${g.eco.foodCap}</b></div>`;
     if (b.key === 'jetty' && b.complete) body += `<div class="kv"><span>Boats</span><b>${b.boats.length} / ${JETTY.maxBoats}${b.boatBuild > 0 ? ` (building ${Math.round((b.boatBuild / JETTY.boatBuildSeconds) * 100)}%)` : ''}</b></div>`;
+    if (b.key === 'tradedock' && b.complete) {
+      const ships = g.trade.of(b);
+      const docked = ships.filter((s) => s.state === 'docked').length;
+      body += `<div class="kv"><span>Trade boats</span><b>${ships.length ? `${docked} moored · ${ships.length - docked} at sea` : 'None yet'}${b.boatBuild > 0 ? ` (building ${Math.round((b.boatBuild / TRADE.boatBuildSeconds) * 100)}%)` : ''}</b></div>`;
+    }
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
     let actions = '';
     const up = g.buildings.canUpgrade(b);
@@ -706,11 +793,18 @@ export class UI {
       const c = JETTY.boatCost;
       actions += `<button class="btn small" data-a="boat" ${b.boats.length + (b.boatBuild > 0 ? 1 : 0) < JETTY.maxBoats && g.eco.canAfford(c) ? '' : 'disabled'}>${ICONS.boat} Build boat <span class="c">${icon('wood')}${c.wood}</span></button>`;
     }
+    if (b.key === 'tradedock' && b.complete) {
+      const c = TRADE.boatCost;
+      const canBoat = g.trade.of(b).length + (b.boatBuild > 0 ? 1 : 0) < TRADE.maxBoats && g.eco.canAfford(c);
+      actions += `<button class="btn small" data-a="trade">${ICONS.boat} Trade goods</button>`;
+      actions += `<button class="btn small" data-a="tradeboat" ${canBoat ? '' : 'disabled'}>${ICONS.boat} Build trade boat <span class="c">${icon('wood')}${c.wood} ${icon('stone')}${c.stone}</span></button>`;
+    }
     if (b.key === 'warroom' && b.complete) {
       const c = WARRIOR.cost;
       const cs = `<span class="c">${icon('wood')}${c.wood} ${icon('stone')}${c.stone} ${icon('belief')}${c.belief}</span>`;
       actions += `<button class="btn small" data-a="jaguar" ${g.eco.canAfford(c) ? '' : 'disabled'}>${ICONS.warrior} Jaguar ${cs}</button><button class="btn small" data-a="eagle" ${g.eco.canAfford(c) ? '' : 'disabled'}>${ICONS.eagle} Eagle ${cs}</button>`;
     }
+    if (!b.complete || b.upgrading) actions += `<button class="btn small" data-a="helpers" title="Call the nearest free villagers to come and build">${ICONS.people} Call helpers</button>`;
     if (b.key !== 'campfire') actions += `<button class="btn small ghost" data-a="demolish">${ICONS.demolish} ${b.complete ? 'Demolish' : 'Cancel'}</button>`;
     return `<div class="card-head"><span><span class="bic">${ICONS[BUILD_ICON[b.key]]}</span> ${b.label}</span></div>
       <p class="muted small">${b.def.description}</p>${body}<div class="actions">${actions}</div>`;
@@ -732,6 +826,10 @@ export class UI {
       }
     }
     if (b) {
+      if (a === 'helpers') {
+        const came = g.colony.callHelpers(b);
+        this.toast(came.length ? `${came.length === 1 ? came[0].name + ' is' : came.length + ' villagers are'} coming to help build the ${b.label}.` : 'Nobody is free nearby to help.', came.length ? 'info' : 'warn');
+      }
       if (a === 'upgrade') {
         const nb = g.buildings.upgrade(b);
         if (nb) {
@@ -744,6 +842,8 @@ export class UI {
         g.select(null);
       }
       if (a === 'boat') g.buildBoat(b);
+      if (a === 'tradeboat') this.toast(g.trade.orderBoat(b));
+      if (a === 'trade') this.openTrade(b);
       if (a === 'jaguar' || a === 'eagle') {
         if (g.colony.trainWarrior(b, a)) this.toast(`A ${a === 'jaguar' ? 'Jaguar' : 'Eagle'} warrior begins training.`);
         else this.toast('Nobody is free to train, or not enough resources.', 'warn');
