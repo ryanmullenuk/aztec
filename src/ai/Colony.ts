@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Economy } from '../economy/Economy';
 import { Islander, Role, Task, makeIslander } from '../entities/Islander';
@@ -11,6 +11,8 @@ import { Pathfinder, PathOptions } from './Pathfinder';
 
 /** Hooks into systems built later (wildlife, boats, audio) so the colony can use them if present. */
 export interface ColonyHooks {
+  /** Where the player is looking from: camera position, the point it looks at, and view radius. */
+  viewer?: () => { x: number; y: number; z: number; tx: number; tz: number; r: number };
   /** Take an animal from a butcher's pen; returns true if one was available. */
   takePenAnimal?: (b: Building) => boolean;
   /** Fisher reached the jetty: board a boat. Returns true if a boat accepted the crew. */
@@ -145,7 +147,8 @@ export class Colony {
     if (cell >= 0) {
       speed *= 1 - this.world.forest[cell] * 0.35;
       if (!Number.isNaN(this.world.riverY[cell])) speed *= 0.5;
-      if (this.world.path[cell]) speed *= ISLANDER.pathSpeed;
+      const pv = this.world.path[cell];
+      if (pv) speed *= pv === 1 ? ISLANDER.pathSpeed : 1 + (ISLANDER.pathSpeed - 1) * PATHS.dirtSpeedShare;
     }
     const step = speed * dt;
     if (d <= step || d < 0.05) {
@@ -166,6 +169,27 @@ export class Colony {
       this.wearDirty = true;
     }
     return 'walking';
+  }
+
+  /**
+   * Standing about with nothing to do: now and then, when the player is looking their way,
+   * an islander turns, looks up at the camera and waves.
+   */
+  private idle(isl: Islander, dt: number): void {
+    if (isl.waveT > 0) {
+      isl.waveT -= dt;
+      isl.anim = 'wave';
+      const v = this.hooks.viewer?.();
+      if (v) this.faceTo(isl, v.x - isl.x, v.z - isl.z, dt * 0.6);
+      return;
+    }
+    isl.anim = 'idle';
+    isl.waveCool -= dt;
+    if (isl.waveCool > 0 || isl.carry || isl.hidden || isl.sleeping) return;
+    isl.waveCool = 5 + this.rnd() * 12;
+    const v = this.hooks.viewer?.();
+    // Only when they're in view and the camera is close enough to see them.
+    if (v && Math.hypot(v.tx - isl.x, v.tz - isl.z) < v.r * 0.9 && v.r < 45 && this.rnd() < 0.5) isl.waveT = 1.8 + this.rnd() * 1.6;
   }
 
   private faceTo(isl: Islander, dx: number, dz: number, dt: number): void {
@@ -847,7 +871,7 @@ export class Colony {
       case 'wander': {
         const r = this.travel(isl, dt, t.x, t.z);
         if (r === 'arrived') {
-          isl.anim = 'idle';
+          this.idle(isl, dt);
           t.timer -= dt;
           if (t.timer <= 0) this.releaseTask(isl);
         } else if (r === 'failed') this.releaseTask(isl);
@@ -1419,7 +1443,7 @@ export class Colony {
       if (isl.happy > ISLANDER.happyThreshold) happy++;
       if (!isl.task) {
         isl.think -= dt;
-        isl.anim = 'idle';
+        this.idle(isl, dt);
         if (isl.think <= 0) {
           isl.think = ISLANDER.aiThinkInterval * (0.7 + this.rnd() * 0.6);
           this.think(isl);

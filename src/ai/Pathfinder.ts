@@ -110,7 +110,7 @@ export class Pathfinder {
     // Worn paths are preferred.
     c *= 1 - w.wear[to] * 0.45;
     // Stone paths are strongly preferred.
-    if (w.path[to]) c *= 0.5;
+    if (w.path[to]) c *= w.path[to] === 1 ? 0.5 : 0.7;
     return c;
   }
 
