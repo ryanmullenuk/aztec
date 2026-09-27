@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FAUNA, WILDLIFE } from '../config';
-import { patchStylised } from '../render/materials';
+import { fishMaterial } from '../render/materials';
 import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { FishType, fishGeometry } from './animalModels';
@@ -77,9 +77,7 @@ export class ReefFish {
     this.spawn();
     // Drawn after the water, softly blended, so their colours read through the surface.
     // Its own material: the shared stylised one is used by boats, buildings and dolphins.
-    const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }));
-    mat.transparent = true;
-    mat.opacity = 0.5;
+    const mat = fishMaterial(8, { transparent: true, opacity: 0.62 });
     mat.depthWrite = false;
     // The ocean writes depth; the fish keep to water deeper than the surf, so skipping the test is safe.
     mat.depthTest = false;
@@ -250,7 +248,8 @@ export class ReefFish {
       const s = this.schools[f.school];
       const m = this.meshes.get(s.type)!;
       const i = cnt.get(s.type) ?? 0;
-      const wig = Math.sin(this.time * (8 + f.speed * 10) + f.phase) * (0.08 + f.speed * 0.05);
+      // The body bends in the shader; a small yaw on top keeps the head searching.
+      const wig = Math.sin(this.time * (3 + f.speed * 4) + f.phase) * (0.03 + f.speed * 0.02);
       _e.set(0, f.heading + wig, 0, 'YXZ');
       _q.setFromEuler(_e);
       _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale * 1.7));

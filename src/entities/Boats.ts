@@ -39,9 +39,9 @@ interface Boat {
 }
 
 /** Boats were oversized next to islanders. */
-const BOAT_SCALE = 0.65;
+export const BOAT_SCALE = 0.65;
 
-function boatGeometry(sail: boolean): THREE.BufferGeometry {
+export function boatGeometry(sail: boolean): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const hull = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
   b.add(hull, { color: (p) => (p.y > -0.05 ? new THREE.Color(0xb8452f) : new THREE.Color(0x8b5a34)) }, M.t(0, 0.18, 0, 0, 0, 0, 0.32, 0.22, 1.05));
@@ -211,7 +211,7 @@ export class Boats {
   }
 
   /** A* over sea cells, avoiding rocks and reefs and hugging deeper water. */
-  private waterPath(sx: number, sz: number, tx: number, tz: number): { x: number; z: number }[] | null {
+  waterPath(sx: number, sz: number, tx: number, tz: number): { x: number; z: number }[] | null {
     const w = this.world;
     const N = w.N;
     const [scx, scz] = w.cellOf(sx, sz);

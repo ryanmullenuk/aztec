@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WILDLIFE } from '../config';
-import { stylisedMaterial } from '../render/materials';
+import { fishMaterial } from '../render/materials';
 import { Building } from '../buildings/Buildings';
 import { Islander } from './Islander';
 import { SpatialHash } from '../world/SpatialHash';
@@ -99,7 +99,7 @@ export class Wildlife {
     const reefPts = [...this.coral.patches.map((p) => ({ x: p.x, z: p.z })), ...veg.plants.filter((p) => p.kind === 'reef' || p.kind === 'searock').map((p) => ({ x: p.x, z: p.z }))];
     this.reef = new ReefFish(world, reefPts);
     this.group.add(this.animals.group, this.birds.group, this.monkeys.group, this.critters.group, this.reef.group, this.coral.group);
-    this.fishMesh = new THREE.InstancedMesh(fishGeometry('silver'), stylisedMaterial(), Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool));
+    this.fishMesh = new THREE.InstancedMesh(fishGeometry('silver'), fishMaterial(11), Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool));
     this.fishMesh.castShadow = false;
     this.fishMesh.frustumCulled = false;
     this.fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -145,7 +145,7 @@ export class Wildlife {
     this.time += dt;
     this.animals.update(dt, input.camTarget, input.ground && input.ground.y > 0.02 ? input.ground : null, islanders);
     this.birds.update(dt, input.ray, islanders);
-    this.monkeys.update(dt, input.camTarget, islanders);
+    this.monkeys.update(dt, input.camTarget, islanders, input.ground);
     this.critters.update(dt, this.time, input.ground, islanders);
     this.reef.update(dt, input.ground, this.boats);
     if (dt > 0) this.updateSchools(dt, input.ground);
@@ -264,7 +264,7 @@ export class Wildlife {
         this.fishMesh.setMatrixAt(i, ZERO);
         continue;
       }
-      const wig = Math.sin(this.time * 12 + f.phase) * 0.15;
+      const wig = Math.sin(this.time * 4 + f.phase) * 0.05;
       _e.set(0, f.heading + wig, 0, 'YXZ');
       _q.setFromEuler(_e);
       _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale * 1.2));

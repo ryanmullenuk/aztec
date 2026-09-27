@@ -6,6 +6,31 @@ import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
 import { Islander } from './Islander';
 import * as models from './animalModels';
+import { GeoBuilder, M, P } from '../render/GeoBuilder';
+
+/** Monkey ids are offset so the colony's hunting hooks can tell them from land animals. */
+export const MONKEY_BASE = 1_000_000;
+
+/** A village raid: down the trunk, across the ground to the food store, and back up a tree. */
+interface Raid {
+  stage: 'down' | 'run' | 'steal' | 'flee' | 'up';
+  tx: number;
+  tz: number;
+  store: number;
+  carry: number;
+  scared: boolean;
+}
+
+export interface MonkeyHooks {
+  /** Food stores monkeys raid (complete buildings holding food). */
+  targets: () => { id: number; x: number; z: number }[];
+  /** Take food from the stores; returns what was stolen. */
+  steal: (n: number) => { res: string; n: number } | null;
+  day: () => boolean;
+  notify: (msg: string) => void;
+  /** People monkeys keep clear of on the ground (warriors). */
+  guards: () => { x: number; z: number }[];
+}
 
 /** A canopy tree monkeys can use: base position plus canopy height and radius. */
 export interface CanopyTree {
@@ -18,9 +43,14 @@ export interface CanopyTree {
   r: number;
 }
 
-type MState = 'sit' | 'walk' | 'climb' | 'hang' | 'crouch' | 'jump' | 'land' | 'eat' | 'watch';
+type MState = 'sit' | 'walk' | 'climb' | 'hang' | 'crouch' | 'jump' | 'land' | 'eat' | 'watch' | 'run' | 'steal';
 
 interface Monkey {
+  id: number;
+  dead: boolean;
+  deadFor: number;
+  raid: Raid | null;
+  chasedBy: Islander | null;
   group: number;
   tree: number;
   /** Current spot on the tree: angle around the trunk, radial fraction, height fraction (0 trunk base → 1 canopy top). */
@@ -51,6 +81,7 @@ interface Monkey {
 interface Troop {
   tree: number;
   timer: number;
+  home: number;
 }
 
 const _m = new THREE.Matrix4();
@@ -85,6 +116,10 @@ export class Monkeys {
   private meshes: Record<string, THREE.InstancedMesh> = {};
   private time = 0;
   private frame = 0;
+  private raidTimer = 0;
+  private warned = -999;
+  private lastTheft = -999;
+  hooks: MonkeyHooks = { targets: () => [], steal: () => null, day: () => true, notify: () => {}, guards: () => [] };
 
   constructor(private world: World, trees: CanopyTree[], private treeAlive: (id: number) => boolean) {
     this.rng = new RNG(world.seed * 173 + 3);
@@ -113,6 +148,8 @@ export class Monkeys {
     mk('shin', models.monkeySeg(LEG[1], 0.012, 0.009), n * 2);
     mk('foot', models.monkeyHand(0.03), n * 2);
     mk('tail', models.monkeyTail(), n);
+    mk('loot', lootGeometry(), n);
+    this.raidTimer = this.rng.range(FAUNA.monkeyRaidEvery[0], FAUNA.monkeyRaidEvery[1]);
   }
 
   /** Trees are linked when the gap between canopies is a believable leap. */
@@ -149,11 +186,12 @@ export class Monkeys {
       if (home < 0) home = good[Math.floor(this.rng.next() * good.length)];
       used.add(home);
       const g = this.troops.length;
-      this.troops.push({ tree: home, timer: 20 + this.rng.next() * 30 });
+      this.troops.push({ tree: home, timer: 20 + this.rng.next() * 30, home });
       const size = Math.min(want - this.list.length, this.rng.int(FAUNA.monkeyGroup[0], FAUNA.monkeyGroup[1]));
       for (let k = 0; k < size; k++) {
         const tree = k === 0 ? home : this.rng.chance(0.5) ? home : this.links[home][Math.floor(this.rng.next() * this.links[home].length)];
         const m: Monkey = {
+          id: this.list.length, dead: false, deadFor: 0, raid: null, chasedBy: null,
           group: g, tree, a: this.rng.range(0, TAU), rf: this.rng.range(0.3, 0.75), hf: this.rng.range(0.55, 0.9), x: 0, y: 0, z: 0,
           heading: this.rng.range(0, TAU), state: 'sit', timer: this.rng.range(1, 6), from: new THREE.Vector3(), to: new THREE.Vector3(),
           toTree: tree, toA: 0, toRf: 0, toHf: 0, t: 0, dur: 1, phase: this.rng.range(0, 10), look: 0,
@@ -181,10 +219,11 @@ export class Monkeys {
     return this.list.length;
   }
 
-  update(dt: number, camTarget: THREE.Vector3, people: SpatialHash<Islander>): void {
+  update(dt: number, camTarget: THREE.Vector3, people: SpatialHash<Islander>, cursor: THREE.Vector3 | null = null): void {
     this.time += dt;
     this.frame++;
     if (dt > 0) {
+      this.updateRaids(dt, cursor);
       for (const tr of this.troops) {
         tr.timer -= dt;
         if (tr.timer <= 0) {
@@ -195,6 +234,11 @@ export class Monkeys {
         }
       }
       for (const m of this.list) {
+        if (m.dead) continue;
+        if (m.raid && m.raid.stage !== 'down' && m.raid.stage !== 'up') {
+          this.ground(m, dt);
+          continue;
+        }
         const far = Math.hypot(m.x - camTarget.x, m.z - camTarget.z) > FAUNA.lodDistance;
         m.lod += dt;
         // Far monkeys think every few frames (animation continues smoothly).
@@ -266,7 +310,15 @@ export class Monkeys {
           const t = this.trees[m.tree];
           m.heading = Math.atan2(t.x - m.x, t.z - m.z);
         }
-        if (k >= 1) this.arrive(m);
+        if (k >= 1) {
+          if (m.raid?.stage === 'down') {
+            m.raid.stage = 'run';
+            m.state = 'run';
+            return;
+          }
+          if (m.raid?.stage === 'up') m.raid = null;
+          this.arrive(m);
+        }
         return;
       }
       case 'crouch':
@@ -300,6 +352,16 @@ export class Monkeys {
           m.timer = 1 + this.rng.next() * 3;
         }
         return;
+    }
+    // Hunted: leap away to another tree when the hunter gets close.
+    if (m.chasedBy && (m.state === 'sit' || m.state === 'watch' || m.state === 'eat' || m.state === 'hang') && Math.hypot(m.chasedBy.x - m.x, m.chasedBy.z - m.z) < 4 && this.rng.chance(dt * 0.6)) {
+      const n = this.links[m.tree].filter((j) => this.treeAlive(this.trees[j].id));
+      if (n.length) {
+        const j = n[Math.floor(this.rng.next() * n.length)];
+        const t = this.trees[j];
+        this.startMove(m, j, Math.atan2(m.z - t.z, m.x - t.x), this.rng.range(0.5, 0.8), this.rng.range(0.7, 0.9), 'crouch');
+        return;
+      }
     }
     if (near && m.state !== 'hang') {
       const p = near as Islander;
@@ -375,6 +437,194 @@ export class Monkeys {
     if (m.state === 'sit' || jumped) m.heading = m.a > -99 ? Math.atan2(Math.cos(m.a), Math.sin(m.a)) : m.heading;
   }
 
+  // ---------------- Village raids ----------------
+
+  private updateRaids(dt: number, cursor: THREE.Vector3 | null): void {
+    // Lost monkeys are slowly replaced by newcomers from the jungle.
+    for (const m of this.list) {
+      if (!m.dead) continue;
+      m.deadFor += dt;
+      if (m.deadFor > FAUNA.monkeyRespawn) {
+        const tr = this.troops[m.group];
+        const tree = this.treeAlive(this.trees[tr.tree].id) ? tr.tree : this.trees.findIndex((t) => this.treeAlive(t.id));
+        if (tree < 0) continue;
+        Object.assign(m, { dead: false, deadFor: 0, raid: null, chasedBy: null, tree, state: 'sit', timer: 2, a: this.rng.range(0, TAU), rf: 0.5, hf: 0.8 });
+        this.spot(tree, m.a, m.rf, m.hf, _p);
+        m.x = _p.x;
+        m.y = _p.y;
+        m.z = _p.z;
+      }
+    }
+    // Raiders on the ground bolt from the pointer and from warriors.
+    const guards = this.hooks.guards();
+    for (const m of this.list) {
+      const r = m.raid;
+      if (m.dead || !r || (r.stage !== 'run' && r.stage !== 'steal')) continue;
+      const scared = (cursor && Math.hypot(cursor.x - m.x, cursor.z - m.z) < FAUNA.monkeyFear) || guards.some((g) => Math.hypot(g.x - m.x, g.z - m.z) < FAUNA.monkeyFear * 0.8) || !!m.chasedBy;
+      if (scared) this.flee(m, cursor, true);
+    }
+    this.raidTimer -= dt;
+    if (this.raidTimer > 0) return;
+    this.raidTimer = this.rng.range(FAUNA.monkeyRaidEvery[0], FAUNA.monkeyRaidEvery[1]);
+    if (!this.hooks.day()) return;
+    const stores = this.hooks.targets();
+    if (!stores.length) return;
+    // The troop nearest a food store sends a few bold members in.
+    let best: { g: number; s: { id: number; x: number; z: number }; d: number } | null = null;
+    this.troops.forEach((tr, g) => {
+      const t = this.trees[tr.tree];
+      for (const st of stores) {
+        const d = Math.hypot(st.x - t.x, st.z - t.z);
+        if (d < FAUNA.monkeyRaidRange && (!best || d < best.d)) best = { g, s: st, d };
+      }
+    });
+    if (!best) return;
+    const { g, s: st } = best as { g: number; s: { id: number; x: number; z: number }; d: number };
+    const members = this.list.filter((m) => !m.dead && m.group === g && !m.raid && (m.state === 'sit' || m.state === 'watch' || m.state === 'eat' || m.state === 'walk'));
+    const n = Math.min(members.length, this.rng.int(FAUNA.monkeyRaiders[0], FAUNA.monkeyRaiders[1]));
+    for (let k = 0; k < n; k++) {
+      const m = members[k];
+      m.raid = { stage: 'down', tx: st.x + this.rng.range(-0.6, 0.6), tz: st.z + this.rng.range(-0.6, 0.6), store: st.id, carry: 0, scared: false };
+      // Down the trunk to the ground.
+      const t = this.trees[m.tree];
+      const a = Math.atan2(st.z - t.z, st.x - t.x);
+      const gx = t.x + Math.cos(a) * 0.4, gz = t.z + Math.sin(a) * 0.4;
+      m.from.set(m.x, m.y, m.z);
+      m.to.set(gx, this.world.groundY(gx, gz), gz);
+      m.t = 0;
+      m.dur = Math.max(0.8, Math.abs(m.to.y - m.from.y) / 1.1);
+      m.state = 'climb';
+    }
+    if (n && this.time - this.warned > 90) {
+      this.warned = this.time;
+      this.hooks.notify('Monkeys are creeping into the village after your food! Wave them off with the pointer, or send a hunter.');
+    }
+  }
+
+  /** Run for the nearest tree (away from whatever scared it), dropping any plan to steal. */
+  private flee(m: Monkey, from: THREE.Vector3 | null, scared: boolean): void {
+    const r = m.raid!;
+    r.stage = 'flee';
+    r.scared = r.scared || scared;
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < this.trees.length; i++) {
+      const t = this.trees[i];
+      if (!this.treeAlive(t.id)) continue;
+      let d = Math.hypot(t.x - m.x, t.z - m.z);
+      // Prefer trees away from the threat.
+      if (from) {
+        const ax = m.x - from.x, az = m.z - from.z, bx = t.x - m.x, bz = t.z - m.z;
+        if (ax * bx + az * bz < 0) d *= 2.5;
+      }
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    if (best < 0) return;
+    m.tree = best;
+    const t = this.trees[best];
+    const a = Math.atan2(m.z - t.z, m.x - t.x);
+    r.tx = t.x + Math.cos(a) * 0.35;
+    r.tz = t.z + Math.sin(a) * 0.35;
+    m.state = 'run';
+  }
+
+  /** On the ground: scamper to the store, rummage, and run back to the trees. */
+  private ground(m: Monkey, dt: number): void {
+    const r = m.raid!;
+    if (r.stage === 'steal') {
+      m.state = 'steal';
+      m.timer -= dt;
+      if (m.timer <= 0) {
+        const got = this.hooks.steal(this.rng.int(FAUNA.monkeySteal[0], FAUNA.monkeySteal[1]));
+        if (got) {
+          r.carry = got.n;
+          // One message per raid, not one per monkey.
+          if (this.time - this.lastTheft > 10) this.hooks.notify(`Monkeys made off with ${got.n}+ ${got.res}!`);
+          this.lastTheft = this.time;
+        }
+        this.flee(m, null, false);
+      }
+      return;
+    }
+    const dx = r.tx - m.x, dz = r.tz - m.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.25) {
+      if (r.stage === 'run') {
+        r.stage = 'steal';
+        m.state = 'steal';
+        m.timer = FAUNA.monkeyStealTime;
+        return;
+      }
+      // Back at a tree: up into the branches.
+      r.stage = 'up';
+      this.startMove(m, m.tree, Math.atan2(m.z - this.trees[m.tree].z, m.x - this.trees[m.tree].x), 0.5, 0.78, 'climb');
+      return;
+    }
+    const sp = (r.stage === 'flee' ? FAUNA.monkeyFleeSpeed * (r.scared ? 1.15 : 1) : FAUNA.monkeyRunSpeed) * (0.8 + 0.2 * m.scale);
+    const step = Math.min(d, sp * dt);
+    const nx = m.x + (dx / d) * step, nz = m.z + (dz / d) * step;
+    // Monkeys won't swim: turn back if the way ahead is water.
+    if (this.world.heightAt(nx, nz) < -0.25 && r.stage === 'run') {
+      this.flee(m, null, false);
+      return;
+    }
+    m.x = nx;
+    m.z = nz;
+    m.y = this.world.groundY(nx, nz);
+    let dh = Math.atan2(dx, dz) - m.heading;
+    while (dh > Math.PI) dh -= TAU;
+    while (dh < -Math.PI) dh += TAU;
+    m.heading += dh * Math.min(1, dt * 10);
+    m.state = 'run';
+  }
+
+  // ---------------- Hunting (through the colony's capture hooks) ----------------
+
+  get(id: number): Monkey | undefined {
+    const m = this.list[id - MONKEY_BASE];
+    return m && !m.dead ? m : undefined;
+  }
+
+  canHunt(id: number): boolean {
+    const m = this.get(id);
+    return !!m && !m.chasedBy && m.state !== 'jump';
+  }
+
+  beginChase(id: number, isl: Islander): void {
+    const m = this.get(id);
+    if (m) m.chasedBy = isl;
+  }
+
+  /** Close enough on the ground to grab, or right under it in a tree for a spear throw. */
+  catchable(id: number, isl: Islander): boolean {
+    const m = this.get(id);
+    if (!m) return false;
+    const d = Math.hypot(m.x - isl.x, m.z - isl.z);
+    if (m.raid && m.raid.stage !== 'down' && m.raid.stage !== 'up') return d < 0.7;
+    return d < 1.3 && m.state !== 'jump' && m.state !== 'crouch' && m.y - isl.y < 4;
+  }
+
+  kill(id: number): void {
+    const m = this.get(id);
+    if (!m) return;
+    m.dead = true;
+    m.deadFor = 0;
+    m.raid = null;
+    m.chasedBy = null;
+  }
+
+  release(id: number): void {
+    const m = this.get(id);
+    if (m) m.chasedBy = null;
+  }
+
+  /** How many are on the ground in the village right now. */
+  get raiders(): number {
+    return this.list.filter((m) => !m.dead && m.raid && m.raid.stage !== 'up').length;
+  }
+
   // ---------------- Rendering ----------------
 
   private render(): void {
@@ -389,6 +639,7 @@ export class Monkeys {
     const L = new THREE.Matrix4();
     const chest = new THREE.Matrix4(), J = new THREE.Matrix4(), T = new THREE.Matrix4();
     for (const m of this.list) {
+      if (m.dead) continue;
       const t = this.time + m.phase;
       let pitch = 0, roll = 0, bodyY = 0;
       let armL = -0.25, armR = -0.25, armLz = 0.25, armRz = -0.25;
@@ -424,10 +675,22 @@ export class Monkeys {
           headX = 0.2 + Math.sin(t * 5) * 0.05;
           waistX = 0.22;
           break;
+        case 'steal':
+          // Hunched on the ground, rummaging with both hands and glancing about.
+          armR = -1.4 + Math.sin(t * 9) * 0.4;
+          armL = -1.4 - Math.sin(t * 9 + 1) * 0.4;
+          elbR = elbL = -0.9;
+          waistX = 0.5;
+          pitch = 0.3;
+          headX = 0.3;
+          headY = Math.sin(t * 2.3) * 0.9;
+          kneeL = kneeR = 2.0;
+          break;
+        case 'run':
         case 'walk': {
-          const g = t * 9;
+          const g = t * (m.state === 'run' ? 15 : 9);
           pitch = 1.2;
-          bodyY = 0.1;
+          bodyY = m.state === 'run' ? 0.12 + Math.abs(Math.sin(g)) * 0.03 : 0.1;
           armL = -pitch + Math.sin(g) * 0.55;
           armR = -pitch - Math.sin(g) * 0.55;
           legL = -pitch - Math.sin(g) * 0.55;
@@ -568,6 +831,8 @@ export class Monkeys {
         ms.foot.setMatrixAt(cnt.foot++, J);
       }
       put('tail', _b, local(L, 0, 0.035, -0.04, tailX, tailY, 0));
+      // Stolen food clutched to the chest.
+      if (m.raid?.carry) put('loot', chest, local(L, 0, 0.03, 0.06, 0, 0, 0));
       void roll;
     }
     for (const [k, mesh] of Object.entries(ms)) {
@@ -580,6 +845,7 @@ export class Monkeys {
   near(x: number, z: number, r: number): Monkey | null {
     let best: Monkey | null = null, bd = r;
     for (const m of this.list) {
+      if (m.dead) continue;
       const d = Math.hypot(m.x - x, m.z - z);
       if (d < bd) {
         bd = d;
@@ -594,6 +860,7 @@ export class Monkeys {
     const v = new THREE.Vector3();
     let best: Monkey | null = null, bd = radius * radius;
     for (const m of this.list) {
+      if (m.dead) continue;
       v.set(m.x, m.y + 0.1, m.z).project(camera);
       if (v.z > 1) continue;
       const px = (v.x * 0.5 + 0.5) * rect.width + rect.left, py = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
@@ -607,7 +874,20 @@ export class Monkeys {
   }
 
   describe(m: Monkey): string {
-    const map: Record<MState, string> = { sit: 'Sitting on a branch', walk: 'Walking along a branch', climb: 'Climbing', hang: 'Hanging and swinging', crouch: 'Getting ready to leap', jump: 'Leaping between trees', land: 'Landing', eat: 'Eating fruit', watch: 'Watching the islanders' };
+    if (m.raid) {
+      if (m.raid.stage === 'steal') return 'Stealing food!';
+      if (m.raid.stage === 'flee' || m.raid.stage === 'up') return m.raid.carry ? `Running off with ${m.raid.carry} food` : 'Fleeing back to the trees';
+      return 'Sneaking into the village';
+    }
+    const map: Record<MState, string> = { sit: 'Sitting on a branch', walk: 'Walking along a branch', climb: 'Climbing', hang: 'Hanging and swinging', crouch: 'Getting ready to leap', jump: 'Leaping between trees', land: 'Landing', eat: 'Eating fruit', watch: 'Watching the islanders', run: 'Scampering', steal: 'Stealing food!' };
     return map[m.state];
   }
+}
+
+/** A stolen bundle: a papaya and a maize cob. */
+function lootGeometry(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.sphere(0.035, 1), { color: 0xf0a030 }, M.t(0, 0, 0, 0, 0, 0, 0.9, 1.2, 0.9));
+  b.add(P.cyl(0.014, 0.012, 0.07, 6), { color: 0xf2d040 }, M.t(0.03, 0.01, 0.01, 0, 0, 0.7));
+  return b.build();
 }

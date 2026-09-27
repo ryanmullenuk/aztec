@@ -39,7 +39,7 @@ export type CarryKind = ResourceKey | 'log' | 'chicken';
 
 /** A task is a small state machine the AI steps through. */
 export interface Task {
-  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke';
+  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire';
   stage: number;
   /** Plant id, building id or islander id depending on kind. */
   target: number;
@@ -91,6 +91,8 @@ export interface Islander {
   headdress: number;
   jewel: boolean;
   warrior: 'jaguar' | 'eagle' | null;
+  /** Day of the last evening spent at a bonfire. */
+  lastBonfire: number;
   hidden: boolean;
   think: number;
   lastMeal?: ResourceKey;
@@ -145,6 +147,7 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
     jewel: rnd() < 0.4,
     warrior: null,
     hidden: false,
+    lastBonfire: -1,
     think: rnd(),
     stuck: 0,
     lastCell: -1,

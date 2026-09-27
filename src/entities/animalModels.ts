@@ -291,48 +291,8 @@ export function monkeyHand(len: number): THREE.BufferGeometry {
 
 // ---------------- Decorative reef fish ----------------
 
-export type FishType = 'blueYellow' | 'yellow' | 'clown' | 'idol' | 'silver' | 'tang';
-
-export function fishGeometry(t: FishType): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  const body = (len: number, h: number, col: (p: THREE.Vector3) => THREE.Color) => b.add(P.sphere(0.5, 1), { color: col, sway: 0.05 }, M.t(0, 0, 0, 0, 0, 0, 0.35 * h, h, len));
-  const tail = (col: number, s = 1) => b.add(P.cone(0.05 * s, 0.07 * s, 4), { color: col, sway: 0.9 }, M.t(0, 0, -0.1 * s, -Math.PI / 2, 0, 0, 0.3, 1, 1));
-  const eye = (z: number, y = 0.012) => { for (const x of [-1, 1]) b.add(P.sphere(0.008, 0), C(0x0a0a0c), M.t(x * 0.018, y, z)); };
-  switch (t) {
-    case 'blueYellow':
-      body(0.16, 0.07, () => new THREE.Color(0x2a4ac8));
-      tail(0xf2d030);
-      eye(0.05);
-      break;
-    case 'yellow':
-      body(0.15, 0.08, () => new THREE.Color(0xf2d42e));
-      tail(0xe8c020);
-      eye(0.05);
-      break;
-    case 'clown':
-      body(0.12, 0.07, (p) => new THREE.Color(Math.abs(p.z - 0.02) < 0.012 || Math.abs(p.z + 0.03) < 0.01 ? 0xf8f6f0 : 0xf07024));
-      tail(0xf07024, 0.8);
-      eye(0.045);
-      break;
-    case 'idol':
-      body(0.1, 0.13, (p) => new THREE.Color(p.z > 0.02 ? 0xf4f0e0 : p.z > -0.015 ? 0x151515 : 0xf2d030));
-      b.add(P.box(0.006, 0.12, 0.03), C(0xf4f0e0), M.t(0, 0.11, -0.01, -0.5, 0, 0));
-      tail(0x151515, 0.8);
-      eye(0.035, 0.02);
-      break;
-    case 'silver':
-      body(0.17, 0.06, (p) => new THREE.Color(p.y > 0 ? 0x7fa898 : 0xd8e4dc));
-      tail(0x8fb0a0);
-      eye(0.055);
-      break;
-    case 'tang':
-      body(0.2, 0.12, (p) => new THREE.Color(p.y > 0.02 && p.z > -0.04 ? 0x10205c : 0x2a5ad8));
-      tail(0xf2d030, 1.2);
-      eye(0.06, 0.02);
-      break;
-  }
-  return facet(b.build());
-}
+export { fishGeometry } from "./fishModels";
+export type { FishType } from "./fishModels";
 
 /** Chicken tucked under an arm, for islanders carrying a captured hen. */
 export function carriedChicken(): THREE.BufferGeometry {
