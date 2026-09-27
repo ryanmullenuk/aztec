@@ -26,6 +26,8 @@ const waterFrag = /* glsl */ `
   uniform float uTime;
   uniform float uWorld;
   uniform float uFlow;
+  /** Extra depth for narrow canals, too fine for the seabed texture to resolve. */
+  uniform float uDeepen;
   uniform sampler2D uHeight;
   uniform vec3 uSunDir;
   uniform vec3 uSunCol;
@@ -104,7 +106,7 @@ const waterFrag = /* glsl */ `
     float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
     vec4 hr = texture2D(uHeight, clamp(uv, 0.0, 1.0));
     float bed = mix(-7.0, hr.r, inside);
-    float depth = max(vW.y - bed, 0.0);
+    float depth = max(vW.y - bed, 0.0) + uDeepen;
     float t = uTime;
     vec2 p = vW.xz;
     // World units covered by one pixel here: drives wave level of detail.
@@ -128,7 +130,7 @@ const waterFrag = /* glsl */ `
       vec2 ou = vec2(cos(ak), sin(ak)) * (2.2 / uWorld);
       bs += texture2D(uHeight, clamp(uv + ou, 0.0, 1.0)).r;
     }
-    float cdepth = max(vW.y - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0);
+    float cdepth = max(vW.y - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0) + uDeepen;
     vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.75, cdepth));
     col = mix(col, cMid, smoothstep(0.6, 2.6, cdepth));
     col = mix(col, cDeep2, smoothstep(2.0, 5.2, cdepth));
@@ -329,6 +331,7 @@ export class Water {
   readonly group = new THREE.Group();
   readonly oceanMat: THREE.ShaderMaterial;
   readonly riverMat: THREE.ShaderMaterial;
+  readonly canalMat: THREE.ShaderMaterial;
   readonly heightTex: THREE.DataTexture;
   private heightData: Uint16Array;
   private res: number;
@@ -364,7 +367,7 @@ export class Water {
       cShallowB: { value: new THREE.Color(COLORS.shallowBright) },
       cFoam: { value: new THREE.Color(COLORS.foam) },
     });
-    const make = (flow: number) =>
+    const make = (flow: number, deepen = 0) =>
       new THREE.ShaderMaterial({
         uniforms: {
           ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
@@ -372,6 +375,7 @@ export class Water {
           ...colorUniforms(),
           uHeight: { value: this.heightTex },
           uFlow: { value: flow },
+          uDeepen: { value: deepen },
         },
         vertexShader: waterVert,
         fragmentShader: waterFrag,
@@ -381,6 +385,7 @@ export class Water {
       });
     this.oceanMat = make(0);
     this.riverMat = make(1);
+    this.canalMat = make(0.4, 0.7);
 
     const ocean = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.oceanSize, WORLD.oceanSize, 1, 1).rotateX(-Math.PI / 2), this.oceanMat);
     ocean.name = 'ocean';
@@ -398,6 +403,51 @@ export class Water {
 
     this.buildRivers();
     this.buildWaterfall();
+    this.setCanals();
+  }
+
+  private canalMesh: THREE.Mesh | null = null;
+
+  /** Rebuild the water surface of all player-dug canals (one quad per channel cell). */
+  setCanals(): void {
+    const w = this.world;
+    const N = w.N;
+    const pos: number[] = [], idx: number[] = [];
+    let n = 0;
+    for (let i = 0; i < N * N; i++) {
+      if (!w.canal[i]) continue;
+      if (Number.isNaN(w.riverY[i])) continue;
+      const cx = i % N, cz = (i / N) | 0;
+      const x = w.centerX(cx), z = w.centerZ(cz);
+      // Sit just below the lowest bank (so it never floats over the land) and above the bed.
+      let bank = Infinity;
+      for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (!w.inBounds(cx + ox, cz + oz)) continue;
+        const j = w.idx(cx + ox, cz + oz);
+        if (w.canal[j] || w.layer[j] <= 0 || !Number.isNaN(w.riverY[j])) continue;
+        bank = Math.min(bank, w.heightAt(w.centerX(cx + ox), w.centerZ(cz + oz)));
+      }
+      const bed = w.heightAt(x, z);
+      const y = Math.max(bed + 0.1, Math.min(w.riverY[i], bank - 0.08));
+      const h = 0.53;
+      pos.push(x - h, y, z - h, x + h, y, z - h, x + h, y, z + h, x - h, y, z + h);
+      idx.push(n, n + 2, n + 1, n, n + 3, n + 2);
+      n += 4;
+    }
+    if (this.canalMesh) {
+      this.group.remove(this.canalMesh);
+      this.canalMesh.geometry.dispose();
+      this.canalMesh = null;
+    }
+    if (!n) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    this.canalMesh = new THREE.Mesh(g, this.canalMat);
+    this.canalMesh.renderOrder = 11;
+    this.canalMesh.name = 'canals';
+    this.group.add(this.canalMesh);
   }
 
   /** Recompute the seabed height texture for a cell rectangle. */
