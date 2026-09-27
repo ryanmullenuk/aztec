@@ -103,6 +103,8 @@ export class Pathfinder {
     if (!Number.isNaN(w.riverY[to])) c *= 4;
     // Worn paths are preferred.
     c *= 1 - w.wear[to] * 0.45;
+    // Stone paths are strongly preferred.
+    if (w.path[to]) c *= 0.5;
     return c;
   }
 

@@ -145,6 +145,7 @@ export class Colony {
     if (cell >= 0) {
       speed *= 1 - this.world.forest[cell] * 0.35;
       if (!Number.isNaN(this.world.riverY[cell])) speed *= 0.5;
+      if (this.world.path[cell]) speed *= ISLANDER.pathSpeed;
     }
     const step = speed * dt;
     if (d <= step || d < 0.05) {
