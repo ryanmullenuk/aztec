@@ -10,26 +10,26 @@ const mix = (a: THREE.Color, b: THREE.Color, t: number) => a.clone().lerp(b, THR
 const PAL = {
   trunk: c(0x9c7a52),
   trunkDark: c(0x6e5236),
-  frondBase: c(0x2d7a32),
-  frondMid: c(0x4fa83a),
+  frondBase: c(0x33602c),
+  frondMid: c(0x557f38),
   frondTip: c(COLORS.frondTip),
   jungleDark: c(COLORS.jungleDark),
   jungleBright: c(COLORS.jungleBright),
-  jungleSun: c(0x8cc43e),
+  jungleSun: c(0x82a04a),
   bark: c(0x6b4a2e),
-  fern: c(0x3b8a34),
-  fernTip: c(0x86c44a),
-  bushDark: c(0x2f7a33),
-  bushLight: c(0x6db043),
+  fern: c(0x3e6d30),
+  fernTip: c(0x7c9a46),
+  bushDark: c(0x31592b),
+  bushLight: c(0x63853c),
   apple: c(0xd8352a),
   banana: c(0xf2d33a),
-  bananaLeaf: c(0x4f9a38),
-  bananaTip: c(0x9ccd4c),
+  bananaLeaf: c(0x4d8038),
+  bananaTip: c(0x8ca84a),
   rockTop: c(0xb3a39c),
   rock: c(COLORS.rock),
   rockLight: c(COLORS.rockLight),
   rockLav: c(0x6f6782),
-  moss: c(0x7a9a3a),
+  moss: c(0x6b8538),
   reef1: c(COLORS.reef1),
   reef2: c(COLORS.reef2),
   coral: c(0xe0766a),
@@ -181,7 +181,7 @@ export function bushGeometry(flowers: boolean, lo: boolean, seed: number, apple 
   const dr = new RNG(seed * 31 + 7);
   const b = new GeoBuilder();
   const blobs = 3 + (seed % 2);
-  const light = apple ? c(0x5da33e) : PAL.bushLight;
+  const light = apple ? c(0x5a8739) : PAL.bushLight;
   for (let k = 0; k < blobs; k++) {
     const a = (k / blobs) * Math.PI * 2;
     const r = k === 0 ? 0 : 0.28;
@@ -193,7 +193,7 @@ export function bushGeometry(flowers: boolean, lo: boolean, seed: number, apple 
       sway: (p) => p.y * 0.25,
       ao: { y0: 0, y1: 0.6, min: 0.6 },
     }, M.t(bx, by, bz));
-    if (!lo) leafClump(b, bx, by, bz, rad, 0.85, Math.round(rad * rad * 90), dr, { cols: [PAL.bushDark, light, mix(PAL.bushDark, light, 0.5)], sun: mix(light, c(0xa8d860), 0.5), len: 0.2, w: 0.08, sway: 0.18, lowBias: 0.2 });
+    if (!lo) leafClump(b, bx, by, bz, rad, 0.85, Math.round(rad * rad * 90), dr, { cols: [PAL.bushDark, light, mix(PAL.bushDark, light, 0.5)], sun: mix(light, c(0x93ab58), 0.5), len: 0.2, w: 0.08, sway: 0.18, lowBias: 0.2 });
   }
   if (!lo && FINE.on) {
     // Woody stems at the base, showing between the leaves.
@@ -324,15 +324,15 @@ export function contactTexture(): THREE.Texture {
 // ---------------- Tree catalogue (broadleaf variants 2–7, fruit tree) ----------------
 
 const TREE = {
-  lime: c(0x8cc43e),
-  limeDark: c(0x5a9a30),
-  yellowGreen: c(0xb8c83a),
-  olive: c(0x7a9a2e),
-  deep: c(0x1f5a2a),
-  deepLight: c(0x3a7f36),
-  pink: c(0xe070b0),
-  pinkLight: c(0xf4a8d0),
-  vine: c(0x5a8a2a),
+  lime: c(0x789a42),
+  limeDark: c(0x4a7230),
+  yellowGreen: c(0x93a34a),
+  olive: c(0x667f35),
+  deep: c(0x224823),
+  deepLight: c(0x3c6831),
+  pink: c(0xcf78a6),
+  pinkLight: c(0xe6a6c6),
+  vine: c(0x4c702f),
 };
 
 function canopyBlob(b: GeoBuilder, x: number, y: number, z: number, r: number, lo: boolean, seed: number, dark: THREE.Color, light: THREE.Color, squash = 0.8): void {
@@ -346,7 +346,7 @@ function canopyBlob(b: GeoBuilder, x: number, y: number, z: number, r: number, l
   }, M.t(x, y, z));
   if (!lo) {
     const rng = new RNG(seed * 7 + 3);
-    leafClump(b, x, y, z, r, squash, Math.round(r * r * 44), rng, { cols: [dark, light, mix(dark, light, 0.5)], sun: mix(light, c(0xc8e070), 0.35), len: 0.3, w: 0.115, sway: 0.16 });
+    leafClump(b, x, y, z, r, squash, Math.round(r * r * 44), rng, { cols: [dark, light, mix(dark, light, 0.5)], sun: mix(light, c(0xa6b566), 0.35), len: 0.3, w: 0.115, sway: 0.16 });
   }
 }
 
@@ -472,7 +472,7 @@ export function fruitTreeGeometry(lo: boolean, seed: number): THREE.BufferGeomet
   const dr = new RNG(seed * 31 + 7);
   trunk(b, 1.1, 0.12, 0.08, lo, rng);
   if (!lo) for (let k = 0; k < 3; k++) branch(b, new THREE.Vector3(0, 0.9, 0), new THREE.Vector3(Math.cos(k * 2.1) * 0.5, 1.55, Math.sin(k * 2.1) * 0.5), 0.05, dr, 1.1);
-  canopyBlob(b, 0, 1.75, 0, 0.85, lo, seed, c(0x2e7a2e), c(0x5aa83a), 0.9);
+  canopyBlob(b, 0, 1.75, 0, 0.85, lo, seed, c(0x2e5c2b), c(0x537e37), 0.9);
   return b.build();
 }
 
