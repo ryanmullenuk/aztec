@@ -95,8 +95,10 @@ export function generateIsland(world: World, seed: number): void {
       const mMain = lobeField(wx, wz, mainLobes) + coast;
       const mWild = lobeField(wx, wz, wildLobes) + coast;
       let m = Math.max(mMain, mWild);
-      // Keep a shallow strait open between the two islands.
-      const sd = Math.abs(nx - straitX + sA.noise(nz * 3, 7) * 0.012) / straitW;
+      // Keep a shallow strait open between the two islands: a gently winding channel that only
+      // exists where both coasts are close (it fades out into open sea beyond the islands).
+      const between = 1 - smoothstep(0.12, 0.42, Math.max(-mMain, -mWild));
+      const sd = Math.abs(nx - straitX + sA.noise(nz * 2.2, 7) * 0.03 + Math.sin(nz * 5.5) * 0.012) / straitW + (1 - between) * 3;
       if (sd < 1 && m > -0.08) m = Math.min(m, -0.04 - (1 - sd) * 0.05);
       if (m > 0) world.isle[i] = mWild > mMain ? 2 : 1;
 
@@ -107,9 +109,11 @@ export function generateIsland(world: World, seed: number): void {
       } else {
         // Wide shallow reef shelf, then a drop-off into the deep (always shallow in the strait).
         const shelfW = 0.36 + sC.noise(nx * 2.3 + 5, nz * 2.3) * 0.1;
-        if (m > -shelfW || sd < 1.6) h = -0.012 + (Math.max(m, -shelfW) / shelfW) * 0.1 + sC.fbm(nx * 9, nz * 9, 2) * 0.018;
+        if (m > -shelfW) h = -0.012 + (m / shelfW) * 0.1 + sC.fbm(nx * 9, nz * 9, 2) * 0.018;
         else h = -0.112 - (-shelfW - m) * 1.7;
-        if (sd < 1.6) h = Math.max(h, -0.05);
+        // The strait itself stays wadeable-shallow (so it can be bridged), blending smoothly
+        // into the surrounding shelf rather than as a hard straight band.
+        if (between > 0) h = Math.max(h, lerp(h, -0.045 + sC.noise(nx * 12, nz * 12) * 0.01, between * (1 - smoothstep(1, 2.4, sd))));
       }
       // Mountain massif on the main island: ridged peaks, only on land.
       const mx = nx - mc.x, mz = nz - mc.z;
