@@ -251,9 +251,10 @@ export class Terrain {
     const w = this.world;
     const d = this.wearData;
     for (let i = 0; i < w.N * w.N; i++) {
-      d[i * 4] = Math.min(255, w.wear[i] * 255);
+      // Dirt paths show as fully trodden ground; stone paths get their own flagstone channel.
+      d[i * 4] = w.path[i] === 2 ? 255 : Math.min(255, w.wear[i] * 255);
       d[i * 4 + 1] = Math.min(255, w.soil[i] * 255);
-      d[i * 4 + 2] = w.path[i] ? 255 : 0;
+      d[i * 4 + 2] = w.path[i] === 1 ? 255 : 0;
       d[i * 4 + 3] = 255;
     }
     this.wearTex.needsUpdate = true;
