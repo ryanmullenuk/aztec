@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RENDER, VEG, PresetName } from '../config';
 import { stylisedMaterial, stylisedMaterialDouble, treeMaterial, treeMaterialDouble } from '../render/materials';
 import { RNG } from '../world/rng';
+import { FINE } from './detail';
 import { Simplex2, clamp } from '../world/noise';
 import { World } from '../world/World';
 import {
@@ -60,6 +61,8 @@ interface BatchDef {
   key: string;
   hi: THREE.BufferGeometry;
   lo?: THREE.BufferGeometry;
+  /** Mid-distance detail (full shapes, without leaves, roots and vines). */
+  mid?: THREE.BufferGeometry;
   double: boolean;
   shadow: boolean;
   /** Hide entirely when the chunk is further than lodDist * cull. 0 = never. */
@@ -93,6 +96,14 @@ export class Vegetation {
   private byCell = new Map<number, number[]>();
   private defs = new Map<string, BatchDef>();
   private chunks = new Map<string, ChunkMesh>();
+  /**
+   * Full-detail layer: the nearest trees and bushes of each type (every leaf, root and vine)
+   * are drawn from one small instanced mesh per type and left out of their chunk meshes,
+   * which use the lighter mid-distance model.
+   */
+  private fine = new Map<string, { mesh: THREE.InstancedMesh; ids: number[] }>();
+  private nearIds = new Set<number>();
+  private fineDirty = false;
   private C = VEG.chunks;
   private lodTimer = 0;
   private contact!: THREE.InstancedMesh;
@@ -120,6 +131,18 @@ export class Vegetation {
     d('fruit_apple', appleFruitGeometry(44), undefined, false, false, 1.4);
     d('banana0', bananaGeometry(false, 51), bananaGeometry(true, 51), true);
     d('fruit_banana', bananaBunchGeometry(), undefined, false, false, 1.4);
+    // Mid-distance versions: the same shapes without the fine leaves, roots, branches and vines.
+    const mid = (key: string, build: () => THREE.BufferGeometry) => {
+      FINE.on = false;
+      this.defs.get(key)!.mid = build();
+      FINE.on = true;
+    };
+    for (let v = 0; v < 3; v++) mid(`palm${v}`, () => palmGeometry(v, false, 11 + v));
+    for (let v = 0; v < 8; v++) mid(`broadleaf${v}`, () => treeGeometry(v, false, 21 + v));
+    mid('apple1', () => fruitTreeGeometry(false, 45));
+    mid('bush0', () => bushGeometry(false, false, 41));
+    mid('flowerbush0', () => bushGeometry(true, false, 42));
+    mid('apple0', () => bushGeometry(false, false, 43, true));
     for (let v = 0; v < 3; v++) d(`rock${v}`, rockGeometry(v, 61 + v), undefined, false);
     d('searock0', rockGeometry(2, 71), undefined, false);
     d('searock1', rockGeometry(1, 72), undefined, false);
@@ -379,6 +402,20 @@ export class Vegetation {
       this.group.add(mesh);
     }
 
+    for (const def of this.defs.values()) {
+      if (!def.mid) continue;
+      const tall = /^(palm|broadleaf|banana|apple1)/.test(def.key);
+      const mat = tall ? (def.double ? treeMaterialDouble() : treeMaterial()) : def.double ? stylisedMaterialDouble() : stylisedMaterial();
+      const mesh = new THREE.InstancedMesh(def.hi, mat, VEG.fineCap);
+      mesh.castShadow = def.shadow;
+      mesh.receiveShadow = true;
+      mesh.count = 0;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+      this.fine.set(def.key, { mesh, ids: [] });
+      this.group.add(mesh);
+    }
+
     // Contact shadows under trees and rocks.
     const contactGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     const contactMat = new THREE.MeshBasicMaterial({ map: contactTexture(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, fog: true });
@@ -497,6 +534,7 @@ export class Vegetation {
     const col = new THREE.Color();
     for (let slot = 0; slot < cm.ids.length; slot++) {
       const p = this.plants[cm.ids[slot]];
+      if (cm.def.mid && this.nearIds.has(p.id)) continue;
       this.plantMatrix(p, key, _m);
       if (_m.elements[0] === 0 && _m.elements[5] === 0) continue;
       cm.mesh.setMatrixAt(n, _m);
@@ -507,6 +545,63 @@ export class Vegetation {
     cm.mesh.instanceMatrix.needsUpdate = true;
     if (cm.mesh.instanceColor) cm.mesh.instanceColor.needsUpdate = true;
     cm.dirty = false;
+  }
+
+  /** Choose the nearest plants of each detailed type for the full-detail layer. */
+  private pickNear(camPos: THREE.Vector3, range: number): void {
+    const per = new Map<string, { id: number; d: number }[]>();
+    const r2 = range * range;
+    for (const p of this.plants) {
+      if (p.state === PlantState.Gone || p.state === PlantState.Stump) continue;
+      const dx = p.x - camPos.x, dy = p.y - camPos.y, dz = p.z - camPos.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d > r2) continue;
+      const key = this.mainKey(p);
+      if (!this.fine.has(key)) continue;
+      let list = per.get(key);
+      if (!list) per.set(key, (list = []));
+      list.push({ id: p.id, d });
+    }
+    const next = new Set<number>();
+    for (const [key, list] of per) {
+      list.sort((a, b) => a.d - b.d);
+      const ids = list.slice(0, VEG.fineCap).map((e) => e.id);
+      ids.forEach((id) => next.add(id));
+      this.fine.get(key)!.ids = ids;
+    }
+    for (const [key, f] of this.fine) if (!per.has(key)) f.ids = [];
+    // Plants that joined or left the layer: their chunk meshes need rewriting.
+    let changed = false;
+    for (const id of next) if (!this.nearIds.has(id)) { this.touchMain(this.plants[id]); changed = true; }
+    for (const id of this.nearIds) if (!next.has(id)) { this.touchMain(this.plants[id]); changed = true; }
+    this.nearIds = next;
+    if (changed || this.fineDirty) this.fineDirty = true;
+  }
+
+  private touchMain(p: Plant): void {
+    const cm = this.chunks.get(`${this.mainKey(p)}|${p.chunk}`);
+    if (cm) cm.dirty = true;
+  }
+
+  private writeFine(): void {
+    const col = new THREE.Color();
+    for (const [key, f] of this.fine) {
+      let n = 0;
+      for (const id of f.ids) {
+        const p = this.plants[id];
+        this.plantMatrix(p, key, _m);
+        if (_m.elements[0] === 0 && _m.elements[5] === 0) continue;
+        f.mesh.setMatrixAt(n, _m);
+        f.mesh.setColorAt(n, this.tint(p, key, col));
+        n++;
+      }
+      f.mesh.count = n;
+      f.mesh.instanceMatrix.needsUpdate = true;
+      if (f.mesh.instanceColor) f.mesh.instanceColor.needsUpdate = true;
+      // Bounds of the instances actually drawn, so the layer is culled when off screen.
+      f.mesh.computeBoundingSphere();
+    }
+    this.fineDirty = false;
   }
 
   private writeContact(): void {
@@ -536,6 +631,7 @@ export class Vegetation {
       }
       const cm = this.chunks.get(`${key}|${p.chunk}`);
       if (cm) cm.dirty = true;
+      if (this.nearIds.has(p.id)) this.fineDirty = true;
     }
   }
 
@@ -718,17 +814,19 @@ export class Vegetation {
         const d = Math.hypot(dx, dz, camPos.y - camTarget.y);
         const far = d > lodDist;
         if (cm.def.lo) {
-          const g = far ? cm.def.lo : cm.def.hi;
+          const g = far ? cm.def.lo : cm.def.mid ?? cm.def.hi;
           if (cm.mesh.geometry !== g) cm.mesh.geometry = g;
         }
         cm.mesh.visible = cm.def.cull === 0 || d < lodDist * cm.def.cull;
         if (cm.def.shadow) cm.mesh.castShadow = d < lodDist * 1.4;
       }
+      this.pickNear(camPos, lodDist * VEG.fineDetail);
     }
 
     for (const [k, cm] of this.chunks) {
       if (cm.dirty) this.writeChunk(cm, k.split('|')[0]);
     }
+    if (this.fineDirty) this.writeFine();
     if (this.contactDirty) this.writeContact();
   }
   private growAcc = 0;
