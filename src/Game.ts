@@ -29,8 +29,10 @@ import { Powers } from './economy/Powers';
 import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { Bridges } from './buildings/Bridges';
+import { TradeFleet } from './entities/Trade';
 import { GOD_NAME, randomIslandName } from './world/names';
-import { SPECIES, TIME } from './config';
+import { FAUNA, SPECIES, TIME } from './config';
+import { MONKEY_BASE } from './entities/Monkeys';
 import type { Islander } from './entities/Islander';
 
 const _pathP = new THREE.Vector3();
@@ -96,6 +98,7 @@ export class Game {
   terrain: Terrain;
   water: Water;
   bridges: Bridges;
+  trade!: TradeFleet;
   veg: Vegetation;
   tufts: GrassTufts;
   clouds: PeakClouds;
@@ -214,6 +217,8 @@ export class Game {
     this.scene.add(this.wildlife.group);
     this.boats = new Boats(this.world, this.water, this.buildings, this.colony, this.eco, this.wildlife, this.veg);
     this.scene.add(this.boats.group);
+    this.trade = new TradeFleet(this.world, this.water, this.buildings, this.eco, this.boats);
+    this.scene.add(this.trade.group);
     this.boats.blockCells(this.wildlife.coral.cells());
     this.marine = new Marine(this.world, this.water);
     this.scene.add(this.marine.group);
@@ -240,7 +245,7 @@ export class Game {
     this.input = new Input(canvas, this.rig, {
       onTap: (x, y) => this.onTap(x, y),
       onCancel: () => this.cancel(),
-      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge',
+      wantsToolDrag: () => this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten' || this.tool === 'harvest' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal',
       onToolDragStart: (x, y) => this.toolDrag(x, y, true),
       onToolDrag: (x, y) => this.toolDrag(x, y, false),
       onToolDragEnd: () => this.toolDragEnd(),
@@ -266,26 +271,54 @@ export class Game {
     this.colony.hooks.takePenAnimal = (b) => this.wildlife.takeFromPen(b);
     this.colony.hooks.penCount = (b) => this.wildlife.penCount(b);
     const A = this.wildlife.animals;
+    const MK = this.wildlife.monkeys;
     this.colony.hooks.animalInfo = (id) => {
+      if (id >= MONKEY_BASE) return MK.get(id) ? { name: 'Spider monkey', food: true, needsPen: false, mode: 'hunt', meat: FAUNA.monkeyMeat } : null;
       const a = A.get(id);
       if (!a || !a.alive) return null;
       const d = SPECIES[a.sp];
       return { name: d.name, food: true, needsPen: d.needsPen, mode: d.capture, meat: d.meat };
     };
     this.colony.hooks.animalPos = (id) => {
+      if (id >= MONKEY_BASE) {
+        const m = MK.get(id);
+        return m ? { x: m.x, z: m.z, free: true } : null;
+      }
       const a = A.get(id);
       return a && a.alive ? { x: a.x, z: a.z, free: a.pen < 0 && !a.heldBy } : null;
     };
     this.colony.hooks.canCapture = (id) => {
+      if (id >= MONKEY_BASE) return MK.canHunt(id);
       const a = A.get(id);
       return !!a && A.capturable(a);
     };
-    this.colony.hooks.beginChase = (id, isl) => A.beginChase(id, isl);
-    this.colony.hooks.catchable = (id, isl) => A.catchable(id, isl);
-    this.colony.hooks.grab = (id, isl) => A.grab(id, isl);
-    this.colony.hooks.releaseAnimal = (id) => A.release(id);
+    this.colony.hooks.beginChase = (id, isl) => (id >= MONKEY_BASE ? MK.beginChase(id, isl) : A.beginChase(id, isl));
+    this.colony.hooks.catchable = (id, isl) => (id >= MONKEY_BASE ? MK.catchable(id, isl) : A.catchable(id, isl));
+    this.colony.hooks.grab = (id, isl) => {
+      if (id < MONKEY_BASE) return A.grab(id, isl);
+      MK.kill(id);
+      return 'hunt';
+    };
+    this.colony.hooks.releaseAnimal = (id) => (id >= MONKEY_BASE ? MK.release(id) : A.release(id));
     this.colony.hooks.putInPen = (id, b) => A.putInPen(id, b);
-    this.colony.hooks.consumeAnimal = (id) => A.consume(id);
+    this.colony.hooks.consumeAnimal = (id) => (id >= MONKEY_BASE ? MK.kill(id) : A.consume(id));
+    // Monkeys raid the food stores in daylight.
+    MK.hooks = {
+      targets: () => this.buildings.list.filter((b) => b.complete && (b.key === 'grainstore' || b.key === 'smokehouse' || b.key === 'campfire')).map((b) => ({ id: b.id, x: b.door.x, z: b.door.z })),
+      steal: (n) => {
+        if (this.eco.godMode) return null;
+        // They go for fruit and grain first, then whatever else is lying about.
+        const order = (['fruit', 'grain', 'fish', 'meat'] as const).filter((k) => this.eco.res[k] >= 1);
+        const k = order.find((r) => this.eco.res[r] >= n) ?? order[0];
+        if (!k) return null;
+        const got = Math.min(n, Math.floor(this.eco.res[k]));
+        this.eco.res[k] -= got;
+        return { res: k, n: got };
+      },
+      day: () => !this.time.isNight,
+      notify: (msg) => this.ui?.toast(msg, 'warn'),
+      guards: () => this.colony.list.filter((i) => i.warrior && !i.hidden).map((i) => ({ x: i.x, z: i.z })),
+    };
     // Chickens and goats hang around the settlement.
     A.settlement = () => this.buildings.list.filter((b) => b.complete && b.key !== 'jetty').map((b) => ({ x: b.x, z: b.z }));
     this.colony.hooks.boardBoat = (isl, j) => this.boats.board(isl, j);
@@ -299,7 +332,11 @@ export class Game {
     };
     this.powers.notify = (t, k) => this.ui?.toast(t, k ?? 'info');
     this.powers.onThunder = () => this.audio.sfx('thunder');
-    this.buildings.onRemove = (b) => this.wildlife.releasePen(b.id);
+    this.buildings.onRemove = (b) => {
+      this.wildlife.releasePen(b.id);
+      if (b.key === 'tradedock') this.trade.removeDock(b);
+    };
+    this.trade.notify = (t) => this.ui?.toast(t);
     this.completeHandler = (b) => {
       if (b.key === 'farm' || b.key === 'butcher') this.wildlife.registerPen(b);
       // The first boat at each jetty is free.
@@ -356,6 +393,7 @@ export class Game {
       this.wildlife.update(dt, { ray: calm ? null : cursorRay, ground: h.active && !calm && this.cursorActive ? this.cursorWorld : null, camTarget: this.rig.target }, this.colony.grid);
       void realDt;
       this.boats.update(dt, this.time.elapsed);
+      this.trade.update(dt, this.time.elapsed);
       this.marine.update(dt, this.rig.target);
       this.powers.update(dt, realDt, this.rig.target);
       this.raining = this.powers.raining;
@@ -571,6 +609,7 @@ export class Game {
       calm: 'Tap anywhere to calm a storm',
       path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
       unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
+      canal: `Hold and drag outward from water to dig a <b>canal</b> into the village · ${PATHS.canalWood} wood per section · Esc to finish`,
       bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
     };
     this.ui.setHint(hints[id] ?? null);
@@ -611,7 +650,7 @@ export class Game {
     const w0 = rot % 2 ? sd : sw, d0 = rot % 2 ? sw : sd;
     const cx = Math.round(p.x + this.world.half - w0 / 2);
     const cz = Math.round(p.z + this.world.half - d0 / 2);
-    if (key === 'jetty') rot = this.buildings.jettyRot(cx, cz);
+    if (key === 'jetty' || key === 'tradedock') rot = this.buildings.jettyRot(cx, cz);
     return [cx, cz, rot];
   }
 
@@ -632,10 +671,10 @@ export class Game {
     this.cursorWorld.copy(p);
     if (this.placing) this.updateGhost(p);
     const sculpt = this.tool === 'raise' || this.tool === 'lower' || this.tool === 'flatten';
-    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge';
+    const area = this.tool === 'harvest' || this.tool === 'bless' || this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal';
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal' ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -690,6 +729,11 @@ export class Game {
           this.captureAnimal(an.id);
           return;
         }
+        const mk = this.wildlife.monkeys.pick(this.rig.camera, x, y, rect, 16);
+        if (mk) {
+          this.captureAnimal(MONKEY_BASE + mk.id);
+          return;
+        }
         if (p) this.markAt(p, true);
         return;
       }
@@ -703,6 +747,9 @@ export class Game {
         return;
       case 'bridge':
         if (p) this.paintBridge(p);
+        return;
+      case 'canal':
+        if (p) this.paintCanal(p);
         return;
       default:
         if (p) this.powerHandler?.(this.tool, p);
@@ -727,6 +774,16 @@ export class Game {
       }
       this.select({ animal: animal.id });
       this.audio?.sfx('select', animal.x, animal.z);
+      return;
+    }
+    const monkey = this.wildlife.monkeys.pick(this.rig.camera, x, y, rect, 14);
+    if (monkey) {
+      if (current && !current.child) {
+        this.captureAnimal(MONKEY_BASE + monkey.id, current);
+        return;
+      }
+      this.select({ animal: MONKEY_BASE + monkey.id });
+      this.audio?.sfx('select', monkey.x, monkey.z);
       return;
     }
     // Tap a whale to make it breach.
@@ -773,7 +830,7 @@ export class Game {
 
   private jettyAt(p: THREE.Vector3 | null): Building | undefined {
     if (!p) return undefined;
-    return this.buildings.of('jetty', false).find((j) => {
+    return this.buildings.list.filter((b) => b.key === 'jetty' || b.key === 'tradedock').find((j) => {
       // Anywhere along the deck counts.
       for (let t = 0; t <= 1; t += 0.2) {
         if (Math.hypot(j.x + (j.dockX - j.x) * t - p.x, j.z + (j.dockZ - j.z) * t - p.z) < 1.3) return true;
@@ -803,6 +860,13 @@ export class Game {
           this.eco.spend(cost);
           w.path[i] = 1;
           changed++;
+        } else if (w.canal[i]) {
+          // Fill the canal back in.
+          w.canal[i] = 0;
+          w.layer[i] += 1;
+          w.riverY[i] = NaN;
+          this.markCanal(cx, cz);
+          changed++;
         } else if (w.path[i] || w.bridge[i]) {
           if (w.bridge[i]) this.bridgeDirty = true;
           w.path[i] = 0;
@@ -819,6 +883,56 @@ export class Game {
   }
   private pathDirty = false;
   private bridgeDirty = false;
+  private canalDirty: [number, number, number, number] | null = null;
+
+  private markCanal(cx: number, cz: number): void {
+    const d = this.canalDirty;
+    this.canalDirty = d ? [Math.min(d[0], cx), Math.min(d[1], cz), Math.max(d[2], cx), Math.max(d[3], cz)] : [cx, cz, cx, cz];
+  }
+
+  /**
+   * Dig a canal: each new section must touch existing water (sea, river, pool or canal), so
+   * channels grow out from the water into the land. The ground is dug down a terrace and filled.
+   */
+  private paintCanal(p: THREE.Vector3): void {
+    const w = this.world;
+    const ccx = Math.floor(p.x + w.half), ccz = Math.floor(p.z + w.half);
+    const cost = { wood: PATHS.canalWood, stone: 0, belief: 0 };
+    const cells: [number, number, number][] = [];
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = ccx + dx, cz = ccz + dz;
+      if (!w.inBounds(cx, cz)) continue;
+      const d = Math.hypot(w.centerX(cx) - p.x, w.centerZ(cz) - p.z);
+      if (d <= 0.72) cells.push([cx, cz, d]);
+    }
+    cells.sort((a, b) => a[2] - b[2]);
+    let n = 0, short = false;
+    const isWater = (i: number) => w.layer[i] <= 0 || !Number.isNaN(w.riverY[i]);
+    for (const [cx, cz] of cells) {
+      const i = w.idx(cx, cz);
+      if (w.layer[i] < 1 || !Number.isNaN(w.riverY[i]) || w.occ[i] || w.bridge[i]) continue;
+      let wet = false;
+      for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (w.inBounds(cx + ox, cz + oz) && isWater(w.idx(cx + ox, cz + oz))) wet = true;
+      if (!wet) continue;
+      if (!this.eco.canAfford(cost)) {
+        short = true;
+        break;
+      }
+      this.eco.spend(cost);
+      this.eco.add('wood', this.veg.clearArea(cx, cz, 1, 1));
+      w.layer[i] -= 1;
+      // Dug down to sea level on the shore, it simply floods as part of the sea; inland it holds
+      // its own channel water (levelled against its banks when the water surface is rebuilt).
+      w.riverY[i] = w.layer[i] <= 0 ? NaN : w.layerY(w.layer[i]) + 0.7 * w.H;
+      w.canal[i] = 1;
+      w.path[i] = 0;
+      w.forest[i] = 0;
+      this.markCanal(cx, cz);
+      n++;
+    }
+    if (short) this.ui.setHint('<b>Not enough wood</b> to dig further');
+    if (n) this.audio?.sfx('sculpt', p.x, p.z);
+  }
 
   /** Lay rope bridge decks over shallow water under the brush, growing out from the shore. */
   private paintBridge(p: THREE.Vector3): void {
@@ -869,7 +983,7 @@ export class Game {
       this.markAt(p, false);
       return;
     }
-    if (this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge') {
+    if (this.tool === 'path' || this.tool === 'unpath' || this.tool === 'bridge' || this.tool === 'canal') {
       // Fill in between pointer samples so a quick drag still lays a continuous path.
       const last = start ? null : this.pathLast;
       const n = last ? Math.max(1, Math.ceil(Math.hypot(p.x - last.x, p.z - last.z) / 0.4)) : 1;
@@ -877,6 +991,7 @@ export class Game {
         const t = k / n;
         _pathP.set(last ? last.x + (p.x - last.x) * t : p.x, p.y, last ? last.z + (p.z - last.z) * t : p.z);
         if (this.tool === 'bridge') this.paintBridge(_pathP);
+        else if (this.tool === 'canal') this.paintCanal(_pathP);
         else this.paintPath(_pathP, this.tool === 'path');
       }
       this.pathLast = { x: p.x, z: p.z };
@@ -1100,6 +1215,21 @@ export class Game {
     for (const s of this.systems) s(realDt, dt);
     this.rig3d.update(this.colony.list, this.selectedIslander, realDt);
 
+    if (this.canalDirty) {
+      const [x0, z0, x1, z1] = this.canalDirty;
+      this.canalDirty = null;
+      const w = this.world;
+      w.countCanals();
+      w.computeSmooth(x0 - 1, z0 - 1, x1 + 1, z1 + 1);
+      w.classifyGround(x0 - 2, z0 - 2, x1 + 2, z1 + 2);
+      this.terrain.rebuild(x0 - 1, z0 - 1, x1 + 1, z1 + 1);
+      this.water.updateHeight(x0 - 1, z0 - 1, x1 + 1, z1 + 1);
+      this.water.setCanals();
+      this.veg.refreshHeights(x0 - 2, z0 - 2, x1 + 2, z1 + 2);
+      this.terrain.updateWear();
+      this.tufts.refresh();
+      w.version++;
+    }
     if (this.bridgeDirty) {
       this.bridgeDirty = false;
       this.bridges.rebuild();

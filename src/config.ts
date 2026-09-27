@@ -239,7 +239,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -270,6 +270,11 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   farm: { key: 'farm', name: 'Vegetable Farm', description: 'Beans climbing poles, squash and chillies. Quick to grow; farmers also catch wild chickens for the pen.', size: [4, 4], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 25, builders: 2, workers: 2, placeable: true },
   maizefarm: { key: 'maizefarm', name: 'Maize Farm', description: 'A big field of tall maize with a granary crib. Slower to ripen but the richest grain harvest.', size: [5, 5], cost: { wood: 26, stone: 4, belief: 0 }, buildTime: 35, builders: 2, workers: 3, placeable: true },
   chinampa: { key: 'chinampa', name: 'Chinampa', description: 'Raised garden beds between water channels, built beside a river, pool or shore. Rich, wet soil grows crops fast in every season.', size: [4, 4], cost: { wood: 20, stone: 8, belief: 0 }, buildTime: 40, builders: 2, workers: 2, placeable: true },
+  tradedock: { key: 'tradedock', name: 'Trade Dock', description: 'A long pier and trading house on the shore, facing open water. Build trade boats here and send them to trade your spare goods for what you need.', size: [2, 2], cost: { wood: 40, stone: 20, belief: 0 }, buildTime: 45, builders: 3, workers: 0, placeable: true },
+  torch: { key: 'torch', name: 'Torch', description: 'A tall torch on a post. Place it along paths or anywhere to light the village at night. Villagers can walk past it.', size: [1, 1], cost: { wood: 3, stone: 0, belief: 0 }, buildTime: 4, builders: 1, workers: 0, placeable: true },
+  bonfire: { key: 'bonfire', name: 'Bonfire', description: 'A great fire ringed with log benches. In the evenings villagers gather here to sing and tell stories: they grow happier and the tribe gains Belief.', size: [3, 3], cost: { wood: 20, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
+  firepit: { key: 'firepit', name: 'Firepit', description: 'A roasting pit with a pig turning on a spit. Meat meals become more filling and put villagers in a good mood.', size: [2, 2], cost: { wood: 12, stone: 8, belief: 0 }, buildTime: 18, builders: 1, workers: 0, placeable: true },
+  well: { key: 'well', name: 'Well', description: 'A stone well of fresh, cool water with a little tiled roof. Villagers living nearby are happier.', size: [2, 2], cost: { wood: 6, stone: 20, belief: 0 }, buildTime: 25, builders: 2, workers: 0, placeable: true },
   smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
   woodstore: { key: 'woodstore', name: 'Wood Store', description: 'Stores wood and stone. Logs stack up as it fills.', size: [3, 2], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 20, builders: 2, workers: 0, woodCap: 120, placeable: true },
@@ -295,6 +300,8 @@ export const PATHS = {
   radius: 0.85,
   /** Wood per rope bridge deck cell. */
   bridgeWood: 2,
+  /** Wood per cell of water canal (the channel is lined with posts and wattle). */
+  canalWood: 1,
 };
 
 /** Adobe homes grow in place: tier 1–4 are house levels 2–5. */
@@ -330,6 +337,52 @@ export const FARM_TYPES: Partial<Record<BuildingKey, { grow: number; yield: numb
   chinampa: { grow: 1.6, yield: 18, seasonFloor: 0.85, crop: 'chinampa', label: 'Chinampa crops' },
 };
 export const isFarm = (k: BuildingKey): boolean => k in FARM_TYPES;
+
+/** A trade: goods loaded at the dock, and what the boat brings back. */
+export interface TradeOffer {
+  id: string;
+  give: Partial<Record<ResourceKey, number>>;
+  get: Partial<Record<ResourceKey, number>>;
+}
+
+/** Trade Dock boats and the bargains on offer (more goods and materials will join this list). */
+export const TRADE = {
+  boatCost: { wood: 40, stone: 10, belief: 0 },
+  boatBuildSeconds: 40,
+  maxBoats: 2,
+  /** Seconds a boat is away over the horizon trading (plus the sail out and back). */
+  voyageSeconds: 55,
+  offers: [
+    { id: 'wood-stone', give: { wood: 20 }, get: { stone: 12 } },
+    { id: 'stone-wood', give: { stone: 20 }, get: { wood: 26 } },
+    { id: 'grain-fish', give: { grain: 20 }, get: { fish: 16 } },
+    { id: 'fish-grain', give: { fish: 16 }, get: { grain: 20 } },
+    { id: 'fruit-meat', give: { fruit: 20 }, get: { meat: 10 } },
+    { id: 'wood-fruit', give: { wood: 24 }, get: { fruit: 18 } },
+    { id: 'meat-belief', give: { meat: 10 }, get: { belief: 25 } },
+    { id: 'stone-belief', give: { stone: 30 }, get: { belief: 20 } },
+  ] as TradeOffer[],
+  /** Goods traders talk about but that aren't on the market yet. */
+  comingSoon: ['Obsidian', 'Cacao', 'Cotton', 'Quetzal feathers', 'Jade', 'Copper'],
+};
+
+/** Village comforts: evening gatherings at bonfires, wells and roasted meat. */
+export const COMFORTS = {
+  /** Evening hours when villagers gather round a bonfire (before bed). */
+  bonfireHours: [18.6, 22.5] as [number, number],
+  bonfireSeconds: [30, 55] as [number, number],
+  bonfireBelief: 0.035,
+  bonfireHappy: 0.006,
+  /** Distance (from home or where they are) within which a well cheers villagers up. */
+  wellRadius: 16,
+  wellHappy: 0.07,
+  /** Extra hunger restored and happiness from a meat meal when the village has a firepit. */
+  firepitMeal: 0.25,
+  firepitHappy: 0.04,
+  /** Villagers answering a call to help build: how many and from how far. */
+  helpersMax: 6,
+  helpersRadius: 45,
+};
 
 /** Smokehouse batches: raw fish or meat in, more (preserved) food out. */
 export const SMOKE = { batchSeconds: 20, input: 4, output: 7, wood: 1 };
@@ -437,6 +490,20 @@ export const FAUNA = {
   monkeyGroup: [2, 5] as [number, number],
   /** Longest believable leap between tree canopies. */
   monkeyJump: 4.6,
+  /** Village raids: seconds between raids, how far troops roam for food, raiders per raid. */
+  monkeyRaidEvery: [75, 150] as [number, number],
+  monkeyRaidRange: 70,
+  monkeyRaiders: [1, 3] as [number, number],
+  /** Food one monkey makes off with, and how long it rummages first. */
+  monkeySteal: [3, 6] as [number, number],
+  monkeyStealTime: 3.5,
+  /** Raiders bolt from the pointer (and warriors) within this range. */
+  monkeyFear: 3.6,
+  monkeyRunSpeed: 1.5,
+  monkeyFleeSpeed: 2.1,
+  monkeyMeat: 5,
+  /** A lost monkey is replaced by a newcomer after this long. */
+  monkeyRespawn: 300,
   toucans: [6, 9] as [number, number],
   gullFlocks: 3,
   gullsPerFlock: [4, 7] as [number, number],
