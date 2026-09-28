@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Where } from './ui/where';
 import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE, isFarm, SETTLERS } from './config';
 import { World } from './world/World';
 import { generateIsland } from './world/generator';
@@ -247,7 +248,7 @@ export class Game {
     this.scene.add(this.buildings.group);
     this.pathfinder = new Pathfinder(this.world);
     this.colony = new Colony(this.world, this.veg, this.eco, this.buildings, this.pathfinder, this.time, () => this.rng.next());
-    this.colony.hooks.notify = (t) => this.ui?.toast(t);
+    this.colony.hooks.notify = (t, at) => this.ui?.toast(t, 'info', at);
     this.colony.hooks.sfx = (n, x, z) => this.audio?.sfx(n, x, z);
     this.colony.hooks.viewer = () => {
       const c = this.rig.camera.position, t = this.rig.target;
@@ -384,7 +385,7 @@ export class Game {
         return { res: k, n: got };
       },
       day: () => !this.time.isNight,
-      notify: (msg) => this.ui?.toast(msg, 'warn'),
+      notify: (msg, at) => this.ui?.toast(msg, 'warn', at),
       guards: () => this.colony.list.filter((i) => i.warrior && !i.hidden).map((i) => ({ x: i.x, z: i.z })),
     };
     // Chickens and goats hang around the settlement.
@@ -405,7 +406,7 @@ export class Game {
       if (b.key === 'tradedock') this.trade.removeDock(b);
       if (b.key === 'kennel') this.dogs.onKennelRemoved(b);
     };
-    this.trade.notify = (t) => this.ui?.toast(t);
+    this.trade.notify = (t, at) => this.ui?.toast(t, 'info', at);
     // Dogs and jaguars.
     const alarm = (x: number, z: number, r: number) => void this.colony.alarm(x, z, r);
     const danger = (j: Jaguar, by: 'dogs' | 'villagers') => {
@@ -419,13 +420,13 @@ export class Game {
           this.lastDanger = this.time.elapsed;
           for (const h of halls) this.buildings.ringBell(h);
           this.audio?.sfx('bell');
-          this.ui?.toast('The Great Hall bell is ringing: a jaguar! Everyone is running to the hall or home for sanctuary.', 'warn');
+          this.ui?.toast('The Great Hall bell is ringing: a jaguar! Everyone is running to the hall or home for sanctuary.', 'warn', () => ({ x: j.x, z: j.z }));
           return;
         }
       }
       if (this.time.elapsed - this.lastDanger < 50) return;
       this.lastDanger = this.time.elapsed;
-      this.ui?.toast(by === 'dogs' ? 'The dogs are barking: a jaguar is prowling near the village!' : 'A jaguar! Villagers are running for shelter.', 'warn');
+      this.ui?.toast(by === 'dogs' ? 'The dogs are barking: a jaguar is prowling near the village!' : 'A jaguar! Villagers are running for shelter.', 'warn', () => ({ x: j.x, z: j.z }));
       void j;
     };
     const sfx = (n: string, x: number, z: number) => this.audio?.sfx(n, x, z);
@@ -434,7 +435,7 @@ export class Game {
       byId: (id) => this.colony.byId(id),
       animals: () => this.wildlife.animals.list.filter((a) => a.alive && a.pen < 0 && !a.heldBy).map((a) => ({ x: a.x, z: a.z })),
       alarm, danger, sfx,
-      notify: (m, k) => this.ui?.toast(m, k ?? 'info'),
+      notify: (m, k, at) => this.ui?.toast(m, k ?? 'info', at),
       godMode: () => this.eco.godMode,
       path: (x, z, tx, tz) => this.pathfinder.find(x, z, tx, tz, { goalRadius: 1 }),
       birdNear: (x, z, r) => this.waterBirds.groundedNear(x, z, r),
@@ -649,9 +650,9 @@ export class Game {
     const genders: ('m' | 'f')[] = this.rng.next() < 0.6 ? ['m', 'f'] : this.rng.next() < 0.5 ? ['m', 'm'] : ['f', 'f'];
     const land = this.boats.sendSettlers(genders, fire, (people) => {
       for (const p of people) this.colony.walkTo(p, fire.x + (this.rng.next() - 0.5) * 4, fire.z + (this.rng.next() - 0.5) * 4);
-      this.ui.toast(`${people.map((p) => p.name).join(' and ')} have arrived by canoe to join the village.`);
+      this.ui.toast(`${people.map((p) => p.name).join(' and ')} have arrived by canoe to join the village.`, 'info', () => (people[0] ? { x: people[0].x, z: people[0].z } : null));
     });
-    if (land) this.ui.toast('A canoe of new settlers has been spotted out at sea.');
+    if (land) this.ui.toast('A canoe of new settlers has been spotted out at sea.', 'info', () => this.boats.arrivalPos ?? land);
   }
 
   private loadSettings(preset: PresetName): Settings {
@@ -1305,12 +1306,13 @@ export class Game {
     } else if (k === 'h' || k === '?') this.ui.toggleHelp();
     else if (k === 'm') this.toggleMute();
     else if (k === 'o') this.rig.toggleOverview();
+    else if (k === 'v') this.ui.toggleZen();
     else if (k === 'f' && this.selectedIslander >= 0) this.followId = this.followId === this.selectedIslander ? -1 : this.selectedIslander;
   }
 
   private onBuildingComplete(b: Building): void {
     this.audio?.sfx('complete', b.x, b.z);
-    if (b.key !== 'campfire') this.ui?.toast(`The ${b.label} is complete.`);
+    if (b.key !== 'campfire') this.ui?.toast(`The ${b.label} is complete.`, 'info', { x: b.x, z: b.z });
     this.completeHandler?.(b);
   }
 
@@ -1343,6 +1345,16 @@ export class Game {
 
   private ray = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
+  /** Take the camera to a notification's place (zooming in a little if far out). */
+  focusAt(where: Where): void {
+    const p = typeof where === 'function' ? where() : where;
+    if (!p) return;
+    this.followId = -1;
+    this.rig.goal.x = p.x;
+    this.rig.goal.z = p.z;
+    this.rig.goal.dist = Math.min(this.rig.goal.dist, 26);
+  }
+
   /** The player rings a Great Hall's bell: a sanctuary drill (everyone goes in for a little while). */
   ringHallBell(b: Building): void {
     if (b.key !== 'greathall' || !b.complete) return;
