@@ -107,6 +107,27 @@ export class World {
   version = 0;
   /** Buildings whose cells islanders may walk through (farm fields, jetty decks). */
   passableBuildings = new Set<number>();
+  /**
+   * Cells nobody can walk into: boulders (rock plants, redone by Vegetation.syncRockBlock) and the
+   * waterfall's rocks, curtain and plunge pool (fixed). Pathfinding routes round them; animals steer
+   * round them.
+   */
+  blockRock = new Uint8Array(this.N * this.N);
+  blockFixed = new Uint8Array(this.N * this.N);
+  blocked(i: number): boolean {
+    return this.blockRock[i] !== 0 || this.blockFixed[i] !== 0;
+  }
+  /** Block the cells under a round footprint (at least the cell it stands in). */
+  blockCircle(x: number, z: number, r: number, grid: Uint8Array = this.blockFixed): void {
+    const [cx, cz] = this.cellOf(x, z);
+    if (this.inBounds(cx, cz)) grid[this.idx(cx, cz)] = 1;
+    const R = Math.ceil(r);
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const nx = cx + dx, nz = cz + dz;
+      if (!this.inBounds(nx, nz)) continue;
+      if (Math.hypot(this.centerX(nx) - x, this.centerZ(nz) - z) <= r) grid[this.idx(nx, nz)] = 1;
+    }
+  }
 
   passable(buildingId: number): boolean {
     return this.passableBuildings.has(buildingId);
@@ -225,9 +246,45 @@ export class World {
     return (t - 0.5) * this.H;
   }
 
+  /**
+   * The waterfall's ground, too sharp for the blurred layer field: set by shapeWaterfall. Lip (x, z)
+   * and flow direction; pool centre l0 along it; basin and rim radii; target heights.
+   */
+  fallSite: { x: number; z: number; dx: number; dz: number; l0: number; inner: number; rim: number; lipH: number; bankH: number; bedH: number; rimH: number; bound: number } | null = null;
+
+  /**
+   * Near the waterfall, blend the terrain to a designed shape: the river channel and high banks
+   * above the lip, a sheer drop, a basin running from the foot of the cliff out to the pool and a
+   * raised rim round it, open where the river leaves.
+   */
+  private fallShape(x: number, z: number, h: number): number {
+    const s = this.fallSite!;
+    const ox = x - s.x, oz = z - s.z;
+    if (ox * ox + oz * oz > s.bound * s.bound) return h;
+    const a = -ox * s.dz + oz * s.dx, l = ox * s.dx + oz * s.dz, aa = Math.abs(a);
+    // Above the drop (raise only).
+    const wl = smoothstep(-3.8, -2.6, l) * (1 - smoothstep(0.26, 0.42, l)) * (1 - smoothstep(4.6, 5.6, aa));
+    if (wl > 0) {
+      const target = s.lipH + (s.bankH - s.lipH) * smoothstep(1.05, 1.8, aa);
+      if (target > h) h += (target - h) * wl;
+    }
+    if (l > 0.26) {
+      // Basin: a capsule from the foot of the cliff to the pool centre (lower only).
+      const dc = l < s.l0 ? aa : Math.hypot(a, l - s.l0);
+      const wb = (1 - smoothstep(s.inner - 0.45, s.inner, dc)) * smoothstep(0.26, 0.4, l);
+      if (wb > 0 && s.bedH < h) h += (s.bedH - h) * wb;
+      // Rim round it (raise only), open at the outlet.
+      const outlet = smoothstep(s.l0 - 0.5, s.l0 + 0.5, l) * (1 - smoothstep(1.0, 1.8, aa));
+      const wr = smoothstep(s.inner - 0.15, s.inner + 0.3, dc) * (1 - smoothstep(s.rim - 0.9, s.rim, dc)) * (1 - outlet);
+      if (wr > 0 && s.rimH > h) h += (s.rimH - h) * wr;
+    }
+    return h;
+  }
+
   /** Terrain surface height at a world position (matches the rendered mesh). */
   heightAt(x: number, z: number): number {
     let h = this.terrace(this.layerF(x, z));
+    if (this.fallSite) h = this.fallShape(x, z, h);
     if (this.canalCount) h -= this.canalCarve(x, z);
     if (this.swampOn) h -= this.sampleField(this.swampCarve, x, z);
     return h;
@@ -235,7 +292,8 @@ export class World {
 
   /** Ground height before the swamp pools were dug (their water surface follows this). */
   heightNoSwamp(x: number, z: number): number {
-    const h = this.terrace(this.layerF(x, z));
+    let h = this.terrace(this.layerF(x, z));
+    if (this.fallSite) h = this.fallShape(x, z, h);
     return this.canalCount ? h - this.canalCarve(x, z) : h;
   }
 
