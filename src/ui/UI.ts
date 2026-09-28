@@ -26,6 +26,7 @@ const BUILD_ICON: Record<BuildingKey, string> = {
   woodstore: 'b_woodstore', grainstore: 'b_grainstore', warroom: 'b_warroom', jetty: 'b_jetty',
   maizefarm: 'b_maize', chinampa: 'b_chinampa', smokehouse: 'b_smoke',
   tradedock: 'b_trade', torch: 'b_torch', bonfire: 'b_bonfire', firepit: 'b_firepit', well: 'b_well', kennel: 'b_kennel', greathall: 'b_greathall',
+  pigpen: 'b_pigpen', chickenpen: 'b_chickenpen',
 };
 
 interface TutorialStep {
@@ -899,9 +900,9 @@ export class UI {
       const A = g.wildlife.animals;
       const doing = A.describe(an);
       const free = A.capturable(an);
-      const hasPen = g.buildings.list.some((x) => x.complete && (x.key === 'butcher' || x.key === 'farm'));
+      const hasPen = g.buildings.list.some((x) => x.complete && (x.key === 'butcher' || x.key === 'farm' || x.key === 'pigpen' || (x.key === 'chickenpen' && !d.needsPen)));
       key = `a${an.id}|${doing}|${free}|${hasPen}`;
-      const how = d.capture === 'hunt' ? `Hunted for ${d.meat} meat. Hard to catch.` : d.needsPen ? `Caught and led on a leash to a Butcher or Farm pen${hasPen ? '' : ' (build one first)'}. Butchered for meat.` : 'Caught and carried to a Farm pen (or straight to the food store).';
+      const how = d.capture === 'hunt' ? `Hunted for ${d.meat} meat. Hard to catch.` : d.needsPen ? `Caught and led on a leash to a Pig Pen (or a Butcher or Farm pen)${hasPen ? '' : ' (build one first)'}. Butchered for meat.` : 'Caught and carried to a Chicken Pen or Farm pen (or straight to the food store).';
       const label = d.capture === 'hunt' ? 'Hunt' : 'Capture';
       html = `
         <div class="card-head"><span>${d.name}</span><span class="tag">Wild</span></div>
