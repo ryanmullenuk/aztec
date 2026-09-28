@@ -16,6 +16,7 @@ import { UI } from './ui/UI';
 import { PAINT_TOOLS, TOOLS, ToolId } from './ui/tools';
 import { PlantState, Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
+import { Wildflowers } from './vegetation/Wildflowers';
 import { PeakClouds } from './render/PeakClouds';
 import { DriftClouds } from './render/DriftClouds';
 import { CoastRocks } from './render/CoastRocks';
@@ -33,6 +34,7 @@ import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { finishSwamps, generateSwamps } from './world/swamp';
 import { growIslets } from './world/islets';
+import { shapeWaterfall } from './world/waterfallSite';
 import { Bridges } from './buildings/Bridges';
 import { TradeFleet } from './entities/Trade';
 import { GOD_NAME, randomIslandName } from './world/names';
@@ -114,6 +116,8 @@ export class Game {
   trade!: TradeFleet;
   veg: Vegetation;
   tufts: GrassTufts;
+  /** Wildflowers, little ferns and small plants scattered in clumps. */
+  flowers: Wildflowers;
   clouds: PeakClouds;
   /** High clouds passing below the camera when zoomed out. */
   driftClouds: DriftClouds;
@@ -205,6 +209,8 @@ export class Game {
     this.veg.build();
     const save = readSave(opts.seed);
     if (save) applyWorld(this.world, save);
+    // The waterfall's cliff, basin and rim (after the save, so old saves get them too).
+    shapeWaterfall(this.world);
     finishSwamps(this.world);
     this.veg.refreshHeights(0, 0, this.world.N - 1, this.world.N - 1);
 
@@ -218,6 +224,8 @@ export class Game {
     this.scene.add(this.veg.group);
     this.tufts = new GrassTufts(this.world, cfg.vegDensity);
     this.scene.add(this.tufts.group);
+    this.flowers = new Wildflowers(this.world, cfg.vegDensity);
+    this.scene.add(this.flowers.group);
     this.clouds = new PeakClouds(this.world);
     this.scene.add(this.clouds.group);
     this.driftClouds = new DriftClouds(opts.seed);
@@ -460,6 +468,7 @@ export class Game {
     this.buildings.onMoved = (b) => {
       this.wildlife.animals.movePen(b);
       this.tufts.refresh();
+      this.flowers.refresh();
     };
     this.completeHandler = (b) => {
       if (b.key === 'farm' || b.key === 'butcher') this.wildlife.registerPen(b);
@@ -1427,6 +1436,7 @@ export class Game {
     this.eco.update(dt);
     this.sculptor.update(realDt);
     this.tufts.update(realDt);
+    this.flowers.update(realDt);
     this.clouds.update(realDt, ls.day, this.rig.cur.dist);
     this.driftClouds.update(realDt, ls.day, this.rig.cur.dist, this.rig.camera.position);
     for (const s of this.systems) s(realDt, dt);
@@ -1445,6 +1455,7 @@ export class Game {
       this.veg.refreshHeights(x0 - 2, z0 - 2, x1 + 2, z1 + 2);
       this.terrain.updateWear();
       this.tufts.refresh();
+      this.flowers.refresh();
       w.version++;
     }
     if (this.bridgeDirty) {
@@ -1455,6 +1466,7 @@ export class Game {
       this.pathDirty = false;
       this.terrain.updateWear();
       this.tufts.refresh();
+      this.flowers.refresh();
     }
     this.wearTimer -= dt;
     if (this.wearTimer <= 0 && this.colony.wearDirty) {
