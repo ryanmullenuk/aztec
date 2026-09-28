@@ -15,6 +15,21 @@ export const SEA_SURFACE = 0.07;
 /** Swell wavelengths and headings, shared with the shader (keep in step with SWL / SWA). */
 const SWELL_L = [11.8, 8.3, 6.1, 4.55];
 const SWELL_A = [0.0, 0.62, -0.55, 1.15];
+/**
+ * Occasional swell sets: after a calm spell, a packet of a few longer, bigger swells rolls in
+ * from a random heading, crosses the sea and fades (amplitudes in world units; the regular
+ * swells sum to about 0.4).
+ */
+const SWELL_SET = {
+  /** Seconds before the first set, then the calm between sets. */
+  firstAfter: 25,
+  every: [55, 120] as [number, number],
+  /** How long one set takes to build, cross and fade. */
+  duration: [55, 80] as [number, number],
+  wavelength: [20, 30] as [number, number],
+  amplitude: [0.14, 0.24] as [number, number],
+  crests: [2, 4] as [number, number],
+};
 
 /** GLSL shared by the ocean, rivers and pool. */
 const waterVert = /* glsl */ `
@@ -43,6 +58,15 @@ const waterFrag = /* glsl */ `
   uniform float uSurface;
   /** Wind strength patch at this pixel (set by waves()). */
   float gWind;
+  /**
+   * Occasional swell set: a packet of a few long, bigger swells rolling across the sea.
+   * uSet0 = (direction x, direction z, amplitude, packet centre along the direction),
+   * uSet1 = (wavenumber, packet half-width, phase, unused). Mirrored by Water.waveHeight().
+   */
+  uniform vec4 uSet0;
+  uniform vec4 uSet1;
+  /** Fades the swell set out over the shallows (set in main()). */
+  float gSetFade;
   uniform sampler2D uHeight;
   uniform vec3 uSunDir;
   uniform vec3 uSunCol;
@@ -111,6 +135,20 @@ const waterFrag = /* glsl */ `
       g += A * k * d * cos(ph) * 0.34 * (1.0 - smoothstep(lam * 0.12, lam * 0.4, fw)) * (1.0 - 0.65 * smoothstep(0.06, 0.4, fw));
       ampSum += A;
     }
+    // Swell set (only while one is running, and faded over the shallows).
+    float setA = uSet0.z * gSetFade;
+    if (setA > 1e-4) {
+      vec2 sd = uSet0.xy;
+      float s = dot(sd, p);
+      float e = (s - uSet0.w) / uSet1.y;
+      float env = exp(-e * e);
+      float k = uSet1.x;
+      float ph = s * k - uSet1.z;
+      float A = setA * env;
+      h += A * sin(ph);
+      g += A * k * sd * cos(ph) * 0.45 * (1.0 - smoothstep(0.12 * TAU / k, 0.4 * TAU / k, fw)) * (1.0 - 0.6 * smoothstep(0.06, 0.4, fw));
+      ampSum += A;
+    }
     // Wind patches: rough, darker ruffled water beside glassy calm stretches, drifting slowly.
     gWind = smoothstep(0.28, 0.78, vnoise(p * 0.012 + vec2(t * 0.004, t * 0.003)) * 0.65 + vnoise(p * 0.031 - vec2(t * 0.006, 0.0)) * 0.35);
     // A slow large-scale warp keeps the ripple layers from drifting in straight lines.
@@ -167,6 +205,7 @@ const waterFrag = /* glsl */ `
     // World units covered by one pixel here: drives wave level of detail.
     float fw = length(fwidth(p)) * 1.5;
     vec2 grad; float ampSum;
+    gSetFade = uSwash * (0.15 + 0.85 * smoothstep(0.6, 4.5, depth));
     float h0 = waves(p, t, fw, grad, ampSum);
     // Far away the surface settles into a smooth sheen.
     grad *= mix(1.0, 0.5, smoothstep(0.15, 0.8, fw));
@@ -502,7 +541,12 @@ export class Water {
     uSkyCol: { value: new THREE.Color(COLORS.sky) },
     uDay: { value: 1 },
     uStorm: { value: 0 },
+    /** Swell set: (dir x, dir z, amplitude, packet centre) and (wavenumber, half-width, phase, 0). */
+    uSet0: { value: new THREE.Vector4(1, 0, 0, 0) },
+    uSet1: { value: new THREE.Vector4(0.25, 30, 0, 0) },
   };
+  /** The current (or next) swell set; `wait` counts down the calm before it. */
+  private set = { wait: SWELL_SET.firstAfter, t: 0, dur: 1, amp: 0, k: 0.25, w: 0.8, width: 30, dx: 1, dz: 0, speed: 1, phi: 0, active: false };
 
   constructor(private world: World) {
     this.res = world.N * 2;
@@ -971,11 +1015,70 @@ export class Water {
       const w = Math.sqrt(9.8 * k) * 0.55;
       h += lam * 0.0105 * amp * Math.sin((Math.cos(ang) * x + Math.sin(ang) * z) * k + t * w + i * 1.93);
     }
+    // The occasional swell set, exactly as the shader adds it.
+    const u0 = this.shared.uSet0.value, u1 = this.shared.uSet1.value;
+    if (u0.z > 1e-4) {
+      const s = u0.x * x + u0.y * z;
+      const e = (s - u0.w) / u1.y;
+      if (e * e < 16) {
+        const S = this.set;
+        h += u0.z * this.setFade(x, z) * Math.exp(-e * e) * Math.sin(s * u1.x - (S.w * t + S.phi));
+      }
+    }
     return h;
+  }
+
+  /** Same shallow-water fade as the shader's gSetFade (depth from the seabed grid). */
+  private setFade(x: number, z: number): number {
+    const r = this.res, half = this.world.half;
+    const i = Math.floor((x + half) * 2), j = Math.floor((z + half) * 2);
+    const bed = i < 0 || j < 0 || i >= r || j >= r ? -7 : this.heightF[j * r + i];
+    const f = THREE.MathUtils.clamp((Math.max(-bed, 0) - 0.6) / 3.9, 0, 1);
+    return 0.15 + 0.85 * f * f * (3 - 2 * f);
+  }
+
+  /** Swell sets: calm, then a packet of a few bigger swells rolls across the sea and fades out. */
+  private updateSwellSet(dt: number, time: number): void {
+    const S = this.set, C = SWELL_SET;
+    const u0 = this.shared.uSet0.value, u1 = this.shared.uSet1.value;
+    if (!S.active) {
+      u0.z = 0;
+      S.wait -= dt;
+      if (S.wait > 0) return;
+      const a = Math.random() * Math.PI * 2;
+      const lam = C.wavelength[0] + Math.random() * (C.wavelength[1] - C.wavelength[0]);
+      const crests = C.crests[0] + Math.random() * (C.crests[1] - C.crests[0]);
+      S.k = (Math.PI * 2) / lam;
+      // Same dispersion as the regular swells; the packet travels at the group speed (half the crests').
+      S.w = Math.sqrt(9.8 * S.k) * 0.55;
+      S.speed = (S.w / S.k) * 0.5;
+      // Gaussian packet: about `crests` wavelengths stand clearly above the background sea.
+      S.width = (crests * lam) / 2.4;
+      S.dur = C.duration[0] + Math.random() * (C.duration[1] - C.duration[0]);
+      S.amp = C.amplitude[0] + Math.random() * (C.amplitude[1] - C.amplitude[0]);
+      S.dx = Math.cos(a);
+      S.dz = Math.sin(a);
+      S.phi = Math.random() * Math.PI * 2;
+      S.t = 0;
+      S.active = true;
+    }
+    S.t += dt;
+    const f = S.t / S.dur;
+    if (f >= 1) {
+      S.active = false;
+      S.wait = C.every[0] + Math.random() * (C.every[1] - C.every[0]);
+      u0.z = 0;
+      return;
+    }
+    // Builds and fades smoothly; the packet crosses the island's centre half-way through.
+    const env = Math.sin(f * Math.PI);
+    u0.set(S.dx, S.dz, S.amp * env * env * (1 + this.shared.uStorm.value * 0.8), (S.t - S.dur * 0.5) * S.speed);
+    u1.set(S.k, S.width, (S.w * time + S.phi) % (Math.PI * 2), 0);
   }
 
   update(dt: number, time: number): void {
     this.shared.uTime.value = time;
+    this.updateSwellSet(Math.max(0, dt), time);
     const f = this.world.waterfall;
     if (f && this.spray && this.fallMist && dt > 0) {
       const px = -f.dz, pz = f.dx;
