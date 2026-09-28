@@ -419,7 +419,7 @@ export class UI {
     card.innerHTML = `
       <div class="card-head"><span>Settings</span></div>
       <div class="row namerow">Island name
-        <span class="nameedit"><input type="text" maxlength="32" spellcheck="false" autocomplete="off" data-n="name" aria-label="Island name"><button class="btn small" data-a="rename" title="Pick a random name">${ICONS.seed} Random</button></span>
+        <span class="nameedit"><input type="text" maxlength="32" spellcheck="false" autocomplete="off" data-n="name" aria-label="Island name"><button class="obtn gold sm" data-a="rename" title="Pick a random name">${ICONS.o_new}<span>Random</span></button></span>
       </div>
       <label class="row">Graphics
         <select data-k="preset">
@@ -435,14 +435,12 @@ export class UI {
       <label class="row">Volume <input type="range" min="0" max="1" step="0.05" data-k="volume"></label>
       <label class="row">Music <input type="range" min="0" max="1" step="0.05" data-k="music"></label>
       <label class="row">Show FPS <input type="checkbox" data-k="fps"></label>
-      <div class="row seedrow">Share the game
-        <button class="btn small" data-a="copy">${ICONS.link} Copy link</button>
-      </div>
-      <div class="row btns">
-        <button class="btn" data-a="new">${ICONS.island} Restart island</button>
-        <button class="btn" data-a="save">Save now</button>
-        <button class="btn" data-a="tutorial">Restart tutorial</button>
-        <button class="btn" data-a="help">${ICONS.help} How to play</button>
+      <div class="obtns">
+        <button class="obtn red" data-a="new">${ICONS.o_new}<span>New game</span></button>
+        <button class="obtn gold" data-a="save">${ICONS.o_save}<span>Save</span></button>
+        <button class="obtn green" data-a="tutorial">${ICONS.o_tutorial}<span>Tutorial</span></button>
+        <button class="obtn cyan" data-a="help">${ICONS.o_help}<span>How to play</span></button>
+        <button class="obtn wide" data-a="copy">${ICONS.o_link}<span>Copy link</span></button>
       </div>
       <p class="muted small">Progress autosaves every minute in this browser. Share the link to let friends play the same island.</p>`;
     const close = el('button', 'ib small close', ICONS.close);

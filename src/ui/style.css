@@ -465,3 +465,48 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   .toolbar { gap: 3px; padding: 5px; }
   .tp-item { min-width: 130px; }
 }
+
+/* ---------- Settings: outline buttons ---------- */
+.obtns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0 6px; }
+.obtn {
+  --c: #e7ecf1;
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03); border: 1.5px solid color-mix(in srgb, var(--c) 70%, transparent);
+  color: var(--c); font-weight: 800; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.obtn svg { width: 18px; height: 18px; flex: none; }
+.obtn:hover { background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 35%, transparent); }
+.obtn:active { transform: scale(0.97); }
+.obtn.red { --c: #ff7a6b; }
+.obtn.gold { --c: #ffd257; }
+.obtn.green { --c: #8fd14f; }
+.obtn.cyan { --c: #5fd4f2; }
+.obtn.wide { grid-column: 1 / -1; }
+
+/* ---------- Smaller bottom toolbar ---------- */
+.toolbar { gap: 6px; padding: 6px; border-radius: 18px; }
+.slot { width: 62px; height: 58px; border-radius: 13px; gap: 3px; }
+.slot .ic { width: 25px; height: 25px; }
+.slot .nm { font-size: 10.5px; }
+.slot .key { top: 4px; left: 7px; font-size: 9.5px; }
+.slot .cost { top: 4px; right: 6px; font-size: 9.5px; }
+.beliefbar { width: min(380px, 80vw); padding: 4px 10px; }
+@media (max-width: 1060px) {
+  .slot { width: 54px; height: 52px; }
+  .slot .ic { width: 22px; height: 22px; }
+  .slot .nm { font-size: 9.5px; }
+  .toolbar { gap: 4px; padding: 5px; }
+}
+@media (max-width: 720px) {
+  .slot { width: 48px; height: 48px; border-radius: 12px; }
+  .slot .ic { width: 21px; height: 21px; }
+  .slot .nm { font-size: 9px; }
+}
+@media (max-width: 480px) {
+  .slot { width: 40px; height: 42px; border-radius: 11px; }
+  .slot .ic { width: 21px; height: 21px; }
+  .toolbar { gap: 3px; padding: 4px; }
+}
+.obtn.sm { padding: 6px 10px; font-size: 11px; }
+.obtn.sm svg { width: 15px; height: 15px; }

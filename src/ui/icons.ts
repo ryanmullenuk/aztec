@@ -15,6 +15,12 @@ function gearPath(): string {
 }
 
 export const ICONS: Record<string, string> = {
+  // ---- Settings buttons (outline, coloured by the button's CSS) ----
+  o_new: svg('<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" stroke="currentColor" stroke-width="1.9"/><path d="M4 3.8v4.6h4.6" stroke="currentColor" stroke-width="1.9"/><path d="M10 12.5l1.6 1.6 3-3.4" stroke="currentColor" stroke-width="1.8"/>'),
+  o_save: svg('<path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 3.5v5h8v-5M7.5 20.5v-6h9v6" stroke="currentColor" stroke-width="1.8"/>'),
+  o_tutorial: svg('<path d="M2.5 9 12 4.5 21.5 9 12 13.5z" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 11v4.5c1.5 1.4 3.3 2 5.5 2s4-.6 5.5-2V11M21.5 9v5" stroke="currentColor" stroke-width="1.8"/>'),
+  o_help: svg('<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7v.4" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="17" r="1" fill="currentColor"/>'),
+  o_link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" stroke-width="1.8"/>'),
   // ---- Toolbar and top-right controls: coloured outline icons ----
   pause: svg('<rect x="6" y="5" width="4" height="14" rx="1.6" stroke="currentColor" stroke-width="1.9"/><rect x="14" y="5" width="4" height="14" rx="1.6" stroke="currentColor" stroke-width="1.9"/>'),
   play: svg('<path d="M8 5.5v13l10.5-6.5z" stroke="currentColor" stroke-width="1.9"/>'),
