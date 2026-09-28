@@ -18,6 +18,7 @@ import { Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { PeakClouds } from './render/PeakClouds';
 import { DriftClouds } from './render/DriftClouds';
+import { Breeze } from './render/Breeze';
 import { Economy } from './economy/Economy';
 import { BuildingSystem, Building } from './buildings/Buildings';
 import { Pathfinder } from './ai/Pathfinder';
@@ -115,6 +116,7 @@ export class Game {
   clouds: PeakClouds;
   /** High clouds passing below the camera when zoomed out. */
   driftClouds: DriftClouds;
+  breeze: Breeze;
   buildings: BuildingSystem;
   pathfinder: Pathfinder;
   colony: Colony;
@@ -217,6 +219,8 @@ export class Game {
     this.scene.add(this.clouds.group);
     this.driftClouds = new DriftClouds(opts.seed);
     this.scene.add(this.driftClouds.group);
+    this.breeze = new Breeze(this.world, opts.seed);
+    this.scene.add(this.breeze.group);
     this.water = new Water(this.world);
     this.bridges = new Bridges(this.world);
     this.scene.add(this.bridges.mesh);
@@ -511,6 +515,8 @@ export class Game {
       this.trade.update(dt, this.time.elapsed);
       this.marine.update(dt, this.rig.target);
       this.powers.update(dt, realDt, this.rig.target);
+      // Add the gentle gust after weather sets its base wind, without accumulating it.
+      FX.uWind.value += this.breeze.strength;
       this.raining = this.powers.raining;
       const L = this.audio.listener;
       const tg = this.rig.target;
@@ -1361,6 +1367,7 @@ export class Game {
     this.rig.update(realDt);
     // What the camera sees this frame: off-screen entities skip posing and drawing.
     View.update(this.rig.camera);
+    this.breeze.update(realDt, this.rig.target, this.rig.viewRadius);
     const t = this.time.elapsed;
     // With the day/night cycle off, the light stays at warm mid-afternoon (the clock still runs for the islanders).
     this.lighting.update(this.settings.dayNight ? this.time.t : RENDER.fixedTimeOfDay, this.rig.target, this.rig.viewRadius);
