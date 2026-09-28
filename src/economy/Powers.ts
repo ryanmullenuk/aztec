@@ -116,7 +116,7 @@ export class Powers {
   startStorm(): void {
     this.state = 'storm';
     this.timer = POWERS.stormDuration[0] + this.rnd() * (POWERS.stormDuration[1] - POWERS.stormDuration[0]);
-    this.notify('A storm rolls in from the sea. Use Calm (9) to settle it.', 'warn');
+    this.notify('A storm rolls in from the sea. Use Calm (7) to settle it.', 'warn');
   }
 
   private spark(x: number, y: number, z: number): void {
