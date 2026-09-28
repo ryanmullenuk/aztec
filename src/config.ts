@@ -239,7 +239,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -275,6 +275,7 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   bonfire: { key: 'bonfire', name: 'Bonfire', description: 'A great fire ringed with log benches. In the evenings villagers gather here to sing and tell stories: they grow happier and the tribe gains Belief.', size: [3, 3], cost: { wood: 20, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   firepit: { key: 'firepit', name: 'Firepit', description: 'A roasting pit with a pig turning on a spit. Meat meals become more filling and put villagers in a good mood.', size: [2, 2], cost: { wood: 12, stone: 8, belief: 0 }, buildTime: 18, builders: 1, workers: 0, placeable: true },
   well: { key: 'well', name: 'Well', description: 'A stone well of fresh, cool water with a little tiled roof. Villagers living nearby are happier.', size: [2, 2], cost: { wood: 6, stone: 20, belief: 0 }, buildTime: 25, builders: 2, workers: 0, placeable: true },
+  kennel: { key: 'kennel', name: 'Kennel', description: 'A timber-and-adobe dog house with a shaded run. Village dogs sleep here, raise puppies and bark the alarm when a jaguar comes near. Each kennel holds up to 3 dogs.', size: [2, 2], cost: { wood: 18, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
   woodstore: { key: 'woodstore', name: 'Wood Store', description: 'Stores wood and stone. Logs stack up as it fills.', size: [3, 2], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 20, builders: 2, workers: 0, woodCap: 120, placeable: true },
@@ -371,6 +372,139 @@ export const TRADE = {
 };
 
 /** Village comforts: evening gatherings at bonfires, wells and roasted meat. */
+/**
+ * Pelicans and herons. Numbers follow the habitat (beach and rock resting places for pelicans,
+ * wading shallows for herons) but are capped so wildlife stays an occasional sight.
+ * Performance: one small instanced mesh per body part for all birds; off-screen birds skip
+ * posing; reactions to people/dogs run ~3 times a second, spot searches only when a bird
+ * decides to move (sampling ~10 candidates).
+ */
+export const WATERBIRDS = {
+  pelicans: [3, 9] as [number, number],
+  herons: [2, 5] as [number, number],
+  /** Herons keep this far apart (two may share a wetland, never crowd it). */
+  heronSpacing: 12,
+  /** Deepest water a heron wades into (below the sea surface). */
+  wadeDepth: 0.22,
+  pelicanSpeed: 3.0,
+  heronSpeed: 2.2,
+  /** Seconds for a bird to go from full to starving; hunts begin below 'hungry'. */
+  hungerSeconds: 260,
+  hungry: 0.5,
+  /** Catch odds for a pelican dive and a heron strike; how far a heron can reach. */
+  pelicanCatch: 0.45,
+  heronCatch: 0.4,
+  strikeReach: 0.62,
+  /** Chance a hungry pelican goes after a canoe that's netting rather than a school. */
+  followCanoe: 0.35,
+  /** Villagers: noticed at alertRange, flee at fleeRange; relocate up to this far. */
+  alertRange: 5,
+  fleeRange: 3,
+  relocate: 25,
+  /** Active hours (they settle down at dusk and stay quiet until morning). */
+  wake: 5.8,
+  settle: 18.4,
+};
+
+/** Sea turtles: a handful per island (more with more beach), slow on land, graceful in water. */
+export const TURTLES = {
+  count: [5, 9] as [number, number],
+  crawlSpeed: 0.09,
+  swimSpeed: 0.45,
+  restSeconds: [60, 200] as [number, number],
+  /** Seconds between breaths (they rise to the surface). */
+  breathEvery: [35, 80] as [number, number],
+  /** Chance, at each wander point, that a swimming turtle heads for a beach to haul out. */
+  comeAshore: 0.08,
+};
+
+/** Swampland: low jungle basins far from the village, with pools of dark water. */
+export const SWAMP = {
+  count: 2,
+  radius: [7, 11] as [number, number],
+  awayFromVillage: 32,
+  /** How deep pools are dug below the ground, and how much the wet mud sinks. */
+  poolDepth: 0.6,
+  mudDepth: 0.06,
+};
+
+/** Alligators: uncommon ambush predators that never leave the swamp. */
+export const ALLIGATORS = {
+  perSwamp: [1, 2] as [number, number],
+  max: 4,
+  /** Lunges at a villager or dog this close to the water's edge where it lies in wait. */
+  lungeRange: 2.2,
+  lungeSpeed: 5,
+  /** Seconds before it can strike again. */
+  cooldown: 70,
+  /** Odds a lunge connects, and that a villager it catches is killed (else injured). */
+  hitChance: 0.45,
+  killChance: 0.2,
+};
+
+/** Village dogs: companions, and the first line of defence against jaguars. */
+export const DOGS = {
+  perKennel: 3,
+  /** Hard ceiling on the whole village's dogs, however many kennels. */
+  maxTotal: 12,
+  /** Two stray dogs adopt the village when its first kennel is finished. */
+  foundingDogs: 2,
+  /** Breeding: food spent, time until the puppy is born, then a rest before the next litter. */
+  breedFood: 12,
+  gestation: 45,
+  breedCooldown: 150,
+  /** Seconds for a puppy to grow up. */
+  puppyGrow: 300,
+  /** Food each adult eats per minute (puppies half). A long hungry spell and a dog wanders off for good. */
+  foodPerMinute: 0.35,
+  starveLeave: 240,
+  /** Dogs smell a jaguar from much farther away than villagers can see one. */
+  detect: 17,
+  /** Barking rallies other dogs within this range. */
+  rally: 20,
+  /** How far dogs stray from the village: guards stay close, free-roamers explore and follow hunters. */
+  guardRange: 14,
+  roamRange: 30,
+  followRange: 45,
+  walkSpeed: 0.9,
+  runSpeed: 3.0,
+  /** An injured dog limps for this long. */
+  injuredTime: 120,
+  /** Chance an adult dog attaches itself to a household. */
+  attachChance: 0.65,
+};
+
+/** Jaguars: rare jungle predators that sometimes stalk the village. */
+export const JAGUARS = {
+  count: 2,
+  /** Seconds between hunts (a jaguar grows hungry, then heads for the village); halved at night. */
+  huntEvery: [260, 480] as [number, number],
+  prowlSpeed: 0.7,
+  stalkSpeed: 1.05,
+  chargeSpeed: 3.3,
+  retreatSpeed: 3.0,
+  /** Villagers only notice a jaguar this close (dogs sense it much farther). */
+  villagerNotice: 5.5,
+  chargeRange: 7,
+  pounceRange: 0.8,
+  /** Gives up the stalk after this long. */
+  stalkTime: 70,
+  /** A caught villager is killed this often (otherwise injured); halved with a dog or warrior close by. */
+  killChance: 0.3,
+  /** Retreat odds against n dogs: base + perDog * n (capped); warriors count as several dogs. */
+  retreatBase: 0.3,
+  retreatPerDog: 0.2,
+  retreatMax: 0.93,
+  warriorAsDogs: 3,
+  /** Of the encounters that are not an immediate retreat, the share that become a scuffle (the rest press on). */
+  fightShare: 0.6,
+  /** A dog lunged at: it escapes, is injured, or is killed. */
+  dogEscape: 0.6,
+  dogInjured: 0.28,
+  /** A dog close to a pouncing jaguar can throw itself in the way this often. */
+  interceptChance: 0.4,
+};
+
 export const COMFORTS = {
   /** Evening hours when villagers gather round a bonfire (before bed). */
   bonfireHours: [18.6, 22.5] as [number, number],

@@ -28,11 +28,20 @@ import { Marine } from './entities/Marine';
 import { Powers } from './economy/Powers';
 import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
+import { finishSwamps, generateSwamps } from './world/swamp';
 import { Bridges } from './buildings/Bridges';
 import { TradeFleet } from './entities/Trade';
 import { GOD_NAME, randomIslandName } from './world/names';
 import { FAUNA, SPECIES, TIME } from './config';
 import { MONKEY_BASE } from './entities/Monkeys';
+import { DOG_BASE, Dogs } from './entities/Dogs';
+import { JAG_BASE, Jaguar, Jaguars } from './entities/Jaguars';
+import { View } from './render/View';
+import { WaterBirds } from './entities/WaterBirds';
+import { SeaTurtles } from './entities/SeaTurtles';
+import { Alligators } from './entities/Alligators';
+import { SwampView } from './water/Swamp';
+import { SEA_SURFACE } from './water/Water';
 import type { Islander } from './entities/Islander';
 
 const _pathP = new THREE.Vector3();
@@ -113,6 +122,13 @@ export class Game {
   ui: UI;
   audio: AudioEngine;
   wildlife: Wildlife;
+  dogs!: Dogs;
+  waterBirds!: WaterBirds;
+  turtles!: SeaTurtles;
+  gators!: Alligators;
+  swampView!: SwampView;
+  jaguars!: Jaguars;
+  private lastDanger = -999;
   boats: Boats;
   marine: Marine;
   powers: Powers;
@@ -172,8 +188,13 @@ export class Game {
     generateIsland(this.world, opts.seed);
     // Plants are generated from the untouched island so saved plant states line up.
     this.veg = new Vegetation(this.world, this.preset);
+    // Swamps come from the seed and the untouched island too; their pools are dug afterwards,
+    // so the trees standing there end up half-drowned in dark water.
+    generateSwamps(this.world, opts.seed);
     const save = readSave(opts.seed);
     if (save) applyWorld(this.world, save);
+    finishSwamps(this.world);
+    this.veg.refreshHeights(0, 0, this.world.N - 1, this.world.N - 1);
 
     this.rig = new CameraRig(window.innerWidth / window.innerHeight, this.world);
     this.rig.boundRadius = this.world.half * 0.95;
@@ -223,9 +244,22 @@ export class Game {
     this.scene.add(this.boats.group);
     this.trade = new TradeFleet(this.world, this.water, this.buildings, this.eco, this.boats);
     this.scene.add(this.trade.group);
+    this.dogs = new Dogs(this.world, this.buildings, this.eco);
+    this.jaguars = new Jaguars(this.world);
+    this.dogs.jaguars = this.jaguars;
+    this.jaguars.dogs = this.dogs;
+    this.scene.add(this.dogs.meshes.group, this.jaguars.meshes.group);
     this.boats.blockCells(this.wildlife.coral.cells());
     this.marine = new Marine(this.world, this.water);
     this.scene.add(this.marine.group);
+    this.waterBirds = new WaterBirds(this.world, this.veg.plants.filter((p) => p.kind === 'searock').map((p) => ({ x: p.x, z: p.z })));
+    this.scene.add(this.waterBirds.meshes.group);
+    this.turtles = new SeaTurtles(this.world, SEA_SURFACE);
+    this.scene.add(this.turtles.meshes.group);
+    this.swampView = new SwampView(this.world, this.water.shared);
+    this.scene.add(this.swampView.group);
+    this.gators = new Alligators(this.world);
+    this.scene.add(this.gators.meshes.group);
     this.powers = new Powers(this.eco, this.buildings, this.lighting, this.water, this.time, () => this.rng.next());
     this.scene.add(this.powers.group);
     this.audio = new AudioEngine();
@@ -339,14 +373,78 @@ export class Game {
     this.buildings.onRemove = (b) => {
       this.wildlife.releasePen(b.id);
       if (b.key === 'tradedock') this.trade.removeDock(b);
+      if (b.key === 'kennel') this.dogs.onKennelRemoved(b);
     };
     this.trade.notify = (t) => this.ui?.toast(t);
+    // Dogs and jaguars.
+    const alarm = (x: number, z: number, r: number) => void this.colony.alarm(x, z, r);
+    const danger = (j: Jaguar, by: 'dogs' | 'villagers') => {
+      if (this.time.elapsed - this.lastDanger < 50) return;
+      this.lastDanger = this.time.elapsed;
+      this.ui?.toast(by === 'dogs' ? 'The dogs are barking: a jaguar is prowling near the village!' : 'A jaguar! Villagers are running for shelter.', 'warn');
+      void j;
+    };
+    const sfx = (n: string, x: number, z: number) => this.audio?.sfx(n, x, z);
+    this.dogs.hooks = {
+      villagers: () => this.colony.list,
+      byId: (id) => this.colony.byId(id),
+      animals: () => this.wildlife.animals.list.filter((a) => a.alive && a.pen < 0 && !a.heldBy).map((a) => ({ x: a.x, z: a.z })),
+      alarm, danger, sfx,
+      notify: (m, k) => this.ui?.toast(m, k ?? 'info'),
+      godMode: () => this.eco.godMode,
+      path: (x, z, tx, tz) => this.pathfinder.find(x, z, tx, tz, { goalRadius: 1 }),
+      birdNear: (x, z, r) => this.waterBirds.groundedNear(x, z, r),
+    };
+    this.jaguars.hooks = {
+      villagers: () => this.colony.list,
+      byId: (id) => this.colony.byId(id),
+      alarm, danger, sfx,
+      maul: (isl, killed) => this.colony.maul(isl, killed),
+      godMode: () => this.eco.godMode,
+    };
+    const W = this.wildlife;
+    this.waterBirds.hooks = {
+      people: this.colony.grid,
+      dogs: () => this.dogs.list.filter((d) => d.state !== 'dead').map((d) => ({ x: d.x, z: d.z, speed: d.speed })),
+      schools: () => W.schools,
+      fishNear: (x, z, r) => W.fishNear(x, z, r),
+      takeFish: (i) => W.takeFish(i),
+      scatterDeep: (x, z, r) => W.scatter(x, z, r),
+      reefNear: (x, z, r) => W.reef.nearest(x, z, r),
+      reefSchools: () => W.reef.schoolSpots(),
+      reefFish: () => W.reef.fish,
+      takeReef: (f) => W.reef.take(f),
+      scatterReef: (x, z, r) => W.reef.scatter(x, z, r),
+      canoes: () => this.boats.fishing(),
+      buildings: () => this.buildings.list.map((b) => ({ x: b.x, z: b.z, key: b.key })),
+      splash: (x, z, n, sp, r) => this.marine.splash(x, z, n, sp, r),
+      sfx,
+      seaLevel: SEA_SURFACE,
+    };
+    this.gators.hooks = {
+      people: this.colony.grid,
+      dogs: () => this.dogs.list.map((d) => ({ id: d.id, x: d.x, z: d.z, puppy: d.puppy, dead: d.state === 'dead' })),
+      bite: (isl, killed) => this.colony.maul(isl, killed, 'an alligator'),
+      biteDog: (id, x, z) => {
+        const d = this.dogs.byId(id);
+        if (d) this.dogs.lungedAt(d, { x, z }, false, 'an alligator');
+      },
+      splash: (x, z, n, sp, r, y) => this.marine.splash(x, z, n, sp, r, y),
+      sfx,
+      godMode: () => this.eco.godMode,
+    };
+    this.colony.onRemoved = (isl) => {
+      this.dogs.onVillagerGone(isl.id);
+      if (this.selectedIslander === isl.id) this.select(null);
+      if (this.followId === isl.id) this.followId = -1;
+    };
     this.buildings.onMoved = (b) => {
       this.wildlife.animals.movePen(b);
       this.tufts.refresh();
     };
     this.completeHandler = (b) => {
       if (b.key === 'farm' || b.key === 'butcher') this.wildlife.registerPen(b);
+      if (b.key === 'kennel') this.dogs.onKennelBuilt(b);
       // The first boat at each jetty is free.
       if (b.key === 'jetty' && b.boats.length === 0) b.boatBuild = 0.001;
     };
@@ -849,6 +947,18 @@ export class Game {
       this.audio?.sfx('select', animal.x, animal.z);
       return;
     }
+    const dog = this.dogs.pick(this.rig.camera, x, y, rect, 16);
+    if (dog) {
+      this.select({ animal: DOG_BASE + dog.id });
+      this.audio?.sfx('select', dog.x, dog.z);
+      return;
+    }
+    const jag = this.jaguars.pick(this.rig.camera, x, y, rect, 20);
+    if (jag) {
+      this.select({ animal: JAG_BASE + jag.id });
+      this.audio?.sfx('select', jag.x, jag.z);
+      return;
+    }
     const monkey = this.wildlife.monkeys.pick(this.rig.camera, x, y, rect, 14);
     if (monkey) {
       if (current && !current.child) {
@@ -1240,6 +1350,8 @@ export class Game {
       } else if (!f) this.followId = -1;
     }
     this.rig.update(realDt);
+    // What the camera sees this frame: off-screen entities skip posing and drawing.
+    View.update(this.rig.camera);
     const t = this.time.elapsed;
     // With the day/night cycle off, the light stays at warm mid-afternoon (the clock still runs for the islanders).
     this.lighting.update(this.settings.dayNight ? this.time.t : RENDER.fixedTimeOfDay, this.rig.target, this.rig.viewRadius);
@@ -1272,6 +1384,13 @@ export class Game {
     const growth = [1.2, 1.0, 0.85, 0.5][this.time.seasonIndex] * (this.raining ? 1.6 : 1);
     this.veg.update(dt, this.rig.camera.position, this.rig.target, RENDER.presets[this.preset].lodDist, growth, t);
     this.colony.update(dt);
+    const fire = this.buildings.list.find((b) => b.key === 'campfire');
+    this.jaguars.update(dt, this.time.isNight, fire ? { x: fire.x, z: fire.z } : null);
+    this.dogs.update(dt, this.time.isNight);
+    this.waterBirds.update(dt, this.time.hour);
+    this.turtles.people = this.colony.grid;
+    this.turtles.update(dt);
+    this.gators.update(dt);
     this.buildings.update(dt, t, ls.night, this.time.seasonIndex, this.raining, this.rig.target);
     this.updateSettlers(dt);
     if (this.introFollow) {
