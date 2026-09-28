@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
+import { HALL } from '../buildings/models';
 import { Economy } from '../economy/Economy';
 import { Islander, Role, Task, makeIslander } from '../entities/Islander';
 import { Plant, PlantState, Vegetation } from '../vegetation/Vegetation';
@@ -31,6 +32,8 @@ export interface ColonyHooks {
   releaseAnimal?: (id: number) => void;
   putInPen?: (id: number, b: Building) => void;
   consumeAnimal?: (id: number) => void;
+  /** A jaguar is still prowling near the village (sheltering villagers wait until it has gone). */
+  threat?: () => boolean;
 }
 
 interface PathReq {
@@ -217,6 +220,7 @@ export class Colony {
       if (p && p.reservedBy === isl.id) p.reservedBy = -1;
     }
     if (t.kind === 'build') this.bld.byId(t.target)?.builders.delete(isl.id);
+    if (t.kind === 'hall') this.leaveHall(isl, t);
     // Abandoned capture: the animal gets away (or is let go).
     if (t.kind === 'capture' && (t.phase ?? 0) < 2) {
       this.hooks.releaseAnimal?.(t.target);
@@ -550,6 +554,8 @@ export class Colony {
     if (this.work(isl)) return;
     // Nothing to do in their own job (store full, nothing left nearby): decide for themselves.
     if (isl.role !== 'warrior' && isl.role !== 'builder' && this.selfDirected(isl)) return;
+    // Truly idle: rest a while in the Great Hall if there is one nearby, else mill about.
+    if (!night && this.rnd() < GREAT_HALL.restChance && this.goToHall(isl, false)) return;
     this.wander(isl, isl.x, isl.z, 4);
   }
 
@@ -1343,6 +1349,10 @@ export class Colony {
         if (r !== 'walking') this.releaseTask(isl);
         break;
       }
+      case 'hall': {
+        this.runHall(isl, t, dt);
+        break;
+      }
       case 'flee': {
         // Running for shelter; indoors at home they stay hidden until the danger passes.
         if (t.stage < 2) {
@@ -1355,6 +1365,8 @@ export class Colony {
         }
         isl.anim = 'idle';
         t.timer -= dt;
+        // Sheltering at home: stay in until the jaguar has gone.
+        if (t.timer <= 0 && isl.hidden && this.hooks.threat?.()) t.timer = 3 + this.rnd() * 3;
         if (t.timer <= 0) {
           isl.hidden = false;
           this.releaseTask(isl);
@@ -1388,7 +1400,13 @@ export class Colony {
         continue;
       }
       if (isl.task?.kind === 'flee') continue;
+      // Already at (or on the way to) the Great Hall: stay there, now as sanctuary.
+      if (isl.task?.kind === 'hall') {
+        this.toShelter(isl.task);
+        continue;
+      }
       this.cancelTask(isl);
+      if (this.shelter(isl, 30)) continue;
       const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
       let dest = home && home.complete && Math.hypot(home.door.x - isl.x, home.door.z - isl.z) < 30 ? home : undefined;
       if (!dest) {
@@ -1412,6 +1430,259 @@ export class Colony {
       }
     }
     return warriors;
+  }
+
+  // ---------------- Great Hall ----------------
+
+  private halls(): Building[] {
+    return this.bld.list.filter((b) => b.key === 'greathall' && b.complete);
+  }
+
+  /** A free place in a hall: a seat (index < seats), or standing room when sheltering. */
+  private freeSlot(b: Building, standing: boolean): number {
+    const taken = new Set<number>();
+    for (const o of this.list) if (o.task?.kind === 'hall' && o.task.target === b.id && o.task.slot !== undefined) taken.add(o.task.slot);
+    const n = HALL.seats.length + (standing ? HALL.stands.length : 0);
+    const free: number[] = [];
+    for (let k = 0; k < n; k++) if (!taken.has(k)) free.push(k);
+    if (!free.length) return -1;
+    // Seats fill from the front rows back; otherwise any free spot.
+    const seats = free.filter((k) => k < HALL.seats.length);
+    const pool = seats.length ? seats : free;
+    return pool[Math.floor(this.rnd() * Math.min(pool.length, 6))];
+  }
+
+  private slotPos(k: number): { x: number; z: number } {
+    return k < HALL.seats.length ? HALL.seats[k] : HALL.stands[k - HALL.seats.length];
+  }
+
+  /** The nearest hall with room, within reach. */
+  private nearestHall(isl: Islander, maxD: number, standing: boolean): { b: Building; slot: number; d: number } | null {
+    let best: { b: Building; slot: number; d: number } | null = null;
+    for (const b of this.halls()) {
+      const d = Math.hypot(b.door.x - isl.x, b.door.z - isl.z);
+      if (d > maxD || (best && d >= best.d)) continue;
+      const slot = this.freeSlot(b, standing);
+      if (slot >= 0) best = { b, slot, d };
+    }
+    return best;
+  }
+
+  /** Head for the Great Hall: to rest on a bench, or (shelter) for sanctuary. */
+  private goToHall(isl: Islander, shelter: boolean, found?: { b: Building; slot: number }): boolean {
+    const h = found ?? this.nearestHall(isl, shelter ? GREAT_HALL.callRadius : GREAT_HALL.restRadius, shelter);
+    if (!h) return false;
+    this.setTask(isl, 'hall', h.b.id, h.b.door.x, h.b.door.z);
+    const t = isl.task!;
+    t.slot = h.slot;
+    t.phase = shelter ? 1 : 0;
+    t.timer = shelter ? GREAT_HALL.shelterMin : GREAT_HALL.restSeconds[0] + this.rnd() * (GREAT_HALL.restSeconds[1] - GREAT_HALL.restSeconds[0]);
+    return true;
+  }
+
+  /** A hall visit turns into sanctuary: stay put (at least a while) until the danger has passed. */
+  private toShelter(t: Task): void {
+    if (t.phase === 1) return;
+    t.phase = 1;
+    if ((t.stage ?? 0) <= 3) t.timer = Math.max(t.timer, GREAT_HALL.shelterMin);
+    // Already on the way out: turn round and go back in.
+    if (t.stage === 4 || t.stage === 5) {
+      t.stage = 2;
+      t.route = undefined;
+    }
+  }
+
+  /**
+   * Run for sanctuary: home or the Great Hall, whichever door is nearer (the hall only while it
+   * has room). Returns false when neither is in reach.
+   */
+  private shelter(isl: Islander, homeRange: number): boolean {
+    const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
+    const dHome = home && home.complete ? Math.hypot(home.door.x - isl.x, home.door.z - isl.z) : Infinity;
+    const hall = this.nearestHall(isl, GREAT_HALL.callRadius, true);
+    if (hall && hall.d < dHome) return this.goToHall(isl, true, hall);
+    if (home && dHome < homeRange) {
+      this.setTask(isl, 'flee', home.id, home.door.x, home.door.z);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * The Great Hall's bell has rung: every villager within earshot drops what they are doing and
+   * makes for sanctuary (home or the hall). Warriors go to meet the jaguar instead (a drill, rung
+   * by the player, leaves them at their posts).
+   */
+  sanctuary(x: number, z: number, drill = false): number {
+    let n = 0;
+    for (const isl of this.list) {
+      if (isl.hidden || isl.sleeping) continue;
+      if (isl.warrior) {
+        if (!drill && isl.task?.kind !== 'capture' && Math.hypot(isl.x - x, isl.z - z) < 30) {
+          this.cancelTask(isl);
+          this.setTask(isl, 'goto', -1, x + (isl.x - x) * 0.25, z + (isl.z - z) * 0.25);
+        }
+        continue;
+      }
+      if (isl.task?.kind === 'flee') continue;
+      if (isl.task?.kind === 'hall') {
+        this.toShelter(isl.task);
+        n++;
+        continue;
+      }
+      // Out at sea, or carried off somewhere: leave them be.
+      if (isl.task?.kind === 'fish' && (isl.task.stage ?? 0) >= 2) continue;
+      if (!this.halls().some((b) => Math.hypot(b.door.x - isl.x, b.door.z - isl.z) < GREAT_HALL.callRadius)) continue;
+      this.cancelTask(isl);
+      if (this.shelter(isl, GREAT_HALL.callRadius)) n++;
+    }
+    return n;
+  }
+
+  /** Villagers now in (or heading to) the hall: resting and sheltering. */
+  hallCount(b: Building): { resting: number; sheltering: number } {
+    let resting = 0, sheltering = 0;
+    for (const o of this.list) {
+      if (o.task?.kind !== 'hall' || o.task.target !== b.id) continue;
+      if (o.task.phase === 1) sheltering++;
+      else resting++;
+    }
+    return { resting, sheltering };
+  }
+
+  /** The walk from the door up the stair to a place on the platform (local points). */
+  private hallRoute(k: number): { x: number; z: number }[] {
+    const p = this.slotPos(k);
+    const top = HALL.edge - 0.2;
+    const r = [{ x: 0, z: HALL.stairFoot + 0.1 }, { x: 0, z: top }];
+    if (k < HALL.seats.length) {
+      // Down the aisle, along behind the row, then into the seat.
+      r.push({ x: 0, z: p.z + 0.14 }, { x: p.x, z: p.z + 0.14 }, { x: p.x, z: p.z });
+    } else {
+      if (Math.abs(p.x) > 2) r.push({ x: Math.sign(p.x) * 2.25, z: top });
+      r.push({ x: p.x, z: p.z });
+    }
+    return r;
+  }
+
+  /**
+   * Great Hall visit: walk to the door, climb the stair to a seat (or standing place), stay there
+   * (resting, or sheltering until the danger has gone), then walk back down and out.
+   * Stages: 0-1 to the door, 2 climbing in, 3 in place, 4 walking out.
+   */
+  private runHall(isl: Islander, t: Task, dt: number): void {
+    const b = this.bld.byId(t.target);
+    if (!b || !b.complete) return this.releaseTask(isl);
+    const shelter = t.phase === 1;
+    isl.tool = 'none';
+    if (t.stage < 2) {
+      const r = this.travel(isl, dt, t.x, t.z, { goalRadius: 0.6 }, shelter);
+      if (r === 'failed') {
+        // Can't reach the hall: sanctuary at home instead, or give up.
+        this.releaseTask(isl);
+        if (shelter) this.shelterHome(isl);
+        return;
+      }
+      if (r !== 'arrived') return;
+      // The path gave out short of the door (blocked): don't walk through walls to get in.
+      if (Math.hypot(isl.x - t.x, isl.z - t.z) > 1.2) {
+        this.releaseTask(isl);
+        if (shelter) this.shelterHome(isl);
+        return;
+      }
+      t.stage = 2;
+    }
+    if (t.stage === 2 || t.stage === 4) {
+      if (!t.route) {
+        const inRoute = this.hallRoute(t.slot ?? 0);
+        t.route = t.stage === 2 ? inRoute : [...inRoute].reverse().slice(1).concat([{ x: 0, z: HALL.stairFoot + 0.55 }]);
+        t.step = 0;
+      }
+      const wp = t.route[t.step ?? 0];
+      const [wx, wz] = b.local(wp.x, wp.z);
+      const dx = wx - isl.x, dz = wz - isl.z, d = Math.hypot(dx, dz);
+      const speed = (shelter && t.stage === 2 ? ISLANDER.runSpeed * 0.8 : ISLANDER.walkSpeed) * (isl.child ? 0.8 : 1);
+      const step = speed * dt;
+      if (d <= step) {
+        isl.x = wx;
+        isl.z = wz;
+        t.step = (t.step ?? 0) + 1;
+      } else {
+        isl.x += (dx / d) * step;
+        isl.z += (dz / d) * step;
+        this.faceTo(isl, dx, dz, dt);
+      }
+      isl.anim = shelter && t.stage === 2 ? 'run' : 'walk';
+      isl.speed = speed;
+      const [lx, lz] = b.toLocal(isl.x, isl.z);
+      isl.floorY = b.y + HALL.floorY(lx, lz);
+      isl.safe = shelter && HALL.floorY(lx, lz) >= HALL.h - 0.01;
+      if ((t.step ?? 0) >= t.route.length) {
+        t.route = undefined;
+        if (t.stage === 2) t.stage = 3;
+        else {
+          isl.floorY = null;
+          isl.safe = false;
+          return this.releaseTask(isl);
+        }
+      }
+      return;
+    }
+    // In place: seated facing the dais, or standing facing the middle of the hall.
+    const k = t.slot ?? 0;
+    const seated = k < HALL.seats.length;
+    if (seated) {
+      const [fx, fz] = b.local(0, -1);
+      const [ox, oz] = b.local(0, 0);
+      this.faceTo(isl, fx - ox, fz - oz, dt);
+      isl.anim = 'sit';
+    } else {
+      this.faceTo(isl, b.x - isl.x, b.z - isl.z, dt);
+      isl.anim = 'idle';
+    }
+    isl.floorY = b.y + HALL.h;
+    isl.safe = shelter;
+    if (!shelter) {
+      isl.rest = Math.min(1, isl.rest + GREAT_HALL.restGain * dt);
+      isl.happy = Math.min(1, isl.happy + GREAT_HALL.happyGain * dt);
+    }
+    t.timer -= dt;
+    if (t.timer > 0) return;
+    // Sheltering: stay until the jaguar has gone (then leave a few at a time).
+    if (shelter && this.hooks.threat?.()) {
+      t.timer = 2 + this.rnd() * 4;
+      return;
+    }
+    t.stage = 4;
+  }
+
+  /** Sanctuary at home (when the hall can't be reached). */
+  private shelterHome(isl: Islander): void {
+    const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
+    if (home && home.complete) this.setTask(isl, 'flee', home.id, home.door.x, home.door.z);
+  }
+
+  /** Taken off a hall visit part-way (new orders, the hall gone): step down to the door. */
+  private leaveHall(isl: Islander, t: Task): void {
+    isl.safe = false;
+    if (isl.floorY === null) return;
+    isl.floorY = null;
+    const b = this.bld.byId(t.target);
+    if (b) {
+      const [x, z] = b.local(0, HALL.stairFoot + 0.55);
+      isl.x = x;
+      isl.z = z;
+    }
+  }
+
+  /** Where to save a villager: someone in the hall is saved at its door. */
+  savePos(isl: Islander): { x: number; z: number } {
+    const t = isl.task;
+    if (t?.kind === 'hall' && isl.floorY !== null) {
+      const b = this.bld.byId(t.target);
+      if (b) return { x: b.door.x, z: b.door.z };
+    }
+    return { x: isl.x, z: isl.z };
   }
 
   /** Caught by a jaguar (or an alligator): badly hurt (limping, shaken), or killed. */
@@ -1552,7 +1823,7 @@ export class Colony {
         } else this.runTask(isl, dt);
       }
       if (!isl.hidden) {
-        isl.y = this.world.groundY(isl.x, isl.z);
+        isl.y = isl.floorY ?? this.world.groundY(isl.x, isl.z);
         this.grid.insert(isl);
       }
     }
@@ -1596,6 +1867,9 @@ export class Colony {
       case 'eat': return 'Eating';
       case 'bonfire': return 'Singing and telling stories at the bonfire';
       case 'flee': return isl.hidden ? 'Sheltering indoors from a jaguar' : 'Running for shelter: jaguar!';
+      case 'hall':
+        if (isl.task!.phase === 1) return isl.task!.stage === 3 ? 'Sheltering in the Great Hall' : 'Running to the Great Hall: jaguar!';
+        return isl.task!.stage === 3 ? 'Resting in the Great Hall' : isl.task!.stage === 4 ? 'Leaving the Great Hall' : 'Going to rest in the Great Hall';
       case 'sleep': return 'Going to bed';
       case 'wander': return 'Strolling';
       case 'spearfish': return (t.stage ?? 0) < 2 ? 'Heading to the shore to fish' : 'Spear fishing';
