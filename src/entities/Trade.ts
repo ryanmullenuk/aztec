@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Where } from '../ui/where';
 import { ResourceKey, TRADE, TradeOffer } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Economy } from '../economy/Economy';
@@ -45,7 +46,7 @@ export class TradeFleet {
   private cargoGeo = cargoGeometry();
   private mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, side: THREE.DoubleSide }));
   /** Messages for the player (arrivals, departures). */
-  notify: (msg: string) => void = () => {};
+  notify: (msg: string, at?: Where) => void = () => {};
 
   constructor(private world: World, private water: Water, private bld: BuildingSystem, private eco: Economy, private boats: Boats) {}
 
@@ -124,7 +125,7 @@ export class TradeFleet {
         if (d.boatBuild >= TRADE.boatBuildSeconds) {
           d.boatBuild = 0;
           this.launch(d);
-          this.notify('A new trade boat is moored at the Trade Dock.');
+          this.notify('A new trade boat is moored at the Trade Dock.', { x: d.x, z: d.z });
         }
       }
     }
@@ -148,7 +149,7 @@ export class TradeFleet {
                 const stored = this.eco.add(k as ResourceKey, n!);
                 return `${stored} ${k}`;
               });
-              this.notify(`A trade boat is back with ${got.join(' and ')}.`);
+              this.notify(`A trade boat is back with ${got.join(' and ')}.`, { x: dock.x, z: dock.z });
               s.cargo = {};
               const [ddx, ddz] = dock.dir;
               s.heading = Math.atan2(ddx, ddz);

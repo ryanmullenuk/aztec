@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Where } from '../ui/where';
 import { View } from '../render/View';
 import { DOGS, FOOD_KEYS, JAGUARS, ResourceKey } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
@@ -97,7 +98,7 @@ export interface DogHooks {
   animals: () => { x: number; z: number }[];
   alarm: (x: number, z: number, r: number) => void;
   danger: (j: Jaguar, by: 'dogs' | 'villagers') => void;
-  notify: (msg: string, kind?: 'info' | 'warn') => void;
+  notify: (msg: string, kind?: 'info' | 'warn', at?: Where) => void;
   sfx: (name: string, x: number, z: number) => void;
   godMode: () => boolean;
   /** Grid path over land (for long trips home around coasts and buildings). */
@@ -220,7 +221,7 @@ export class Dogs {
     if (this.founded) return;
     this.founded = true;
     for (let i = 0; i < DOGS.foundingDogs; i++) this.spawn(k, false, i);
-    this.hooks?.notify('Two dogs have wandered in and made the new kennel their home.');
+    this.hooks?.notify('Two dogs have wandered in and made the new kennel their home.', 'info', { x: k.x, z: k.z });
   }
 
   /** A demolished kennel: its dogs move to another kennel (or stay on as strays by the fire). */
@@ -340,12 +341,12 @@ export class Dogs {
       d.state = 'dead';
       d.timer = 8;
       d.lie = 1;
-      h.notify(by === 'the jaguar' ? `${d.name} the dog was killed by the jaguar while protecting the village.` : `${d.name} the dog was killed by ${by}.`, 'warn');
+      h.notify(by === 'the jaguar' ? `${d.name} the dog was killed by the jaguar while protecting the village.` : `${d.name} the dog was killed by ${by}.`, 'warn', { x: d.x, z: d.z });
     } else if (out === 'injured') {
       d.injured = DOGS.injuredTime;
       d.state = 'yelp';
       d.timer = 1.2;
-      h.notify(by === 'the jaguar' ? `${d.name} the dog was hurt fighting off the jaguar.` : `${d.name} the dog was bitten by ${by}.`, 'warn');
+      h.notify(by === 'the jaguar' ? `${d.name} the dog was hurt fighting off the jaguar.` : `${d.name} the dog was bitten by ${by}.`, 'warn', () => ({ x: d.x, z: d.z }));
     } else {
       d.state = 'yelp';
       d.timer = 0.8;
@@ -376,7 +377,7 @@ export class Dogs {
           k.breedT = 0;
           k.breedCool = DOGS.breedCooldown;
           const p = this.spawn(k, true);
-          this.hooks!.notify(`A puppy, ${p.name}, was born at the kennel.`);
+          this.hooks!.notify(`A puppy, ${p.name}, was born at the kennel.`, 'info', () => ({ x: p.x, z: p.z }));
         }
       }
     }

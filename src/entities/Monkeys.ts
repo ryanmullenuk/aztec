@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Where } from '../ui/where';
 import { View } from '../render/View';
 import { FAUNA } from '../config';
 import { peopleMaterial } from '../render/materials';
@@ -28,7 +29,7 @@ export interface MonkeyHooks {
   /** Take food from the stores; returns what was stolen. */
   steal: (n: number) => { res: string; n: number } | null;
   day: () => boolean;
-  notify: (msg: string) => void;
+  notify: (msg: string, at?: Where) => void;
   /** People monkeys keep clear of on the ground (warriors). */
   guards: () => { x: number; z: number }[];
 }
@@ -202,6 +203,12 @@ export class Monkeys {
   private time = 0;
   private frame = 0;
   private raidTimer = 0;
+
+  /** Where a raiding monkey is now (for notifications that take the camera there). */
+  private raider(): { x: number; z: number } | null {
+    const m = this.list.find((q) => q.raid && !q.dead);
+    return m ? { x: m.x, z: m.z } : null;
+  }
   private warned = -999;
   private lastTheft = -999;
   hooks: MonkeyHooks = { targets: () => [], steal: () => null, day: () => true, notify: () => {}, guards: () => [] };
@@ -587,7 +594,7 @@ export class Monkeys {
     }
     if (n && this.time - this.warned > 90) {
       this.warned = this.time;
-      this.hooks.notify('Monkeys are creeping into the village after your food! Wave them off with the pointer, or send a hunter.');
+      this.hooks.notify('Monkeys are creeping into the village after your food! Wave them off with the pointer, or send a hunter.', () => this.raider());
     }
   }
 
@@ -631,7 +638,7 @@ export class Monkeys {
         if (got) {
           r.carry = got.n;
           // One message per raid, not one per monkey.
-          if (this.time - this.lastTheft > 10) this.hooks.notify(`Monkeys made off with ${got.n}+ ${got.res}!`);
+          if (this.time - this.lastTheft > 10) this.hooks.notify(`Monkeys made off with ${got.n}+ ${got.res}!`, () => this.raider());
           this.lastTheft = this.time;
         }
         this.flee(m, null, false);
