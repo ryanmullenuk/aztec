@@ -299,7 +299,7 @@ export class AudioEngine {
     if (!this.ready) return;
     const ctx = this.ctx!;
     const now = ctx.currentTime;
-    const minGap: Record<string, number> = { chop: 0.12, mine: 0.12, build: 0.1, sculpt: 0.09, drop: 0.1, flap: 0.15, mark: 0.05, splash: 0.2, bark: 0.12, growl: 0.5, yelp: 0.3 };
+    const minGap: Record<string, number> = { chop: 0.12, mine: 0.12, build: 0.1, sculpt: 0.09, drop: 0.1, flap: 0.15, mark: 0.05, splash: 0.2, bark: 0.12, growl: 0.5, yelp: 0.3, bell: 3 };
     const lastT = this.last.get(name) ?? 0;
     if (now - lastT < (minGap[name] ?? 0.03)) return;
     this.last.set(name, now);
@@ -390,6 +390,29 @@ export class AudioEngine {
       // Jaguar: a low rasping rumble.
       case 'growl': burst('lowpass', 280, 3, 0.75, 0.3, 160); tone('sawtooth', 82, 64, 0.7, 0.05); break;
       case 'yelp': tone('triangle', 1450, 650, 0.2, 0.12); break;
+      // The Great Hall's bronze bell: three slow strikes, each a cluster of inharmonic partials
+      // (hum, fundamental, minor third, fifth, octave, upper) ringing down at their own rates.
+      case 'bell': {
+        const f = 330;
+        const partials: [number, number, number][] = [[0.5, 0.1, 4.5], [1, 0.14, 3.2], [1.19, 0.07, 2.4], [1.5, 0.05, 2.0], [2, 0.06, 1.7], [2.74, 0.035, 1.1], [3.76, 0.02, 0.7]];
+        for (let hit = 0; hit < 3; hit++) {
+          const t0 = t + hit * 1.15;
+          for (const [m, g0, dur] of partials) {
+            const o = ctx.createOscillator();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(f * m * (1 + (Math.random() - 0.5) * 0.002), t0);
+            const g = ctx.createGain();
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(g0 * vol, t0 + 0.006);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+            o.connect(g).connect(this.sfxBus);
+            o.start(t0);
+            o.stop(t0 + dur + 0.05);
+          }
+          burst('bandpass', 2400, 3, 0.05, 0.12, undefined, hit * 1.15);
+        }
+        break;
+      }
     }
   }
 
