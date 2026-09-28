@@ -3,6 +3,7 @@ import type { Game } from '../Game';
 import type { Islander, Role } from '../entities/Islander';
 import { PlantState } from '../vegetation/Vegetation';
 import { World } from './World';
+import { regrowSavedIslets } from './islets';
 
 /** Compact save format. The island is regenerated from the seed; only changes are stored. */
 export interface SaveData {
@@ -17,6 +18,8 @@ export interface SaveData {
   weather: { state: string };
   world: { layer: string; sandy: string; forest: string; rocky: string; wear: string; path?: string; bridge?: string; canal?: string };
   plants: string;
+  /** Terrain layout version: 1 = the grown islets are part of the stored terrain. */
+  layout?: number;
   buildings: {
     id: number; key: BuildingKey; cx: number; cz: number; rot: number; complete: boolean; progress: number; tier: number;
     upgrading: boolean; growth: number; stock: number; boats: number; bless: number;
@@ -103,6 +106,7 @@ export function serialize(g: Game): SaveData {
     weather: { state: g.powers?.state ?? 'clear' },
     world: { layer: toB64(layerU), sandy: q8(w.sandy), forest: q8(w.forest), rocky: q8(w.rocky), wear: q8(w.wear), path: toB64(w.path), bridge: toB64(w.bridge), canal: toB64(w.canal) },
     plants: toB64(plants),
+    layout: 1,
     buildings: g.buildings.list.map((b) => ({
       id: b.id, key: b.key, cx: b.cx, cz: b.cz, rot: b.rot, complete: b.complete, progress: b.progress, tier: b.tier,
       upgrading: b.upgrading, growth: b.growth, stock: b.stock, boats: b.key === 'tradedock' ? b.tradeBoats : b.boats.length, bless: b.blessTimer,
@@ -130,6 +134,7 @@ export function applyWorld(w: World, d: SaveData): void {
   dq8(d.world.forest, w.forest);
   dq8(d.world.rocky, w.rocky);
   dq8(d.world.wear, w.wear);
+  if ((d.layout ?? 0) < 1) regrowSavedIslets(w);
   if (d.world.canal) {
     // Canals: their dug-out layers are already restored; refill them with water.
     const p = fromB64(d.world.canal);

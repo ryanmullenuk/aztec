@@ -68,6 +68,36 @@ export function generateIsland(world: World, seed: number): void {
   const islets = [
     [-0.95, -0.62, 0.045], [-0.98, 0.1, 0.05], [-0.9, 0.72, 0.045], [-0.2, 0.86, 0.05], [0.3, 0.72, 0.045], [0.9, 0.62, 0.05], [0.94, -0.5, 0.045], [0.2, -0.82, 0.05], [-0.45, -0.78, 0.045],
   ].map(([x, z, r], k) => ({ x, z, r, h: 0.28 + (k % 3) * 0.06 }));
+  // The islets as they are now: bigger, fuller and further in from the map edge, several joined
+  // to the coast by a sand spit. Built alongside the original ones (above) and applied only after
+  // the plants are generated, so saved plant states still line up (see growIslets).
+  const grown = [
+    { x: -0.8, z: -0.6, r: 0.08, spit: [-0.66, -0.36] },
+    { x: -0.86, z: 0.14, r: 0.06 },
+    { x: -0.78, z: 0.7, r: 0.08, spit: [-0.64, 0.47] },
+    { x: -0.2, z: 0.8, r: 0.085, spit: [-0.2, 0.56] },
+    { x: 0.32, z: 0.74, r: 0.075 },
+    { x: 0.78, z: 0.62, r: 0.08, spit: [0.66, 0.38] },
+    { x: 0.8, z: -0.5, r: 0.08, spit: [0.7, -0.2] },
+    { x: 0.2, z: -0.78, r: 0.085 },
+    { x: -0.46, z: -0.74, r: 0.08 },
+  ].map((it, k) => {
+    // Two smaller lobes on the side facing the island (never out toward the map edge).
+    const toC = Math.atan2(-it.z, -it.x);
+    const hash = (n: number) => {
+      const v = Math.sin(k * 91.7 + n * 17.3) * 43758.5;
+      return v - Math.floor(v);
+    };
+    const blobs = [{ x: it.x, z: it.z, r: it.r }];
+    for (let j = 0; j < 2; j++) {
+      const a = toC + (j === 0 ? -1 : 1) * (0.5 + hash(j) * 0.7);
+      const d = it.r * (0.6 + hash(j + 5) * 0.25);
+      blobs.push({ x: it.x + Math.cos(a) * d, z: it.z + Math.sin(a) * d, r: it.r * (0.55 + hash(j + 9) * 0.2) });
+    }
+    return { ...it, h: 0.3 + (k % 3) * 0.06, blobs };
+  });
+  const vGrown = new Float32Array(N * N);
+  const zone = new Uint8Array(N * N);
   world.isle = new Uint8Array(N * N);
   const lobeField = (wx: number, wz: number, lobes: typeof mainLobes) => {
     let m = -10;
@@ -135,14 +165,47 @@ export function generateIsland(world: World, seed: number): void {
       // The village plain: wide, level grassland.
       const dp = Math.hypot(nx - plain.x, nz - plain.z) / plain.r;
       plainM[i] = 1 - smoothstep(0.85, 1.25, dp);
+      // The grown islets (same base terrain, new islets), and which cells either layout touches.
+      let hg = h;
+      let inZone = false;
+      const edge = Math.max(Math.abs(nx), Math.abs(nz));
+      for (const it of grown) {
+        let di = 1e9, gap = 1e9;
+        for (const bl of it.blobs) {
+          const d = Math.hypot(nx - bl.x, nz - bl.z);
+          di = Math.min(di, d / bl.r);
+          gap = Math.min(gap, d - bl.r);
+        }
+        di += sB.noise(nx * 9 + it.x * 7, nz * 9 - it.z * 7) * 0.16;
+        const iv = (1 - di) * it.h + sB.noise(nx * 14, nz * 14) * 0.03 - 0.015;
+        if (iv > hg) hg = iv;
+        // A ring of shallows, fading into the deep toward the map edge instead of being cut off.
+        const ring = lerp(-0.012 - (gap / 0.05) * 0.045, -0.3, smoothstep(0.9, 0.985, edge));
+        if (gap < 0.13) hg = Math.max(hg, ring);
+        if (gap < 0.15) inZone = true;
+        if (it.spit) {
+          // Sand spit from the islet to the coast, with shallows either side.
+          const [sx, sz] = it.spit;
+          const ex = sx - it.x, ez = sz - it.z;
+          const t = clamp(((nx - it.x) * ex + (nz - it.z) * ez) / (ex * ex + ez * ez), 0, 1);
+          const ds = Math.hypot(nx - it.x - ex * t, nz - it.z - ez * t) + sB.noise(nx * 11 + 3, nz * 11) * 0.006;
+          const sand = 0.034 - (ds / 0.02) ** 2 * 0.05 + sC.noise(nx * 20, nz * 20) * 0.006;
+          if (sand > hg) hg = sand;
+          if (ds < 0.08) hg = Math.max(hg, -0.012 - (ds / 0.05) * 0.045);
+          if (ds < 0.1) inZone = true;
+        }
+      }
       // Islets, each with its own ring of shallows.
       for (const it of islets) {
         const di = Math.hypot(nx - it.x, nz - it.z) / it.r;
         const iv = (1 - di) * it.h + sB.noise(nx * 14, nz * 14) * 0.03 - 0.015;
         if (iv > h) h = iv;
         if (di < 3.2) h = Math.max(h, -0.012 - (di - 1) * 0.045);
+        if (di < 3.4) inZone = true;
       }
       v[i] = h;
+      vGrown[i] = hg;
+      zone[i] = inZone ? 1 : 0;
     }
   }
 
@@ -159,7 +222,19 @@ export function generateIsland(world: World, seed: number): void {
     world.foam[i] = 0;
     world.riverY[i] = NaN;
   }
-  for (const it of islets) world.islets.push({ x: it.x * world.half, z: it.z * world.half, r: it.r * world.half });
+  for (const it of grown) world.islets.push({ x: it.x * world.half, z: it.z * world.half, r: it.r * world.half });
+  // The grown islets' layers, for growIslets to apply once the plants exist.
+  const cells: number[] = [], layers: number[] = [];
+  for (let i = 0; i < N * N; i++) {
+    if (!zone[i]) continue;
+    const toLayer = (h: number) => clamp(h > 0 ? 1 + Math.floor(Math.pow(h, 0.95) * 10.5) : Math.ceil(h * 18), WORLD.minLayer, WORLD.maxLayer);
+    const L = toLayer(vGrown[i]);
+    // Only where the new islets actually change the ground (the coasts they meet keep their shape).
+    if (L === toLayer(v[i]) || !Number.isNaN(world.riverY[i])) continue;
+    cells.push(i);
+    layers.push(L);
+  }
+  world.isletNext = { cells: Int32Array.from(cells), layer: Int8Array.from(layers) };
 
   world.computeDistWater();
 

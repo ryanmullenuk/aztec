@@ -81,6 +81,13 @@ export class World {
   /** Direction (unit XZ) from the meadow towards the nearest sea. */
   seaDir = { x: 0, z: 1 };
   islets: { x: number; z: number; r: number }[] = [];
+  /** The grown islets waiting to be applied (cells and their new layers), from the generator. */
+  isletNext: { cells: Int32Array; layer: Int8Array } | null = null;
+  /**
+   * After growIslets: the cells it reshaped and their terrain, re-applied over saves made before
+   * the islets grew (their stored terrain still has the old islets).
+   */
+  isletGrown: { cells: Int32Array; layer: Int8Array; sandy: Float32Array; forest: Float32Array; rocky: Float32Array } | null = null;
   /** Which island each land cell belongs to: 0 sea, 1 the main island, 2 the wild island. */
   isle = new Uint8Array(this.N * this.N);
   /** Water canals dug by the player from existing water (1 = channel). */
