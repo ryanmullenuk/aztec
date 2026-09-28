@@ -287,7 +287,7 @@ export class Game {
     this.scene.add(this.marine.group);
     this.waterBirds = new WaterBirds(this.world, this.veg.plants.filter((p) => p.kind === 'searock').map((p) => ({ x: p.x, z: p.z })));
     this.scene.add(this.waterBirds.meshes.group);
-    this.butterflies = new Butterflies(this.world, this.veg.plants.filter((p) => p.kind === 'flowerbush' || p.kind === 'bush'), Math.round(110 * cfg.vegDensity));
+    this.butterflies = new Butterflies(this.world, this.veg.plants.filter((p) => p.kind === 'flowerbush' || p.kind === 'bush'), Math.round(110 * cfg.vegDensity), this.flowers.blooms());
     this.scene.add(this.butterflies.mesh);
     this.turtles = new SeaTurtles(this.world, SEA_SURFACE);
     this.scene.add(this.turtles.meshes.group);
