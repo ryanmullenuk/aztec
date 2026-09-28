@@ -3,7 +3,7 @@ import { World } from './World';
 /**
  * Give the waterfall the ground it needs: a sheer step under the lip with high banks either side,
  * a basin one layer deep under the plunge pool and a low sandy rim round it (the rock columns stand
- * on it as the gorge walls), open where the river flows out. The generator carves these too, but the river
+ * on it as the gorge walls), dipping to a spill lip where the river flows out. The generator carves these too, but the river
  * running on downstream lowers the basin's far side and terrain smoothing rounds the cliff away;
  * this runs after a save is applied, so old saves get the fixed ground as well.
  *
@@ -84,7 +84,7 @@ export function shapeWaterfall(w: World): void {
   // The sharp shape itself (the layer field above is too blurred to hold a cliff).
   w.fallSite = {
     x: f.x, z: f.z, dx: f.dx, dz: f.dz, l0, inner, rim: f.poolR + 2.6,
-    lipH: f.topY - 0.3, bankH: f.topY + 0.35, bedH: f.poolY - 0.45, rimH: f.poolY + 0.35, bound: l0 + f.poolR + 4,
+    lipH: f.topY - 0.3, bankH: f.topY + 0.35, bedH: f.poolY - 0.45, rimH: f.poolY + 0.35, spillH: f.poolY - 0.04, bound: l0 + f.poolR + 4,
   };
   w.computeDistWater();
   w.classifyGround();

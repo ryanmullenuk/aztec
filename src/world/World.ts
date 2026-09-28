@@ -250,12 +250,13 @@ export class World {
    * The waterfall's ground, too sharp for the blurred layer field: set by shapeWaterfall. Lip (x, z)
    * and flow direction; pool centre l0 along it; basin and rim radii; target heights.
    */
-  fallSite: { x: number; z: number; dx: number; dz: number; l0: number; inner: number; rim: number; lipH: number; bankH: number; bedH: number; rimH: number; bound: number } | null = null;
+  fallSite: { x: number; z: number; dx: number; dz: number; l0: number; inner: number; rim: number; lipH: number; bankH: number; bedH: number; rimH: number; spillH: number; bound: number } | null = null;
 
   /**
    * Near the waterfall, blend the terrain to a designed shape: the river channel and high banks
    * above the lip, a sheer drop, a basin running from the foot of the cliff out to the pool and a
-   * raised rim round it, open where the river leaves.
+   * raised rim all round it, dipping to a spill lip just under the water where the river leaves
+   * (so the pool never hangs over the lower ground downstream).
    */
   private fallShape(x: number, z: number, h: number): number {
     const s = this.fallSite!;
@@ -273,10 +274,11 @@ export class World {
       const dc = l < s.l0 ? aa : Math.hypot(a, l - s.l0);
       const wb = (1 - smoothstep(s.inner - 0.45, s.inner, dc)) * smoothstep(0.26, 0.4, l);
       if (wb > 0 && s.bedH < h) h += (s.bedH - h) * wb;
-      // Rim round it (raise only), open at the outlet.
-      const outlet = smoothstep(s.l0 - 0.5, s.l0 + 0.5, l) * (1 - smoothstep(1.0, 1.8, aa));
-      const wr = smoothstep(s.inner - 0.15, s.inner + 0.3, dc) * (1 - smoothstep(s.rim - 0.9, s.rim, dc)) * (1 - outlet);
-      if (wr > 0 && s.rimH > h) h += (s.rimH - h) * wr;
+      // Rim round it (raise only), down to the spill lip at the outlet.
+      const outlet = smoothstep(s.l0 - 0.5, s.l0 + 0.5, l) * (1 - smoothstep(0.5, 1.0, aa));
+      const wr = smoothstep(s.inner - 0.15, s.inner + 0.3, dc) * (1 - smoothstep(s.rim - 0.9, s.rim, dc));
+      const target = s.rimH + (s.spillH - s.rimH) * outlet;
+      if (wr > 0 && target > h) h += (target - h) * wr;
     }
     return h;
   }
