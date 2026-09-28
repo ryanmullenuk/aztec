@@ -166,6 +166,185 @@ export function stylisedMaterial(): THREE.MeshStandardMaterial {
   return shared;
 }
 
+/**
+ * Procedural surface "skin" for building meshes, keyed off the vertex colour and world-space
+ * position / normal so adobe, stone, timber and thatch read as hand-made:
+ *  - all surfaces: two-scale blotchy value noise (grime), faint rain streaks on walls, and a soft
+ *    darkening near the building's base (base height = the mesh's model-matrix origin, which for
+ *    building meshes sits on the ground);
+ *  - warm, light adobe walls: running-bond mud-brick courses (0.16 x 0.08) with thin mortar and a
+ *    per-brick tint, partly covered by irregular smooth mud-plaster patches;
+ *  - pale plaster / cream: mostly plastered, with faint brick courses showing through;
+ *  - grey stone: chunkier block joints on walls (0.3 x 0.18) and flagstones on tops, plus speckle;
+ *  - thatch (the aVeg leaf flag 0.2, or straw colours): fine striations down the slope;
+ *  - timber browns: faint grain.
+ * Fine detail fades out with camera distance and screen-space texel size to avoid moiré.
+ * All tuning is in perceptual (≈sRGB) terms and converted to a linear multiplier at the end.
+ */
+function patchBuilding(mat: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    prev.call(mat, shader, r);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBldW;\nvarying vec3 vBldN;\nvarying float vBldBase;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        {
+          vec4 bw = vec4(transformed, 1.0);
+          vec3 bn = objectNormal;
+          #ifdef USE_INSTANCING
+            bw = instanceMatrix * bw;
+            bn = mat3(instanceMatrix) * bn;
+            vBldBase = (modelMatrix * instanceMatrix[3]).y;
+          #else
+            vBldBase = modelMatrix[3].y;
+          #endif
+          vBldW = (modelMatrix * bw).xyz;
+          vBldN = mat3(modelMatrix) * bn;
+        }`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vBldW;
+        varying vec3 vBldN;
+        varying float vBldBase;
+        float bHash(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+        float bNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(bHash(i), bHash(i + vec2(1.0, 0.0)), u.x), mix(bHash(i + vec2(0.0, 1.0)), bHash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }
+        // Staggered block courses: x = mortar coverage (0..1), y = per-block random, z = distance to nearest joint.
+        vec3 bBlocks(vec2 p, vec2 size, float jitter, float mortarW, float pw) {
+          vec2 q = p / size;
+          float row = floor(q.y);
+          q.x += fract(row * 0.5) + (bHash(vec2(row, 7.13)) - 0.5) * jitter;
+          vec2 id = floor(q);
+          vec2 f = fract(q);
+          vec2 e = min(f, 1.0 - f) * size;
+          float d = min(e.x, e.y);
+          return vec3(1.0 - smoothstep(mortarW, mortarW + pw * 1.5, d), bHash(id + vec2(3.7, 11.1)), d);
+        }`
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          vec3 bc = diffuseColor.rgb;
+          vec3 sc = pow(max(bc, vec3(0.0)), vec3(1.0 / 2.2));
+          float mx = max(sc.r, max(sc.g, sc.b)), mn = min(sc.r, min(sc.g, sc.b));
+          float sat = (mx - mn) / max(mx, 1e-3);
+          float val = mx;
+          // 0 = red .. 1 = yellow, meaningful for warm colours (r >= g >= b).
+          float hueW = clamp((sc.g - sc.b) / max(sc.r - sc.b, 1e-3), 0.0, 1.0);
+          float warm = step(sc.b, sc.g) * step(sc.g, sc.r);
+
+          vec3 n = normalize(vBldN);
+          float ny = abs(n.y);
+          float wallW = 1.0 - smoothstep(0.4, 0.55, ny);
+          float topW = smoothstep(0.85, 0.95, n.y);
+          // Horizontal tangent of the face, so courses run along any wall (and down any roof slope).
+          float nl = length(n.xz);
+          vec2 tH = nl > 1e-3 ? vec2(-n.z, n.x) / nl : vec2(1.0, 0.0);
+          float uT = dot(vBldW.xz, tH);
+          vec2 suv = ny > 0.55 ? vBldW.xz : vec2(uT, vBldW.y);
+
+          // Detail fades: distance to camera, and the world size of a screen pixel.
+          float pw = max(length(dFdx(vBldW)), length(dFdy(vBldW)));
+          float dFade = 1.0 - smoothstep(15.0, 45.0, length(vBldW - cameraPosition));
+          float fadeFine = dFade * (1.0 - smoothstep(0.012, 0.03, pw));
+          float fadeStone = dFade * (1.0 - smoothstep(0.02, 0.05, pw));
+          float fadeMicro = dFade * (1.0 - smoothstep(0.007, 0.018, pw));
+
+          // Leave foliage (crops, potted plants) alone.
+          float wAll = 1.0 - smoothstep(0.5, 0.9, vLeaf);
+
+          // Material classes from the vertex colour.
+          float thatchFlag = step(0.05, vLeaf) * (1.0 - step(0.6, vLeaf));
+          float thatchW = max(thatchFlag, warm * smoothstep(0.53, 0.58, hueW) * smoothstep(0.38, 0.45, sat) * smoothstep(0.5, 0.58, val) * (1.0 - step(0.97, ny)));
+          float grey = 1.0 - smoothstep(0.22, 0.28, sat);
+          float plasterW = grey * smoothstep(0.84, 0.9, val) * step(sc.b, sc.r);
+          float stoneW = grey * smoothstep(0.4, 0.48, val) * (1.0 - smoothstep(0.82, 0.88, val));
+          float adobeW = warm * (1.0 - thatchW) * smoothstep(0.72, 0.8, val) * smoothstep(0.2, 0.28, sat) * smoothstep(0.28, 0.34, hueW) * (1.0 - smoothstep(0.58, 0.64, hueW));
+          float woodW = warm * (1.0 - thatchW) * (1.0 - smoothstep(0.66, 0.72, val)) * smoothstep(0.3, 0.4, sat) * smoothstep(0.12, 0.2, val);
+
+          // Perceptual brightness multiplier.
+          float n1 = bNoise(suv * 2.2 + 17.0);
+          float n2 = bNoise(suv * 6.5 - 5.0);
+          float m = 1.0 + ((n1 - 0.5) * 0.14 + (n2 - 0.5) * 0.07) * wAll;
+          float st = bNoise(vec2(suv.x * 9.0, suv.y * 0.7));
+          m *= 1.0 - smoothstep(0.62, 0.95, st) * 0.06 * wallW * wAll;
+          float hb = vBldW.y - vBldBase;
+          m *= mix(1.0, mix(0.84, 1.0, smoothstep(-0.02, 0.3, hb)), (wallW * 0.85 + 0.15) * wAll);
+          float desat = 0.0;
+
+          float mudW = max(adobeW, plasterW) * wAll;
+          if (mudW > 0.01) {
+            // Irregular mud-plaster patches over the brickwork (mostly plastered on pale walls).
+            float pn = bNoise(suv * 1.7 + 3.1) * 0.65 + bNoise(suv * 4.6 - 1.7) * 0.35;
+            float thr = mix(0.56, 0.40, plasterW);
+            float patchM = smoothstep(thr - 0.03, thr + 0.03, pn);
+            float rim = smoothstep(thr - 0.04, thr, pn) * (1.0 - smoothstep(thr, thr + 0.05, pn));
+            vec2 bp = suv + (n2 - 0.5) * vec2(0.012, 0.006);
+            vec3 bk = bBlocks(bp, vec2(0.16, 0.08), 0.35, 0.0045, pw);
+            float bricks = wallW * fadeFine * (1.0 - patchM) * max(adobeW, plasterW * 0.45) * wAll;
+            m *= 1.0 - bk.x * 0.18 * bricks;
+            m *= 1.0 + (bk.y - 0.5) * 0.1 * bricks;
+            m *= 1.0 - (1.0 - smoothstep(0.0, 0.018, bk.z)) * 0.04 * bricks;
+            float tone = mix(0.95, 1.05, step(0.5, bNoise(suv * 0.9 + 11.0)));
+            m *= mix(1.0, tone, patchM * mudW);
+            m *= 1.0 - rim * 0.06 * mudW;
+            desat = patchM * mudW * 0.12;
+          }
+          float stW = stoneW * wAll * max(wallW, topW);
+          if (stW > 0.01) {
+            vec2 sz = mix(vec2(0.3, 0.18), vec2(0.3, 0.26), topW);
+            vec3 sb = bBlocks(suv + (n1 - 0.5) * 0.02, sz, 0.6, 0.007, pw);
+            float sw = stW * fadeStone;
+            m *= 1.0 - sb.x * 0.2 * sw;
+            m *= 1.0 + (sb.y - 0.5) * 0.14 * sw;
+            m *= 1.0 + (smoothstep(0.0, 0.05, sb.z) - 0.5) * 0.05 * sw;
+            m *= 1.0 + (bNoise(suv * 22.0) - 0.5) * 0.08 * stW * fadeFine;
+          }
+          float thW = thatchW * wAll;
+          if (thW > 0.01) {
+            float s1 = bNoise(vec2(uT * 24.0, vBldW.y * 3.0));
+            float s2 = bNoise(vec2((uT + vBldW.y * 0.7) * 16.0, vBldW.y * 2.0));
+            float f = thW * fadeMicro;
+            m *= 1.0 + ((s1 - 0.5) * 0.16 + (s2 - 0.5) * 0.08) * f;
+            m *= 1.0 - smoothstep(0.7, 0.9, s1) * 0.08 * f;
+          }
+          float wdW = woodW * wAll;
+          if (wdW > 0.01) {
+            vec2 wc = ny > 0.55 ? vBldW.zx : vec2(uT, vBldW.y);
+            float g1 = bNoise(vec2(wc.x * 26.0, wc.y * 1.3));
+            float g2 = bNoise(vec2(wc.x * 45.0 + g1 * 3.0, wc.y * 0.8));
+            m *= 1.0 + ((g1 - 0.5) * 0.12 * fadeFine + (g2 - 0.5) * 0.08 * fadeMicro) * wdW;
+          }
+
+          float lum = dot(bc, vec3(0.2126, 0.7152, 0.0722));
+          diffuseColor.rgb = mix(bc, vec3(lum), desat) * pow(max(m, 0.0), 2.2);
+        }`
+      );
+  };
+  mat.customProgramCacheKey = () => 'building';
+  return mat;
+}
+
+let building: THREE.MeshStandardMaterial | null = null;
+/** Stylised material for building meshes, with the hand-made surface skin (see patchBuilding). */
+export function buildingMaterial(): THREE.MeshStandardMaterial {
+  if (!building) building = patchBuilding(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })));
+  return building;
+}
+
 let sharedDouble: THREE.MeshStandardMaterial | null = null;
 /** Double-sided variant for thin leaves and fronds. */
 export function stylisedMaterialDouble(): THREE.MeshStandardMaterial {

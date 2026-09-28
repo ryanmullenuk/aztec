@@ -17,6 +17,15 @@ const cA = new THREE.Color();
 const _sun = new THREE.Vector3();
 const _moon = new THREE.Vector3();
 const cB = new THREE.Color();
+const cC = new THREE.Color();
+/** Storm cloud tints: grey by day, deep slate at night (so night storms stay dark). */
+const STORM_HEMI_DAY = new THREE.Color(0x8a97a8);
+const STORM_HEMI_NIGHT = new THREE.Color(0x1f2836);
+const STORM_FOG_DAY = new THREE.Color(0x7f8a96);
+const STORM_FOG_NIGHT = new THREE.Color(0x0f141c);
+/** Lightning: a cold blue-white flash on the land and in the sky. */
+const FLASH_LIGHT = new THREE.Color(0xd4e0ff);
+const FLASH_SKY = new THREE.Color(0x7d8cb0);
 
 /**
  * Golden-hour sun, cool sky bounce, low ambient, and the day/night keyframes.
@@ -39,6 +48,8 @@ export class Lighting {
   eveningAzimuth = 0;
   /** Darkening from storms / rain (0..1). */
   overcast = 0;
+  /** Lightning flash on the scene (0..~1.4), set each frame by the weather. */
+  flash = 0;
 
   constructor(scene: THREE.Scene, shadowSize: number) {
     this.sun = new THREE.DirectionalLight(COLORS.sunWarm, 3.2);
@@ -112,17 +123,28 @@ export class Lighting {
 
     cA.setHex(a.hemiSky);
     cB.setHex(b.hemiSky);
-    this.hemi.color.copy(cA).lerp(cB, f).lerp(new THREE.Color(0x8a97a8), oc * 0.7);
+    this.hemi.color.copy(cA).lerp(cB, f).lerp(cC.copy(STORM_HEMI_DAY).lerp(STORM_HEMI_NIGHT, night), oc * 0.7);
     cA.setHex(a.hemiGround);
     cB.setHex(b.hemiGround);
     this.hemi.groundColor.copy(cA).lerp(cB, f);
-    this.hemi.intensity = L(a.hemiI, b.hemiI) * (1 - oc * 0.35);
-    this.ambient.intensity = L(a.amb, b.amb);
+    this.hemi.intensity = L(a.hemiI, b.hemiI) * (1 - oc * (0.35 + 0.15 * night));
+    this.ambient.intensity = L(a.amb, b.amb) * (1 - oc * 0.35 * night);
 
     cA.setHex(a.fog);
     cB.setHex(b.fog);
-    s.fog.copy(cA).lerp(cB, f).lerp(new THREE.Color(0x7f8a96), oc * 0.6);
-    s.exposure = L(a.exposure, b.exposure) * (1 - oc * 0.12);
+    s.fog.copy(cA).lerp(cB, f).lerp(cC.copy(STORM_FOG_DAY).lerp(STORM_FOG_NIGHT, night), oc * 0.6);
+    s.exposure = L(a.exposure, b.exposure) * (1 - oc * (0.12 + 0.08 * night));
+
+    // Lightning: everything lights up cold and blue-white for an instant (most of all in the dark).
+    const fl = this.flash * (0.55 + 0.45 * night);
+    if (fl > 0.001) {
+      const fc = Math.min(1, fl);
+      this.ambient.intensity += fl * 1.0;
+      this.hemi.color.lerp(FLASH_LIGHT, fc * 0.65);
+      this.hemi.intensity += fl * 1.2;
+      s.fog.lerp(FLASH_SKY, fc * 0.5);
+      s.exposure *= 1 + fl * 0.18;
+    }
 
     // Fit the shadow camera tightly around the view, snapped to texels to avoid shimmering.
     const r = clamp(viewRadius, 12, 150);
