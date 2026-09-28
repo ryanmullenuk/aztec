@@ -6,6 +6,7 @@ import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { Water } from '../water/Water';
 import { Particles } from './Boats';
+import { rigWhale, poseWhaleSpine, sampleBreach, IMPACT_T, BREACH_END, FLUKE_T, DIVE_T } from './WhaleMotion';
 
 // ---------------- Models (length 1 along +z, head at +z) ----------------
 
@@ -501,52 +502,13 @@ function softTexture(): THREE.Texture {
   return t;
 }
 
-// ---------------- Breach choreography ----------------
-
-/**
- * Breach keyframes, matched to the reference clip (seconds):
- *  y = body-centre height in body lengths, h = travel along the fall direction (body lengths),
- *  pitch = tilt from vertical toward the fall direction (degrees), roll = spin about the body axis (degrees),
- *  fin = pectoral fin spread (radians).
- */
-const BREACH: { t: number; y: number; h: number; pitch: number; roll: number; fin: number }[] = [
-  { t: 0.0, y: -0.64, h: -0.3, pitch: 36, roll: 0, fin: 0.3 },
-  { t: 1.0, y: -0.42, h: -0.08, pitch: 16, roll: 10, fin: 0.5 },
-  { t: 1.4, y: -0.26, h: 0.0, pitch: 7, roll: 45, fin: 0.9 },
-  { t: 1.8, y: -0.06, h: 0.01, pitch: 9, roll: 95, fin: 1.1 },
-  { t: 2.2, y: 0.08, h: 0.02, pitch: 12, roll: 145, fin: 0.9 },
-  { t: 2.55, y: 0.14, h: 0.04, pitch: 18, roll: 180, fin: 0.7 },
-  { t: 2.85, y: 0.1, h: 0.12, pitch: 40, roll: 195, fin: 0.9 },
-  { t: 3.15, y: 0.02, h: 0.3, pitch: 72, roll: 208, fin: 1.2 },
-  { t: 3.4, y: -0.06, h: 0.44, pitch: 96, roll: 215, fin: 1.3 },
-  { t: 3.8, y: -0.26, h: 0.56, pitch: 138, roll: 222, fin: 0.8 },
-  { t: 4.25, y: -0.46, h: 0.62, pitch: 172, roll: 226, fin: 0.5 },
-  { t: 4.9, y: -0.95, h: 0.66, pitch: 186, roll: 228, fin: 0.3 },
-];
-const BREACH_END = 4.9;
-/** Seconds of diving and turning upward before the breach starts. */
-const DIVE_T = 3.2;
-const IMPACT_T = 3.4;
 const _ax = new THREE.Vector3();
-const FLUKE_T = 4.2;
-
-function sampleTrack(t: number): { y: number; h: number; pitch: number; roll: number; fin: number } {
-  const K = BREACH;
-  if (t <= K[0].t) return K[0];
-  if (t >= K[K.length - 1].t) return K[K.length - 1];
-  let i = 0;
-  while (t > K[i + 1].t) i++;
-  const a = K[Math.max(0, i - 1)], b = K[i], c = K[i + 1], d = K[Math.min(K.length - 1, i + 2)];
-  const f = (t - b.t) / (c.t - b.t);
-  // Catmull-Rom for smooth, eased motion through the keys.
-  const cr = (p0: number, p1: number, p2: number, p3: number) =>
-    0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (-p0 + 3 * p1 - 3 * p2 + p3) * f * f * f);
-  return { y: cr(a.y, b.y, c.y, d.y), h: cr(a.h, b.h, c.h, d.h), pitch: cr(a.pitch, b.pitch, c.pitch, d.pitch), roll: cr(a.roll, b.roll, c.roll, d.roll), fin: cr(a.fin, b.fin, c.fin, d.fin) };
-}
 
 interface Whale {
   root: THREE.Group;
-  body: THREE.Mesh;
+  body: THREE.SkinnedMesh;
+  spine: THREE.Bone[];
+  swimPhase: number;
   finL: THREE.Group;
   finR: THREE.Group;
   fluke: THREE.Group;
@@ -555,8 +517,6 @@ interface Whale {
   heading: number;
   route: { x: number; z: number; r: number; a: number; dir: number };
   state: 'swim' | 'dive' | 'breach' | 'recover';
-  /** Body bend uniforms (travelling wave along the body, lateral turn curvature). */
-  bend: { uPhase: { value: number }; uAmp: { value: number }; uTurn: { value: number } };
   /** Current pose: tilt from vertical toward yaw (90 = level), spin, depth. */
   pose: { y: number; pitch: number; roll: number; yaw: number };
   turnRate: number;
@@ -610,8 +570,8 @@ interface Dolphin {
 }
 
 /**
- * Humpback whales that cruise the deep water, spout and breach (choreographed after the
- * reference clip: vertical rise with a spin, topple onto the back, huge swirling splash, fluke
+ * Humpback whales that cruise the deep water, spout and breach (an airborne spin,
+ * broadside landing, huge swirling splash, fluke
  * flip as it dives), and dolphin pods porpoising in leaping arcs.
  */
 export class Marine {
@@ -650,7 +610,7 @@ export class Marine {
     }
 
     const crownGeo = new THREE.CylinderGeometry(1, 1, 1, 64, 6, true).translate(0, 0.5, 0);
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < 8; k++) {
       const cm = new THREE.ShaderMaterial({
         uniforms: { uA: { value: 0 }, uFlare: { value: 0.5 }, uSeed: { value: k * 17.3 }, uDay: this.water.shared.uDay },
         vertexShader: `uniform float uFlare; uniform float uSeed; varying vec2 vUv;
@@ -686,44 +646,23 @@ export class Marine {
     spots.forEach((s, k) => {
       const L = MARINE.whaleLength * (0.9 + this.rng.next() * 0.2);
       const root = new THREE.Group();
-      // Each whale gets its own material so its body can bend independently.
-      const bend = { uPhase: { value: 0 }, uAmp: { value: 0 }, uTurn: { value: 0 } };
-      const bodyMat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0 }), 0.3);
-      const baseCompile = bodyMat.onBeforeCompile;
-      bodyMat.onBeforeCompile = (shader, r) => {
-        baseCompile.call(bodyMat, shader, r);
-        Object.assign(shader.uniforms, bend);
-        shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', '#include <common>\nuniform float uPhase; uniform float uAmp; uniform float uTurn; varying float vWy;')
-          .replace('#include <begin_vertex>', `#include <begin_vertex>
-            {
-              // Travelling wave: still at the head, strongest at the tail (flukes drive the swim).
-              // Whole-body undulation: a gentle nod at the head, building to big strokes at the tail stock,
-              // with the head end slightly out of phase so the body flexes like a real whale.
-              float zz = transformed.z;
-              float wgt = smoothstep(0.35, -0.5, zz);
-              transformed.y += uAmp * (wgt * wgt * 1.1 + 0.1) * sin(uPhase - zz * 4.2);
-              // Turning curves the whole body sideways (head and tail both bend into the turn).
-              transformed.x += uTurn * (zz * zz * 1.6 - 0.08);
-            }`);
-      };
-      underwater(bodyMat, 'whale-body');
-      const body = new THREE.Mesh(bodyGeo, bodyMat);
-      body.castShadow = true;
+      const bodyMat = underwater(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0 }), 0.3), 'whale-body');
+      const { body, spine } = rigWhale(bodyGeo, bodyMat);
       const finL = new THREE.Group(), finR = new THREE.Group();
       const fl = new THREE.Mesh(finGeo, finMat), fr = new THREE.Mesh(finGeo, finMat);
       fl.castShadow = fr.castShadow = true;
       fl.scale.x = -1; // mirrored for the left side
       finL.add(fl);
       finR.add(fr);
-      finL.position.set(-0.09, -0.04, 0.2);
-      finR.position.set(0.09, -0.04, 0.2);
+      finL.position.set(-0.09, -0.04, -0.05);
+      finR.position.set(0.09, -0.04, -0.05);
       const fluke = new THREE.Group();
       const fm = new THREE.Mesh(flukeGeo, finMat);
       fm.castShadow = true;
       fluke.add(fm);
-      fluke.position.set(0, 0, -0.5);
-      root.add(body, finL, finR, fluke);
+      spine[2].add(finL, finR);
+      spine[8].add(fluke);
+      root.add(body);
       root.scale.setScalar(L);
       this.group.add(root);
       const mk = (geo: THREE.BufferGeometry, m: THREE.Material) => {
@@ -755,7 +694,7 @@ export class Marine {
         route: { x: s.x, z: s.z, r: 10 + this.rng.next() * 10, a, dir: this.rng.chance(0.5) ? 1 : -1 },
         state: 'swim', t: 0, nextBreach: MARINE.firstBreach + k * 9 + this.rng.next() * 10, nextSpout: 3 + this.rng.next() * 8, nextPrint: 1 + this.rng.next() * 3,
         bx: 0, bz: 0, fallYaw: 0, length: L, flags: new Set(), ring, glow, patch, foam,
-        bend, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
+        spine, swimPhase: 0, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
       });
     });
 
@@ -850,7 +789,7 @@ export class Marine {
     if (w.state !== 'swim') return;
     w.state = 'dive';
     w.t = 0;
-    // Fall roughly sideways to the direction of travel, like the clip.
+    // Fall roughly sideways to the direction of travel.
     w.fallYaw = w.heading + (this.rng.chance(0.5) ? 1 : -1) * (Math.PI / 2) + this.rng.range(-0.4, 0.4);
     w.flags.clear();
   }
@@ -882,7 +821,7 @@ export class Marine {
     for (let k = 0; k < Math.round(90 * (h / 2)); k++) {
       const a = this.rng.next() * Math.PI * 2;
       const out = (1.2 + this.rng.next() * 2.2) * (r1 / 3);
-      this.spray.spawn(x + Math.cos(a) * r0, h * (0.3 + this.rng.next() * 0.6), z + Math.sin(a) * r0, Math.cos(a) * out, 2 + this.rng.next() * 4 * (h / 2), Math.sin(a) * out, 0.9 + this.rng.next() * 0.9, 0.04 + this.rng.next() * 0.1, 0.02);
+      this.spray.spawn(x + Math.cos(a) * r0, 0.08, z + Math.sin(a) * r0, Math.cos(a) * out, 2 + this.rng.next() * 4 * (h / 2), Math.sin(a) * out, 0.9 + this.rng.next() * 0.9, 0.04 + this.rng.next() * 0.1, 0.02);
     }
   }
 
@@ -895,7 +834,8 @@ export class Marine {
       c.t += dt;
       const f = Math.min(1, c.t / c.life);
       const r = c.r0 + (c.r1 - c.r0) * (1 - (1 - f) * (1 - f));
-      const rise = Math.sin(Math.min(1, f / 0.85) * Math.PI);
+      // A fast impact plume followed by a slower collapse.
+      const rise = f < 0.18 ? Math.sin(f / 0.18 * Math.PI / 2) : Math.pow(Math.max(0, 1 - (f - 0.18) / 0.82), 1.4);
       c.mesh.visible = true;
       c.mesh.scale.set(r, Math.max(0.01, c.h * Math.pow(rise, 0.8)), r);
       c.mat.uniforms.uA.value = Math.pow(1 - f, 1.2) * 0.9;
@@ -937,7 +877,7 @@ export class Marine {
     }
     this.updateCrowns(dt);
     this.spray.update(dt, 9);
-    this.mist.update(dt, -0.25);
+    this.mist.update(dt, 0.45);
   }
 
 /** Apply a pose (tilt from vertical toward yaw, spin about the body axis) to the whale root. */
@@ -965,18 +905,12 @@ export class Marine {
 
   /** Swim animation: body wave, fluke following the tail, slow fin strokes. */
   private animateBody(w: Whale, dt: number, strength: number): void {
-    const B = w.bend;
-    B.uPhase.value += dt * (1.6 + strength * 0.8);
-    B.uAmp.value += (0.055 * strength - B.uAmp.value) * Math.min(1, dt * 2);
-    B.uTurn.value += (-w.turnRate * 0.45 - B.uTurn.value) * Math.min(1, dt * 2);
-    // Fluke rides the tail of the wave: position and slope at z = -0.5 (matches the body shader).
-    const ph = B.uPhase.value;
-    const amp = B.uAmp.value * 1.2;
-    const dy = amp * Math.sin(ph + 2.1);
-    const slope = -4.2 * amp * Math.cos(ph + 2.1);
-    w.fluke.position.set(B.uTurn.value * 0.32, dy, -0.5);
-    // The fluke lags the stock a little, like a flexible tail.
-    w.fluke.rotation.set(Math.atan(slope) * 1.5 + Math.sin(ph + 1.2) * 0.12 * strength, B.uTurn.value * 1.3, 0);
+    w.swimPhase += dt * (1.6 + strength * 0.8);
+    const ph = w.swimPhase;
+    const arch = w.state === 'breach' ? Math.sin(Math.min(1, w.t / IMPACT_T) * Math.PI) : 0;
+    poseWhaleSpine(w.spine, ph, strength, -w.turnRate, arch);
+    // Fluke inherits the last spine joint, so it never separates from the tail stock.
+    w.fluke.rotation.set(Math.sin(ph - 4.5) * 0.22 * strength, 0, 0);
     // Flippers swept back and held close along the flanks, with slow small strokes and steering.
     const st = Math.sin(ph * 0.5);
     const steer = THREE.MathUtils.clamp(w.turnRate * 0.8, -0.3, 0.3);
@@ -1061,8 +995,8 @@ export class Marine {
           P.yaw = w.heading + dy * u * u * (3 - 2 * u);
         }
       } else {
-        P.pitch = 186 + (90 - 186) * e;
-        P.roll = 228 * (1 - e);
+        P.pitch = 180 + (90 - 180) * e;
+        P.roll = 450 - 90 * e;
         P.y += (-MARINE.swimDepth - P.y) * Math.min(1, dt * 1.2);
         w.x += Math.sin(P.yaw) * MARINE.whaleSpeed * e * dt;
         w.z += Math.cos(P.yaw) * MARINE.whaleSpeed * e * dt;
@@ -1089,7 +1023,7 @@ export class Marine {
     // ---------------- Breach ----------------
     w.t += dt;
     const t = w.t;
-    const k = sampleTrack(t);
+    const k = sampleBreach(t);
     const fy = w.fallYaw;
     const dirX = Math.sin(fy), dirZ = Math.cos(fy);
     const cx = w.bx + dirX * k.h * L, cz = w.bz + dirZ * k.h * L;
@@ -1100,7 +1034,7 @@ export class Marine {
     P.roll = k.roll;
     P.y = cy;
     const q = this.applyPose(w, cx, cy, cz);
-    this.animateBody(w, dt, t < 1 ? 1.5 : 0.5);
+    this.animateBody(w, dt, t < 1.1 ? 2.2 : t < IMPACT_T ? 1.1 : 1.7);
     // Fins sweep out wide; the fluke flexes.
     w.finL.rotation.set(0, 0.3 - k.fin * 0.3, -k.fin + Math.sin(t * 5) * 0.08);
     w.finR.rotation.set(0, -0.3 + k.fin * 0.3, k.fin - Math.sin(t * 5) * 0.08);
@@ -1124,7 +1058,7 @@ export class Marine {
     // Bright foam ring hugging the body at the waterline while it rises and hangs.
     const axis = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
     let ringOn = false;
-    if (t > 0.95 && t < IMPACT_T && Math.abs(axis.y) > 0.2) {
+    if (t > 0.65 && t < IMPACT_T && Math.abs(axis.y) > 0.2) {
       const s = -cy / axis.y;
       if (Math.abs(s) < 0.5 * L) {
         ringOn = true;
@@ -1145,18 +1079,19 @@ export class Marine {
         fn();
       }
     };
-    once('surface', 1.0, () => {
+    once('surface', 0.65, () => {
       this.sfx('splash', w.bx, w.bz);
       for (const [r1, life, delay] of [[L * 0.45, 1.6, 0], [L * 0.7, 2.2, 0.35], [L * 0.95, 2.6, 0.8], [L * 1.1, 2.8, 1.3]]) this.ring(w.bx, w.bz, 0.3, r1, life, delay);
       this.burst(w.bx, w.bz, 90, 2.4, 0.6);
       this.crown(w.bx, w.bz, L * 0.12, L * 0.3, L * 0.16, 1.4);
     });
     once('impact', IMPACT_T, () => {
-      const ix = w.bx + dirX * L * 0.55, iz = w.bz + dirZ * L * 0.55;
+      const impact = sampleBreach(IMPACT_T);
+      const ix = w.bx + dirX * L * impact.h, iz = w.bz + dirZ * L * impact.h;
       this.sfx('bigsplash', ix, iz);
-      this.burst(ix, iz, 480, 5.8, L * 0.35);
-      this.crown(ix, iz, L * 0.22, L * 0.72, L * 0.62, 2.1);
-      this.crown(ix, iz, L * 0.14, L * 0.42, L * 0.36, 1.5);
+      this.burst(ix, iz, 620, 8.2, L * 0.42);
+      this.crown(ix, iz, L * 0.24, L * 0.9, L * 0.8, 2.0);
+      this.crown(ix, iz, L * 0.18, L * 0.55, L * 0.48, 1.4);
       for (let m = 0; m < 60; m++) {
         const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.4;
         this.mist.spawn(ix + Math.cos(a) * r, this.rng.next() * L * 0.25, iz + Math.sin(a) * r, Math.cos(a) * 1.6, 1.5 + this.rng.next() * 2.5, Math.sin(a) * 1.6, 1.2 + this.rng.next() * 0.8, 1.4 + this.rng.next() * 1.2, 1.2);
@@ -1166,13 +1101,14 @@ export class Marine {
         // Mist hangs in the air and drifts downwind before fading.
         this.mist.spawn(ix + Math.cos(a) * r, 0.2 + this.rng.next() * L * 0.4, iz + Math.sin(a) * r, Math.cos(a) * 0.7 + 0.35, 0.2 + this.rng.next() * 0.8, Math.sin(a) * 0.7 + 0.2, 2.4 + this.rng.next() * 2.2, 0.9 + this.rng.next() * 1.1, 0.8);
       }
-      for (const [r1, life, delay] of [[L * 0.8, 1.6, 0], [L * 1.2, 2.2, 0.25], [L * 1.6, 2.8, 0.6]]) this.ring(ix, iz, L * 0.3, r1, life, delay);
+      for (const [r1, life, delay] of [[L * 1.0, 2.2, 0], [L * 1.5, 3.2, 0.25], [L * 2.0, 4.2, 0.6]]) this.ring(ix, iz, L * 0.3, r1, life, delay);
       w.foam.visible = true;
       w.foam.position.set(ix, 0.03, iz);
       w.foam.userData = { t: 0, x: ix, z: iz };
     });
     once('fluke', FLUKE_T, () => {
-      const tail = new THREE.Vector3(0, 0, -0.5 * L).applyQuaternion(q).add(new THREE.Vector3(cx, cy, cz));
+      w.root.updateMatrixWorld(true);
+      const tail = w.fluke.getWorldPosition(new THREE.Vector3());
       this.sfx('splash', tail.x, tail.z);
       this.burst(tail.x, tail.z, 110, 2.8, 0.45);
       this.crown(tail.x, tail.z, L * 0.08, L * 0.24, L * 0.16, 1.2);
@@ -1188,14 +1124,14 @@ export class Marine {
     }
   }
 
-  /** Swirling foam disc left by the impact: spreads, spins and fades (clip 3.5 – 5.2 s). */
+  /** Swirling foam left by the impact spreads and fades over seven seconds. */
   private fadeFoam(w: Whale, dt: number): void {
     const u = w.foam.userData as { t?: number };
     if (!w.foam.visible || u.t === undefined) return;
     u.t += dt;
-    const f = u.t / 5.5;
+    const f = u.t / 7;
     const L = w.length;
-    const r = L * (0.35 + 0.55 * (1 - Math.pow(1 - Math.min(1, f), 2)));
+    const r = L * (0.45 + 0.8 * (1 - Math.pow(1 - Math.min(1, f), 2)));
     w.foam.scale.set(r, 1, r);
     w.foam.rotation.y += dt * 0.5 * (1 - f);
     (w.foam.material as THREE.MeshBasicMaterial).opacity = Math.max(0, f < 0.15 ? f / 0.15 : 1 - (f - 0.15) / 0.85) * 0.95;
