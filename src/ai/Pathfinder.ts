@@ -88,6 +88,7 @@ export class Pathfinder {
   walkable(i: number, allowBuilding = -1): boolean {
     const w = this.world;
     if (w.layer[i] < 1 && !w.bridge[i]) return false;
+    if (w.blocked(i)) return false;
     const occ = w.occ[i];
     if (occ !== 0 && occ - 1 !== allowBuilding && !w.passable(occ - 1)) return false;
     return true;
@@ -210,6 +211,20 @@ export class Pathfinder {
     const ax = a % N, az = (a / N) | 0, bx = b % N, bz = (b / N) | 0;
     const steps = Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(bz - az)) * 2);
     if (steps > 24) return false;
+    // Rocks and the waterfall: keep a little clearance, so a straightened line never clips the
+    // corner of a blocked cell.
+    const len = Math.hypot(bx - ax, bz - az);
+    const fine = Math.ceil(len * 5);
+    for (let s = 1; s < fine; s++) {
+      const t = s / fine;
+      const gx = ax + (bx - ax) * t + 0.5, gz = az + (bz - az) * t + 0.5;
+      for (const [ox, oz] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]) {
+        const cx = Math.floor(gx + ox), cz = Math.floor(gz + oz);
+        if (cx < 0 || cz < 0 || cx >= N || cz >= N) continue;
+        const i = cz * N + cx;
+        if (i !== a && i !== b && w.blocked(i)) return false;
+      }
+    }
     let prev = a;
     for (let s = 1; s <= steps; s++) {
       const t = s / steps;
