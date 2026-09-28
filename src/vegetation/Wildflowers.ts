@@ -193,6 +193,20 @@ export class Wildflowers {
     return this.chunks.reduce((s, c) => s + c.list.length, 0);
   }
 
+  /** Every flowering plant (not the ferns and leafy plants): where it is and how high its blooms stand. */
+  blooms(): { x: number; z: number; top: number }[] {
+    const out: { x: number; z: number; top: number }[] = [];
+    const fern = KINDS.findIndex((k) => k.k === 'fern'), tropical = KINDS.findIndex((k) => k.k === 'tropical');
+    for (const c of this.chunks) {
+      for (const b of c.list) {
+        const k = b.kind >> 1;
+        if (k === fern || k === tropical) continue;
+        out.push({ x: b.x, z: b.z, top: 0.16 * b.s });
+      }
+    }
+    return out;
+  }
+
   /** Rebuild the chunks whose visible flowers changed (buildings, fields, paths, sculpting). */
   refresh(): void {
     const w = this.world;
