@@ -178,7 +178,7 @@ export function applyRest(g: Game, d: SaveData): void {
     idMap.set(b.id, nb.id);
     if (b.key === 'jetty' && b.boats > 0) g.boats?.restore(nb, b.boats);
     if (b.key === 'tradedock') for (let k = 0; k < (b.boats ?? 0); k++) g.trade?.launch(nb);
-    if (b.key === 'farm' || b.key === 'butcher') g.wildlife?.registerPen(nb);
+    if (b.key === 'farm' || b.key === 'butcher' || b.key === 'pigpen' || b.key === 'chickenpen') g.wildlife?.registerPen(nb);
     if (b.key === 'kennel') {
       nb.breedT = b.breed ?? 0;
       nb.breedCool = b.cool ?? 0;
