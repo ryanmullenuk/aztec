@@ -157,6 +157,22 @@ export class BuildingSystem {
   private ghostRot = -1;
   private ghostMat = new THREE.MeshBasicMaterial({ color: 0x9df08a, transparent: true, opacity: 0.45, depthWrite: false });
   private ringGeo = new THREE.RingGeometry(0.5, 0.56, 4, 1).rotateX(-Math.PI / 2);
+  /** Ghost squares around the footprint: the walkway ring, and a hut's room to grow into a Home. */
+  private spaceMesh = (() => {
+    const geo = new THREE.PlaneGeometry(0.86, 0.86).rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.42, depthWrite: false });
+    const m = new THREE.InstancedMesh(geo, mat, 128);
+    m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(128 * 3), 3);
+    m.frustumCulled = false;
+    m.renderOrder = 19;
+    m.count = 0;
+    m.visible = false;
+    return m;
+  })();
+  private spaceCol = new THREE.Color();
+  private spaceM4 = new THREE.Matrix4();
+  /** God mode's "instant build": new buildings and upgrades finish the moment they are placed. */
+  instantBuild: () => boolean = () => false;
   private flameGeo = models.flameGeometry();
   private lights: THREE.PointLight[] = [];
   private lightTimer = 0;
@@ -175,6 +191,7 @@ export class BuildingSystem {
 
   constructor(private world: World, private veg: Vegetation, private eco: Economy, private terrain: Terrain, private scene: THREE.Scene) {
     this.group.add(this.smoke.points);
+    this.scene.add(this.spaceMesh);
     for (let i = 0; i < 8; i++) {
       const l = new THREE.PointLight(0xffa04a, 0, 8, 1.6);
       l.castShadow = false;
@@ -259,16 +276,42 @@ export class BuildingSystem {
    * as free and it costs nothing.
    */
   canPlace(key: BuildingKey, cx: number, cz: number, rot: number, moving?: Building): { ok: boolean; reason: string } {
-    if (!moving) return this.siteCheck(key, cx, cz, rot, false);
+    if (!moving) return this.siteCheck(key, cx, cz, rot);
     const cells: number[] = [];
     for (let z = moving.cz; z < moving.cz + moving.d; z++) for (let x = moving.cx; x < moving.cx + moving.w; x++) cells.push(this.world.idx(x, z));
     for (const i of cells) this.world.occ[i] = 0;
-    const res = this.siteCheck(key, cx, cz, rot, true);
+    const res = this.siteCheck(key, cx, cz, rot, moving);
     for (const i of cells) this.world.occ[i] = moving.id + 1;
     return res;
   }
 
-  private siteCheck(key: BuildingKey, cx: number, cz: number, rot: number, moving: boolean): { ok: boolean; reason: string } {
+  /**
+   * Torches, farms and docks need no walkway ring: people walk past or through them (and docks sit
+   * on the shoreline). Everything else keeps a one-square path clear all round.
+   */
+  private static open(key: BuildingKey): boolean {
+    return key === 'torch' || isFarm(key) || key === 'jetty' || key === 'tradedock';
+  }
+
+  /**
+   * The area a building keeps for itself: its footprint, or for a hut the 3×3 Home it grows into
+   * (as [x0, z0, x1, z1), exclusive max), plus the walkway margin kept clear around that.
+   */
+  private space(key: BuildingKey, cx: number, cz: number, w: number, d: number): { x0: number; z0: number; x1: number; z1: number; m: number } {
+    const big = key === 'hut' ? BUILDINGS.home.size[0] : 0;
+    return { x0: cx, z0: cz, x1: cx + Math.max(w, big), z1: cz + Math.max(d, big), m: BuildingSystem.open(key) ? 0 : 1 };
+  }
+
+  /** Is (x, z) a cell a hut at (cx, cz) would need for its Home but can't have? */
+  private growBlocked(x: number, z: number, layer: number): boolean {
+    const W = this.world;
+    if (!W.inBounds(x, z)) return true;
+    const i = W.idx(x, z);
+    return !!W.occ[i] || W.layer[i] !== layer || !Number.isNaN(W.riverY[i]);
+  }
+
+  private siteCheck(key: BuildingKey, cx: number, cz: number, rot: number, movingB?: Building): { ok: boolean; reason: string } {
+    const moving = !!movingB;
     const def = BUILDINGS[key];
     if (key === 'campfire' && this.hasCampfire && !moving) return { ok: false, reason: 'The village already has its fire' };
     if (key !== 'campfire' && !this.hasCampfire) return { ok: false, reason: 'Found your village first: place the campfire' };
@@ -287,6 +330,23 @@ export class BuildingSystem {
     }
     if ((key === 'jetty' || key === 'tradedock') && this.jettyWater(cx, cz, rot) < JETTY.length - 2) return { ok: false, reason: `A ${key === 'jetty' ? 'jetty' : 'trade dock'} must face open water at the shore` };
     if (key === 'chinampa' && this.waterAround(cx, cz, w, d) < 4) return { ok: false, reason: 'A chinampa must be built right beside water (river, pool or shore)' };
+    // Room to grow and walk: a hut keeps the flat 3×3 it will become a Home on, and buildings keep
+    // a clear square all round so islanders and animals can always get past (and upgrades fit).
+    const sp = this.space(key, cx, cz, w, d);
+    const layer = this.world.layer[this.world.idx(cx, cz)];
+    for (let z = sp.z0; z < sp.z1; z++) for (let x = sp.x0; x < sp.x1; x++) {
+      if (x < cx + w && z < cz + d) continue;
+      if (this.growBlocked(x, z, layer)) return { ok: false, reason: 'A hut needs a flat 3×3 area to grow into a Home later' };
+    }
+    const nOpen = sp.m === 0;
+    for (const e of this.list) {
+      if (e === movingB) continue;
+      const es = this.space(e.key, e.cx, e.cz, e.w, e.d);
+      const gap = nOpen || es.m === 0 ? 0 : 1;
+      if (sp.x0 - gap < es.x1 && sp.x1 + gap > es.x0 && sp.z0 - gap < es.z1 && sp.z1 + gap > es.z0) {
+        return { ok: false, reason: gap ? 'Leave a clear path (one square) around buildings' : `Leave room for the ${e.label.toLowerCase()} to grow` };
+      }
+    }
     if (!moving && !this.eco.canAfford(def.cost)) return { ok: false, reason: 'Not enough resources' };
     return { ok: true, reason: '' };
   }
@@ -387,7 +447,7 @@ export class BuildingSystem {
     this.buildVisuals(b);
     this.list.push(b);
     this.group.add(b.group);
-    if (instant) this.finish(b);
+    if (instant || this.instantBuild()) this.finish(b);
     return b;
   }
 
@@ -427,6 +487,7 @@ export class BuildingSystem {
       b.upgrading = true;
       b.progress = 0;
       b.scaffold.visible = true;
+      if (this.instantBuild()) this.finish(b);
       return b;
     }
     const residents = b.residents.slice();
@@ -709,6 +770,7 @@ export class BuildingSystem {
       if (this.ghost) this.scene.remove(this.ghost);
       this.ghost = null;
       this.ghostKey = null;
+      this.spaceMesh.visible = false;
       return { ok: false, reason: '' };
     }
     if (key === 'jetty' || key === 'tradedock') rot = this.jettyRot(cx, cz);
@@ -739,7 +801,45 @@ export class BuildingSystem {
     this.ghost!.position.set(cx + w / 2 - this.world.half, y + 0.02, cz + d / 2 - this.world.half);
     this.ghost!.rotation.y = (rot * Math.PI) / 2;
     this.ghostMat.color.setHex(res.ok ? 0x9df08a : 0xff7a5a);
+    this.showSpace(key, cx, cz, w, d, moving);
     return res;
+  }
+
+  /**
+   * Lay the ghost squares: gold where a hut will grow into a Home, pale where the walkway runs,
+   * red on any square that is already taken.
+   */
+  private showSpace(key: BuildingKey, cx: number, cz: number, w: number, d: number, moving?: Building): void {
+    const W = this.world, m = this.spaceMesh;
+    const sp = this.space(key, cx, cz, w, d);
+    const layer = W.inBounds(cx, cz) ? W.layer[W.idx(cx, cz)] : 1;
+    let n = 0;
+    for (let z = sp.z0 - sp.m; z < sp.z1 + sp.m; z++) for (let x = sp.x0 - sp.m; x < sp.x1 + sp.m; x++) {
+      if (x >= cx && x < cx + w && z >= cz && z < cz + d) continue;
+      if (!W.inBounds(x, z) || n >= 128) continue;
+      const i = W.idx(x, z);
+      if (W.layer[i] <= 0) continue; // open water: nothing to draw
+      const grow = x < sp.x1 && z < sp.z1 && x >= sp.x0 && z >= sp.z0;
+      const o = W.occ[i];
+      const other = o && (!moving || o - 1 !== moving.id) ? this.byId(o - 1) : undefined;
+      let bad = grow ? !!other || W.layer[i] !== layer || !Number.isNaN(W.riverY[i]) : !!other && !BuildingSystem.open(other.key);
+      if (!grow && !bad) {
+        // A walkway square may not cut into a neighbouring hut's room to grow either.
+        for (const e of this.list) {
+          if (e === moving || e.key !== 'hut') continue;
+          if (x >= e.cx && x < e.cx + 3 && z >= e.cz && z < e.cz + 3) bad = true;
+        }
+      }
+      const wx = x + 0.5 - W.half, wz = z + 0.5 - W.half;
+      this.spaceM4.makeTranslation(wx, W.heightAt(wx, wz) + 0.06, wz);
+      m.setMatrixAt(n, this.spaceM4);
+      m.setColorAt(n, this.spaceCol.setHex(bad ? 0xff6a4a : grow ? 0xf2c14e : 0xdff7e8));
+      n++;
+    }
+    m.count = n;
+    m.visible = n > 0;
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
 
   get ghostRotation(): number {
