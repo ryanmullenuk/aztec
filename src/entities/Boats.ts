@@ -11,6 +11,7 @@ import { Particles } from '../render/Particles';
 export { Particles };
 import { World } from '../world/World';
 import { Islander } from './Islander';
+import { CanoePassenger } from './CanoePassenger';
 import { School, Wildlife } from './Wildlife';
 
 interface Boat {
@@ -104,7 +105,7 @@ function netTexture(): THREE.Texture {
 /** A canoe bringing new settlers across the sea to the island. */
 interface Arrival {
   mesh: THREE.Group;
-  rowers: THREE.Mesh[];
+  rowers: CanoePassenger[];
   path: { x: number; z: number }[];
   idx: number;
   x: number;
@@ -313,9 +314,9 @@ export class Boats {
     const hull = new THREE.Mesh(this.geos[0], this.hullMat);
     hull.castShadow = true;
     mesh.add(hull);
-    const rowers: THREE.Mesh[] = [];
-    genders.forEach((_, k) => {
-      const r = new THREE.Mesh(this.rowerGeo, stylisedMaterial());
+    const rowers: CanoePassenger[] = [];
+    genders.forEach((gender, k) => {
+      const r = new CanoePassenger(gender, (0.62 / 1.8) / (BOAT_SCALE * 1.1), this.rowerGeo);
       r.castShadow = true;
       r.position.z = 0.35 - k * (0.7 / Math.max(1, genders.length - 1));
       mesh.add(r);
@@ -342,7 +343,7 @@ export class Boats {
             // Landed: the settlers step ashore; the canoe is pulled up on the sand.
             a.state = 'beached';
             a.timer = 120;
-            for (const r of a.rowers) r.visible = false;
+            for (const r of a.rowers) r.dispose();
             const people = a.genders.map((g, k) => this.colony.spawn(g, a.land.x + (k - (a.genders.length - 1) / 2) * 0.5, a.land.z));
             this.sfx('splash', a.x, a.z);
             a.onLand?.(people);
@@ -370,7 +371,7 @@ export class Boats {
       const yF = this.water.waveHeight(a.x + Math.sin(a.heading) * 0.6, a.z + Math.cos(a.heading) * 0.6, time);
       a.mesh.position.set(a.x, (a.state === 'beached' ? 0.06 : 0.03 + SEA_SURFACE) + (a.state === 'sail' ? y * 0.12 : 0), a.z);
       a.mesh.rotation.set(a.state === 'sail' ? (y - yF) * 0.8 : -0.05, a.heading, 0, 'YXZ');
-      a.rowers.forEach((r, k) => (r.rotation.z = Math.sin(a.phase + k * 0.7) * 0.25 * (k % 2 ? -1 : 1)));
+      a.rowers.forEach((r, k) => (r.rotation.z = Math.sin(a.phase + k * 0.7) * 0.04 * (k % 2 ? -1 : 1)));
     }
   }
 
