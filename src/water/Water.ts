@@ -897,6 +897,22 @@ export class Water {
       const w = big ? rng.range(0.9, 1.3) : rng.range(0.45, 0.7);
       rock(a, l, g0 - 0.22, w, big ? rng.range(0.6, 0.95) : rng.range(0.3, 0.45), w * rng.range(0.8, 1.1), rng.next() * 3, 0.5);
     }
+    // The front of the pool, where it spills: boulders either side of the notch, more along the
+    // rim, and a few low stones in the spill itself with the water running between them.
+    for (const [deg, sc] of [[-58, 0.9], [-40, 1.0], [-24, 1.25], [24, 1.2], [41, 1.0], [60, 0.85]] as const) {
+      const ang = (deg * Math.PI) / 180;
+      const rr = R * rng.range(0.98, 1.1);
+      const a = Math.sin(ang) * rr, l = f.poolR + 1.2 + Math.cos(ang) * rr;
+      const [x, z] = at(a, l);
+      const g0 = this.world.heightAt(x, z);
+      const w = sc * rng.range(0.85, 1.15);
+      rock(a, l, g0 - 0.25, w, sc * rng.range(0.55, 0.85), w * rng.range(0.8, 1.1), rng.next() * 3, 0.55);
+    }
+    for (const [a, dl, w] of [[-0.55, 0.1, 0.42], [0.4, 0.25, 0.36], [0.05, 0.55, 0.3]] as const) {
+      const l = f.poolR + 1.2 + R + dl;
+      const [x, z] = at(a, l);
+      rock(a, l, Math.min(this.world.heightAt(x, z), f.poolY) - 0.18, w, 0.3, w * 0.9, rng.next() * 3, 0.3);
+    }
     void pc;
     // Boulders along the dangerous edges: the cliff top either side of the drop, and the front of
     // the cliff between the columns, so the gorge reads as enclosed without looking fenced.
