@@ -20,7 +20,7 @@ export const FX = {
  * Trees that stand between the camera and what it's looking at dither to semi-transparent,
  * but only when zoomed in (fully solid when zoomed out).
  */
-function patchSeeThrough(mat: THREE.MeshStandardMaterial, key: string): THREE.MeshStandardMaterial {
+function patchSeeThrough(mat: THREE.MeshStandardMaterial, key: string, amount = 0.62): THREE.MeshStandardMaterial {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
     prev.call(mat, shader, r);
@@ -59,12 +59,22 @@ function patchSeeThrough(mat: THREE.MeshStandardMaterial, key: string): THREE.Me
           float s = dot(ap, dir);
           float r = length(ap - dir * s);
           float inTube = (1.0 - smoothstep(2.6, 4.4, r)) * step(0.0, s) * (1.0 - smoothstep(L - 0.5, L + 1.5, s));
-          if (seeBayer(gl_FragCoord.xy) < inTube * uCut * 0.62) discard;
+          if (seeBayer(gl_FragCoord.xy) < inTube * uCut * ${amount.toFixed(2)}) discard;
         }`
       );
   };
   mat.customProgramCacheKey = () => key;
   return mat;
+}
+
+let canopy: THREE.MeshStandardMaterial | null = null;
+/**
+ * Canopy roofs (the Great Hall): like trees, they dither away where they stand between the camera
+ * and what it looks at when zoomed in, but more strongly, so the people under them show.
+ */
+export function canopyMaterial(): THREE.MeshStandardMaterial {
+  if (!canopy) canopy = patchSeeThrough(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide })), 'canopy', 0.88);
+  return canopy;
 }
 
 let tree: THREE.MeshStandardMaterial | null = null;
