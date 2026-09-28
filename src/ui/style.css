@@ -82,15 +82,16 @@ html, body {
 .splash-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 0%; }
 /* Tall phones: fit the full width so the whole title shows (below the status bar), and let the
    bottom of the art fade into the blurred copy behind it. */
-@media (max-aspect-ratio: 941/1672) {
+@media (max-aspect-ratio: 853/1844) {
   .splash-art {
     top: var(--safe-t); bottom: auto; height: auto; object-fit: fill;
     -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
     mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
   }
 }
-/* Very wide, short screens (phones on their side): fit the height so the title isn't cropped. */
-@media (min-aspect-ratio: 17/9) {
+/* Wider than a portrait tablet (desktops, phones on their side): show the whole tall poster,
+   fitted to the height, over its blurred copy. */
+@media (min-aspect-ratio: 3/4) {
   .splash-art { left: 50%; right: auto; width: auto; transform: translateX(-50%); object-fit: contain; box-shadow: 0 0 60px rgba(0, 0, 0, 0.35); }
 }
 .splash-ui { position: absolute; left: 0; right: 0; bottom: calc(6vh + var(--safe-b)); display: flex; flex-direction: column; align-items: center; gap: 14px; }
