@@ -14,10 +14,11 @@ import { FX } from './render/materials';
 import { Input } from './ui/Input';
 import { UI } from './ui/UI';
 import { PAINT_TOOLS, TOOLS, ToolId } from './ui/tools';
-import { Vegetation } from './vegetation/Vegetation';
+import { PlantState, Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { PeakClouds } from './render/PeakClouds';
 import { DriftClouds } from './render/DriftClouds';
+import { CoastRocks } from './render/CoastRocks';
 import { Breeze } from './render/Breeze';
 import { Economy } from './economy/Economy';
 import { BuildingSystem, Building } from './buildings/Buildings';
@@ -116,6 +117,8 @@ export class Game {
   clouds: PeakClouds;
   /** High clouds passing below the camera when zoomed out. */
   driftClouds: DriftClouds;
+  /** Rock clusters along the rocky coasts, with waves breaking on them. */
+  coastRocks: CoastRocks;
   breeze: Breeze;
   buildings: BuildingSystem;
   pathfinder: Pathfinder;
@@ -221,6 +224,9 @@ export class Game {
     this.scene.add(this.driftClouds.group);
     this.breeze = new Breeze(this.world, opts.seed);
     this.scene.add(this.breeze.group);
+    // Rocky coasts first: they stamp foam into the sea the water is built from.
+    this.coastRocks = new CoastRocks(this.world, opts.seed, this.veg.plants.filter((p) => p.kind === 'searock' && p.state === PlantState.Alive).map((p) => ({ x: p.x, z: p.z })));
+    this.scene.add(this.coastRocks.group);
     this.water = new Water(this.world);
     this.bridges = new Bridges(this.world);
     this.scene.add(this.bridges.mesh);
@@ -1386,6 +1392,7 @@ export class Game {
     ws.uDay.value = 0.25 + 0.75 * ls.day;
     ws.uSkyCol.value.copy(this.lighting.hemi.color);
     this.water.update(realDt, t);
+    this.coastRocks.update(realDt, t, this.water);
     this.terrain.update(t);
 
     FX.uTime.value = t;
