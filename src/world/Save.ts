@@ -113,7 +113,7 @@ export function serialize(g: Game): SaveData {
       ...(b.key === 'kennel' ? { breed: b.breedT, cool: b.breedCool, guard: b.dogRole === 'guard' ? 1 : 0 } : {}),
     })),
     islanders: g.colony.list.map((i) => ({
-      id: i.id, name: i.name, gender: i.gender, child: i.child, age: i.age, x: i.x, z: i.z, hunger: i.hunger, rest: i.rest, happy: i.happy,
+      id: i.id, name: i.name, gender: i.gender, child: i.child, age: i.age, ...g.colony.savePos(i), hunger: i.hunger, rest: i.rest, happy: i.happy,
       role: i.role, manualRole: i.manualRole, workplace: i.workplace, home: i.home, skin: i.skin, cloth: i.cloth, cloth2: i.cloth2,
       headdress: i.headdress, jewel: i.jewel, warrior: i.warrior, heading: i.heading,
     })),
