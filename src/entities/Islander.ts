@@ -32,7 +32,8 @@ export type Anim =
   | 'pray'
   | 'sleep'
   | 'eat'
-  | 'wave';
+  | 'wave'
+  | 'sit';
 
 export type Tool = 'none' | 'axe' | 'pick' | 'hoe' | 'spear' | 'hammer';
 
@@ -40,7 +41,7 @@ export type CarryKind = ResourceKey | 'log' | 'chicken';
 
 /** A task is a small state machine the AI steps through. */
 export interface Task {
-  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire' | 'flee';
+  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire' | 'flee' | 'hall';
   stage: number;
   /** Plant id, building id or islander id depending on kind. */
   target: number;
@@ -49,10 +50,14 @@ export interface Task {
   z: number;
   /** Extra data (e.g. resource type). */
   res?: ResourceKey;
-  /** Sub-phase for multi-step tasks (capture: 0 chase, 1 bring home). */
+  /** Sub-phase for multi-step tasks (capture: 0 chase, 1 bring home; hall: 0 resting, 1 sheltering). */
   phase?: number;
   /** Building the task delivers to (capture: the pen's building). */
   building?: number;
+  /** Great Hall: the seat or standing place taken, and the walk up onto (or down off) the platform. */
+  slot?: number;
+  route?: { x: number; z: number }[];
+  step?: number;
 }
 
 export interface Islander {
@@ -100,6 +105,10 @@ export interface Islander {
   /** Seconds left limping from a wild-animal attack. */
   injured: number;
   hidden: boolean;
+  /** On the Great Hall's platform: height of the floor they stand on (else they follow the ground). */
+  floorY: number | null;
+  /** Sheltering in the Great Hall: jaguars leave them be. */
+  safe: boolean;
   think: number;
   lastMeal?: ResourceKey;
   /** For stuck detection. */
@@ -153,6 +162,8 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
     jewel: rnd() < 0.4,
     warrior: null,
     hidden: false,
+    floorY: null,
+    safe: false,
     lastBonfire: -1,
     waveT: 0,
     injured: 0,

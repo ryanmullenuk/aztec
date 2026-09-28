@@ -333,6 +333,22 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
       p.bob = pos(Math.sin(ph * 0.5)) * 0.012;
       break;
     }
+    case 'sit': {
+      // On a bench: thighs level, shins down, hands resting on the knees; breathing, glancing about.
+      p.thL = p.thR = -1.5;
+      p.shL = p.shR = 1.45;
+      p.spread = 0.04;
+      p.ftL = p.ftR = 0.05;
+      p.uaLx = p.uaRx = -0.32;
+      p.uaLz = p.uaRz = 0.1;
+      p.faL = p.faR = -1.05;
+      p.wrLx = p.wrRx = -0.15;
+      p.spineX = 0.04 + Math.sin(t * 0.9) * 0.015;
+      p.headY = Math.sin(t * 0.23 + isl.id) * 0.35;
+      p.headX = 0.05 + Math.sin(t * 0.31 + isl.id * 2) * 0.06;
+      p.bob = Math.sin(t * 1.8) * 0.003;
+      break;
+    }
     case 'eat': {
       const ph = t * 3;
       const bite = pos(Math.sin(ph));
@@ -641,7 +657,7 @@ export class IslanderRig {
       this.put(hd as PartKey, M.out);
     }
     // Tool in the right (+x) hand.
-    const tool = isl.carry || isl.anim === 'sleep' || isl.anim === 'pray' || isl.anim === 'eat' ? 'none' : isl.tool;
+    const tool = isl.carry || isl.anim === 'sleep' || isl.anim === 'pray' || isl.anim === 'eat' || isl.anim === 'sit' ? 'none' : isl.tool;
     if (tool !== 'none') {
       M.out.multiplyMatrices(M.base, W[BI.handL]);
       // Gripped in the palm, a little past the wrist.

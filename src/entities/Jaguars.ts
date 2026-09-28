@@ -163,7 +163,8 @@ export class Jaguars {
   private pickTarget(j: Jaguar, maxD: number): Islander | null {
     let best: Islander | null = null, bs = Infinity;
     for (const i of this.hooks!.villagers()) {
-      if (i.hidden || i.sleeping) continue;
+      // Indoors, asleep, or sheltering in the Great Hall: out of reach.
+      if (i.hidden || i.sleeping || i.safe) continue;
       const d = Math.hypot(i.x - j.x, i.z - j.z);
       if (d > maxD) continue;
       // Stragglers are easier prey than villagers among the dogs and warriors.
@@ -223,7 +224,7 @@ export class Jaguars {
       case 'stalk':
       case 'charge': {
         let t = tgt;
-        if (!t || t.hidden) {
+        if (!t || t.hidden || t.safe) {
           t = this.pickTarget(j, j.state === 'charge' ? 12 : 60) ?? undefined;
           if (!t) {
             this.retreat(j, false);
