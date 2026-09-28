@@ -239,7 +239,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall' | 'pigpen' | 'chickenpen';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -279,6 +279,8 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   kennel: { key: 'kennel', name: 'Kennel', description: 'A timber-and-adobe dog house with a shaded run. Village dogs sleep here, raise puppies and bark the alarm when a jaguar comes near. Each kennel holds up to 3 dogs.', size: [2, 2], cost: { wood: 18, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
+  pigpen: { key: 'pigpen', name: 'Pig Pen', description: 'A wattle-fenced yard with a thatched sty, a muddy wallow and troughs. Captured pigs and goats led home on a leash are kept here; a nearby Butcher turns them into meat.', size: [5, 5], cost: { wood: 24, stone: 6, belief: 0 }, buildTime: 30, builders: 2, workers: 0, placeable: true },
+  chickenpen: { key: 'chickenpen', name: 'Chicken Pen', description: 'A fenced, straw-strewn yard with a raised thatched coop, nest boxes, perches and feeders. Captured chickens are carried here to scratch and peck.', size: [5, 5], cost: { wood: 22, stone: 4, belief: 0 }, buildTime: 28, builders: 2, workers: 0, placeable: true },
   woodstore: { key: 'woodstore', name: 'Wood Store', description: 'Stores wood and stone. Logs stack up as it fills.', size: [3, 2], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 20, builders: 2, workers: 0, woodCap: 120, placeable: true },
   grainstore: { key: 'grainstore', name: 'Grain Store', description: 'Stores grain, fruit, meat and fish. Baskets fill visibly.', size: [2, 2], cost: { wood: 18, stone: 4, belief: 0 }, buildTime: 24, builders: 2, workers: 0, foodCap: 140, placeable: true },
   warroom: { key: 'warroom', name: 'War Room', description: 'Trains Jaguar and Eagle warriors who patrol the island.', size: [3, 3], cost: { wood: 30, stone: 30, belief: 15 }, buildTime: 55, builders: 3, workers: 0, placeable: true },
@@ -581,9 +583,20 @@ export const POWERS = {
   bless: { cost: 30, radius: 12, duration: 180 },
   rain: { cost: 40, duration: 120 },
   calm: { cost: 50 },
-  stormChancePerDay: 0.25,
+  /** Chance, rolled at each dusk, of a thunderstorm that night (x1.4 in autumn). */
+  stormChancePerNight: 0.35,
+  /** Chance, rolled at each dawn, of a (rarer) daytime storm (x1.4 in autumn). */
+  stormChancePerDay: 0.06,
+  /** Game seconds after dusk / dawn before a rolled storm arrives (a day is 600 s; night ~200 s). */
+  nightStormDelay: [5, 90] as [number, number],
+  dayStormDelay: [40, 260] as [number, number],
+  /** Storm length in game seconds (at night roughly 3-5 in-game hours). */
   stormDuration: [70, 130] as [number, number],
   rainChancePerDay: [0.4, 0.2, 0.45, 0.35],
+  /** Happiness every islander gains when the player calms a storm. */
+  calmHappy: 0.15,
+  /** Game seconds between re-calls to shelter while a storm rages (villagers who wandered out go back in). */
+  stormRecall: 20,
 };
 
 export const WILDLIFE = {

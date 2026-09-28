@@ -148,6 +148,8 @@ export class Game {
   /** The Great Hall bell has called the village to sanctuary; seconds the coast has been clear. */
   private hallAlert = false;
   private hallClear = 0;
+  /** Game seconds to the next call back to shelter while a storm rages. */
+  private stormRecall = 0;
   boats: Boats;
   marine: Marine;
   powers: Powers;
@@ -404,7 +406,11 @@ export class Game {
       if (n === 'splash' && Math.random() < 0.3) this.audio.sfx('whale', x, z);
     };
     this.powers.notify = (t, k) => this.ui?.toast(t, k ?? 'info');
-    this.powers.onThunder = () => this.audio.sfx('thunder');
+    this.powers.onThunder = (near) => this.audio.sfx(near ? 'thunderclap' : 'thunder');
+    this.powers.camera = this.rig.camera;
+    this.powers.isOpenSea = (x, z) => this.isOpenSea(x, z);
+    this.powers.onStormStart = () => this.stormShelter(true);
+    this.powers.onStormEnd = (calmed) => this.stormPassed(calmed);
     this.buildings.onRemove = (b) => {
       this.wildlife.releasePen(b.id);
       if (b.key === 'tradedock') this.trade.removeDock(b);
@@ -444,7 +450,8 @@ export class Game {
       path: (x, z, tx, tz) => this.pathfinder.find(x, z, tx, tz, { goalRadius: 1 }),
       birdNear: (x, z, r) => this.waterBirds.groundedNear(x, z, r),
     };
-    this.colony.hooks.threat = () => this.hallAlert || this.jaguarThreat();
+    // A jaguar alert, a jaguar still prowling, or a storm raging: those in shelter stay in.
+    this.colony.hooks.threat = () => this.hallAlert || this.powers.state === 'storm' || this.jaguarThreat();
     this.jaguars.hooks = {
       villagers: () => this.colony.list,
       byId: (id) => this.colony.byId(id),
@@ -494,7 +501,7 @@ export class Game {
       this.flowers.refresh();
     };
     this.completeHandler = (b) => {
-      if (b.key === 'farm' || b.key === 'butcher') this.wildlife.registerPen(b);
+      if (b.key === 'farm' || b.key === 'butcher' || b.key === 'pigpen' || b.key === 'chickenpen') this.wildlife.registerPen(b);
       if (b.key === 'kennel') this.dogs.onKennelBuilt(b);
       // The first boat at each jetty is free.
       if (b.key === 'jetty' && b.boats.length === 0) b.boatBuild = 0.001;
@@ -698,7 +705,7 @@ export class Game {
       this.resize();
     }
     this.powers.randomWeather = s.weather;
-    if (!s.weather && was.weather && this.powers.state !== 'clear') this.powers.state = 'clear';
+    if (!s.weather && was.weather) this.powers.clearWeather();
     this.applied = { ...s };
     this.post.dofEnabled = s.dof;
     this.post.dofStrength = s.dofStrength;
@@ -1372,6 +1379,60 @@ export class Game {
     this.ui?.toast(n ? `The bell rings: ${n} villager${n === 1 ? '' : 's'} hurry to sanctuary (a drill).` : 'The bell rings, but nobody is near enough to answer it.');
   }
 
+  /**
+   * A storm: the village takes shelter. With a Great Hall its bell calls everyone in (as a drill, so
+   * the warriors stay at their posts); anyone else close to home runs indoors. They stay in while
+   * the storm lasts (the colony's threat hook). Returns true when the village was told.
+   */
+  private stormShelter(announce: boolean): boolean {
+    this.stormRecall = POWERS.stormRecall;
+    const halls = this.buildings.list.filter((b) => b.key === 'greathall' && b.complete);
+    if (halls.length) this.colony.sanctuary(halls[0].x, halls[0].z, true);
+    // Those the bell can't reach (or with no hall at all) run home when it's near.
+    for (const isl of this.colony.list) {
+      if (isl.hidden || isl.sleeping || isl.warrior || isl.safe) continue;
+      const t = isl.task;
+      if (t && (t.kind === 'flee' || t.kind === 'hall' || t.kind === 'sleep' || t.kind === 'capture' || (t.kind === 'fish' && t.stage >= 2))) continue;
+      const home = isl.home >= 0 ? this.buildings.byId(isl.home) : undefined;
+      if (!home || !home.complete || Math.hypot(home.door.x - isl.x, home.door.z - isl.z) > 28) continue;
+      this.colony.alarm(isl.x, isl.z, 0.01);
+    }
+    if (!announce) return false;
+    const hall = halls[0];
+    if (hall) {
+      // Already in sanctuary from a jaguar: no need to ring again.
+      if (!this.hallAlert) {
+        for (const h of halls) this.buildings.ringBell(h);
+        this.audio?.sfx('bell');
+      }
+      this.ui?.toast('A storm is coming: the bell calls everyone to shelter. Use Calm (7) to settle it.', 'warn', () => ({ x: hall.x, z: hall.z }));
+    } else this.ui?.toast('A storm is coming: the villagers hurry home to shelter. Use Calm (7) to settle it.', 'warn');
+    return true;
+  }
+
+  /** The storm is over: out of shelter (unless a jaguar still prowls). Calming it cheers everyone. */
+  private stormPassed(calmed: boolean): void {
+    this.stormRecall = 0;
+    if (calmed) {
+      // (Powers has already announced that the people rejoice.)
+      for (const isl of this.colony.list) isl.happy = Math.min(1, isl.happy + POWERS.calmHappy);
+      return;
+    }
+    this.ui?.toast(this.hallAlert ? 'The storm has passed, but a jaguar keeps the village in sanctuary.' : 'The storm has passed. Villagers are coming out of shelter.');
+  }
+
+  /** Open, deep sea well away from any coast (where lightning may strike). */
+  private isOpenSea(x: number, z: number): boolean {
+    const w = this.world;
+    if (Math.abs(x) > 600 || Math.abs(z) > 600) return false;
+    if (w.heightAt(x, z) > -1.8) return false;
+    for (let k = 0; k < 6; k++) {
+      const a = (k * Math.PI) / 3;
+      if (w.heightAt(x + Math.cos(a) * 6, z + Math.sin(a) * 6) > -0.6) return false;
+    }
+    return true;
+  }
+
   /** A jaguar is hunting near the village (its fire, or any villager out in the open). */
   private jaguarThreat(): boolean {
     const fire = this.buildings.list.find((b) => b.key === 'campfire');
@@ -1520,8 +1581,13 @@ export class Game {
       this.hallClear = this.jaguarThreat() ? 0 : this.hallClear + dt;
       if (this.hallClear > 4) {
         this.hallAlert = false;
-        this.ui?.toast('All clear: the jaguar has gone. Villagers are coming out of sanctuary.');
+        this.ui?.toast(this.powers.state === 'storm' ? 'The jaguar has gone, but the storm keeps everyone in shelter.' : 'All clear: the jaguar has gone. Villagers are coming out of sanctuary.');
       }
+    }
+    // While a storm rages, anyone who has wandered back out is called in again.
+    if (this.powers.state === 'storm') {
+      this.stormRecall -= dt;
+      if (this.stormRecall <= 0) this.stormShelter(false);
     }
     this.dogs.update(dt, this.time.isNight);
     this.waterBirds.update(dt, this.time.hour);
