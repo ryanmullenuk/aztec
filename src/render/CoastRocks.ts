@@ -92,6 +92,7 @@ export class CoastRocks {
       const bed = Math.min(w.heightAt(x, z), SEA_SURFACE - 0.05) - 0.15;
       const h = Math.max(0.2, top - bed);
       b.add(angularRockGeometry(Math.floor(rng.next() * 1e6), { tilt: 0.2 }), { color: rockColor(0.22, wet) }, M.t(x, bed, z, 0, turn, 0, r, h, r * rng.range(0.8, 1.15)));
+      w.blockCircle(x, z, r * 0.9);
     };
     for (const c of cands) {
       if (this.sites.length >= COAST_ROCKS.maxSites) break;

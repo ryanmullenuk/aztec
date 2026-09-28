@@ -261,7 +261,13 @@ export function peopleSkinnedMaterial(bones: THREE.DataTexture): { mat: THREE.Me
  * weight for the pectoral fins, and a phase so the bend travels down the body as a wave.
  * Each instance swims out of step with the others (phase from its position).
  */
-export function fishMaterial(rate: number, params: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
+/**
+ * @param surfaceY for fish seen through a water surface drawn before them: each fish takes the
+ *   depth of the point where the view ray enters the water, so the water surface (which writes
+ *   depth) no longer hides it, while land, trees, rocks and buildings in front of that point still
+ *   do. The fish are then drawn after the water with normal depth testing.
+ */
+export function fishMaterial(rate: number, params: THREE.MeshStandardMaterialParameters = {}, surfaceY?: number): THREE.MeshStandardMaterial {
   const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.05, ...params }), 0.5);
   const base = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
@@ -288,7 +294,25 @@ export function fishMaterial(rate: number, params: THREE.MeshStandardMaterialPar
           transformed.x += sign(position.x) * flap * aFish.y * 0.006;
           transformed.z += flap * aFish.y * 0.008;
         }`);
+    if (surfaceY !== undefined) {
+      shader.uniforms.uSurfaceY = { value: surfaceY };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n        uniform float uSurfaceY;')
+        .replace('#include <project_vertex>', `#include <project_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vec4 fw = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
+          #else
+            vec4 fw = modelMatrix * vec4(transformed, 1.0);
+          #endif
+          // Depth where the view ray enters the water (a hair nearer than the surface itself).
+          vec3 ray = fw.xyz - cameraPosition;
+          float tS = ray.y < -1e-4 ? clamp((uSurfaceY - cameraPosition.y) / ray.y, 0.0, 1.0) : 1.0;
+          vec4 sc = projectionMatrix * viewMatrix * vec4(cameraPosition + ray * tS, 1.0);
+          gl_Position.z = (sc.z / sc.w - 0.0002) * gl_Position.w;
+        }`);
+    }
   };
-  mat.customProgramCacheKey = () => 'fish';
+  mat.customProgramCacheKey = () => (surfaceY !== undefined ? 'fish-surface' : 'fish');
   return mat;
 }
