@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COLORS } from '../config';
 import { GeoBuilder, M, P, lumpy, ribbon, tube } from '../render/GeoBuilder';
 import { RNG } from '../world/rng';
-import { BARK, FINE, barkColor, barkTrunk, branch, hangingVine, leafClump, leafGeometry, roots, trunkVine, vnoise3 } from './detail';
+import { BARK, FINE, barkTrunk, barkColor, branch, foliage, hangingVine, leafGeometry, liana, roots, trunkVine } from './detail';
 
 const c = (h: number) => new THREE.Color(h);
 const mix = (a: THREE.Color, b: THREE.Color, t: number) => a.clone().lerp(b, THREE.MathUtils.clamp(t, 0, 1));
@@ -124,32 +124,34 @@ export function broadleafGeometry(variant: number, lo: boolean, seed: number): T
   }
   const blobs = variant === 0 ? 4 : 5;
   const cy = trunkH + 0.7;
+  const br = new RNG(seed * 53 + 1);
+  const tips: THREE.Vector3[] = [];
   for (let k = 0; k < blobs; k++) {
     const a = (k / blobs) * Math.PI * 2 + rng.next();
     const r = k === 0 ? 0 : rng.range(0.55, 0.85);
     const rad = k === 0 ? 1.05 : rng.range(0.6, 0.85);
     const y = cy + (k === 0 ? 0.45 : rng.range(-0.25, 0.35));
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    if (!lo && k > 0) branch(b, new THREE.Vector3(top.x * 0.7, trunkH * dr.range(0.72, 0.92), top.z * 0.7), new THREE.Vector3(x * 0.8, y - rad * 0.3, z * 0.8), 0.06, dr, trunkH);
-    const geo = lumpy(P.sphere(rad, lo ? 0 : 1), 0.12, seed * 13 + k, 0.8);
-    b.add(geo, {
-      color: (p, nn) => {
-        const up = nn.y * 0.5 + 0.5;
-        const hgt = (p.y - (cy - 0.8)) / 2.2;
-        let col = mix(PAL.jungleDark, PAL.jungleBright, up * 0.7 + hgt * 0.4 + (vnoise3(p.x * 2.2, p.y * 2.2, p.z * 2.2) - 0.5) * 0.35);
-        if (nn.y > 0.55) col = mix(col, PAL.jungleSun, (nn.y - 0.55) * 1.4);
-        return col;
-      },
-      leaf: 1,
-      sway: (p) => 0.15 + Math.max(0, p.y - trunkH) * 0.18,
-      ao: { y0: cy - 1.0, y1: cy + 0.6, min: 0.55 },
-    }, M.t(x, y, z));
-    if (!lo) leafClump(b, x, y, z, rad, 0.8, Math.round(rad * rad * 42), dr, { cols: [PAL.jungleDark, PAL.jungleBright, TREE.deepLight], sun: PAL.jungleSun, len: 0.32, w: 0.12, sway: 0.2 });
+    if (!lo && k > 0) branch(b, new THREE.Vector3(top.x * 0.7, trunkH * br.range(0.72, 0.92), top.z * 0.7), new THREE.Vector3(x * 0.8, y - rad * 0.3, z * 0.8), 0.06, br, trunkH);
+    foliage(b, x, y, z, rad, 0.8, seed * 13 + k, lo, {
+      dark: PAL.jungleDark,
+      light: PAL.jungleBright,
+      sun: PAL.jungleSun,
+      len: 0.34,
+      w: 0.13,
+      sway: 0.15 + Math.max(0, y - trunkH) * 0.18,
+    });
+    if (k > 0) tips.push(new THREE.Vector3(x * 0.8, y - rad * 0.35, z * 0.8));
   }
-  if (!lo && variant === 1) for (let v = 0; v < 3; v++) hangingVine(b, new THREE.Vector3(dr.range(-0.9, 0.9), cy - 0.4, dr.range(-0.9, 0.9)), dr.range(0.6, 1.4), dr, TREE.vine, TREE.lime);
+  if (!lo) {
+    // Hanging vines under the crown and lianas slung between its limbs.
+    const vr = new RNG(seed * 59 + 3);
+    const nv = variant === 1 ? 5 : 2;
+    for (let v = 0; v < nv; v++) hangingVine(b, new THREE.Vector3(vr.range(-0.9, 0.9), cy - 0.35, vr.range(-0.9, 0.9)), vr.range(0.6, variant === 1 ? 1.8 : 1.1), vr, TREE.vine, TREE.lime);
+    for (let v = 0; v + 1 < tips.length; v += 2) liana(b, tips[v], tips[v + 1], vr.range(0.3, 0.7), vr, TREE.vine, TREE.lime);
+  }
   return b.build();
 }
-
 /** Forest-floor fern: arching fronds from a single point. */
 export function fernGeometry(lo: boolean, seed: number): THREE.BufferGeometry {
   const rng = new RNG(seed);
@@ -187,19 +189,22 @@ export function bushGeometry(flowers: boolean, lo: boolean, seed: number, apple 
     const r = k === 0 ? 0 : 0.28;
     const rad = k === 0 ? 0.48 : rng.range(0.3, 0.4);
     const bx = Math.cos(a) * r, by = rad * 0.75 + (k === 0 ? 0.08 : 0), bz = Math.sin(a) * r;
-    b.add(lumpy(P.sphere(rad, lo ? 0 : 1), 0.1, seed + k * 7, 0.85), {
-      color: (p, nn) => mix(PAL.bushDark, light, nn.y * 0.45 + 0.35 + p.y * 0.3 + (vnoise3(p.x * 4, p.y * 4, p.z * 4) - 0.5) * 0.3),
-      leaf: 0.6,
-      sway: (p) => p.y * 0.25,
-      ao: { y0: 0, y1: 0.6, min: 0.6 },
-    }, M.t(bx, by, bz));
-    if (!lo) leafClump(b, bx, by, bz, rad, 0.85, Math.round(rad * rad * 90), dr, { cols: [PAL.bushDark, light, mix(PAL.bushDark, light, 0.5)], sun: mix(light, c(0x93ab58), 0.5), len: 0.2, w: 0.08, sway: 0.18, lowBias: 0.2 });
+    foliage(b, bx, by, bz, rad, 0.85, seed + k * 7, lo, {
+      dark: PAL.bushDark,
+      light,
+      sun: mix(light, c(0x93ab58), 0.5),
+      len: 0.2,
+      w: 0.085,
+      sway: 0.12 + by * 0.25,
+      density: 34,
+      core: 0.66,
+    });
   }
-  if (!lo && FINE.on) {
+  if (!lo) {
     // Woody stems at the base, showing between the leaves.
     for (let k = 0; k < 4; k++) {
       const a = (k / 4) * Math.PI * 2 + rng.next();
-      b.add(tube([new THREE.Vector3(0, -0.02, 0), new THREE.Vector3(Math.cos(a) * 0.12, 0.14, Math.sin(a) * 0.12), new THREE.Vector3(Math.cos(a) * 0.26, 0.3, Math.sin(a) * 0.26)], (t) => 0.03 * (1 - 0.6 * t), 4, 3), { color: BARK.mid, sway: (p) => p.y * 0.2 });
+      b.add(tube([new THREE.Vector3(0, -0.02, 0), new THREE.Vector3(Math.cos(a) * 0.12, 0.14, Math.sin(a) * 0.12), new THREE.Vector3(Math.cos(a) * 0.26, 0.3, Math.sin(a) * 0.26)], (t) => 0.03 * (1 - 0.6 * t), FINE.on ? 4 : 3, FINE.on ? 3 : 2), { color: BARK.mid, sway: (p) => p.y * 0.2 });
     }
   }
   if (flowers && !lo) {
@@ -336,18 +341,7 @@ const TREE = {
 };
 
 function canopyBlob(b: GeoBuilder, x: number, y: number, z: number, r: number, lo: boolean, seed: number, dark: THREE.Color, light: THREE.Color, squash = 0.8): void {
-  const geo = lumpy(P.sphere(r, lo ? 0 : 1), 0.12, seed, squash);
-  b.add(geo, {
-    // Greens blended with a soft mottle so the canopy isn't one flat colour.
-    color: (p, nn) => mix(dark, light, nn.y * 0.45 + 0.4 + (p.y - y) / (r * 3) + (vnoise3(p.x * 2.5, p.y * 2.5, p.z * 2.5) - 0.5) * 0.35),
-    leaf: 1,
-    sway: (p) => 0.12 + Math.max(0, p.y - 1) * 0.12,
-    ao: { y0: y - r, y1: y + r * 0.6, min: 0.6 },
-  }, M.t(x, y, z));
-  if (!lo) {
-    const rng = new RNG(seed * 7 + 3);
-    leafClump(b, x, y, z, r, squash, Math.round(r * r * 44), rng, { cols: [dark, light, mix(dark, light, 0.5)], sun: mix(light, c(0xa6b566), 0.35), len: 0.3, w: 0.115, sway: 0.16 });
-  }
+  foliage(b, x, y, z, r, squash, seed, lo, { dark, light, sun: mix(light, c(0xa6b566), 0.35), len: 0.3, w: 0.12, sway: 0.12 + Math.max(0, y - 1) * 0.12 });
 }
 
 /** Trunk (bark ridges, flared base) plus buttress roots when close. Returns the top point. */
@@ -362,8 +356,9 @@ function trunk(b: GeoBuilder, h: number, r0: number, r1: number, lo: boolean, rn
 }
 
 /** Branches from the upper trunk out to each canopy blob. */
-function branchesTo(b: GeoBuilder, lo: boolean, rng: RNG, h: number, r: number, targets: [number, number, number][]): void {
+function branchesTo(b: GeoBuilder, lo: boolean, seed: number, h: number, r: number, targets: [number, number, number][]): void {
   if (lo) return;
+  const rng = new RNG(seed * 53 + 1);
   for (const [x, y, z] of targets) branch(b, new THREE.Vector3(0, h * rng.range(0.7, 0.95), 0), new THREE.Vector3(x * 0.85, y - 0.15, z * 0.85), r, rng, h);
 }
 
@@ -396,7 +391,7 @@ export function treeGeometry(variant: number, lo: boolean, seed: number): THREE.
         pts.push(p);
         canopyBlob(b, p[0], p[1], p[2], 0.5, lo, seed + k, TREE.limeDark, TREE.lime);
       }
-      branchesTo(b, lo, dr, 1.2, 0.05, pts);
+      branchesTo(b, lo, seed, 1.2, 0.05, pts);
       break;
     }
     case 3: // tall narrow, yellow-green, stacked
@@ -413,24 +408,27 @@ export function treeGeometry(variant: number, lo: boolean, seed: number): THREE.
       const top = trunk(b, 1.6, 0.2, 0.14, lo, rng);
       if (!lo && variant === 6) trunkVine(b, 1.8, 0.15, dr, TREE.vine, TREE.lime);
       const arms = lo ? 2 : 3;
+      const arms3: THREE.Vector3[] = [];
       for (let k = 0; k < arms; k++) {
         const a = (k / arms) * Math.PI * 2 + rng.next();
         const px = Math.cos(a) * 1.1, pz = Math.sin(a) * 1.1;
-        if (lo || !FINE.on) b.add(P.cyl(0.06, 0.11, 1.5, 5), { color: PAL.bark, sway: 0.1 }, M.t(Math.cos(a) * 0.4, 2.1, Math.sin(a) * 0.4, Math.sin(a) * 0.6, 0, -Math.cos(a) * 0.6));
-        else branch(b, new THREE.Vector3(top.x, 1.45, top.z), new THREE.Vector3(px * 0.9, 2.75, pz * 0.9), 0.1, dr, 1.6);
+        if (lo) b.add(P.cyl(0.06, 0.11, 1.5, 5), { color: PAL.bark, sway: 0.1 }, M.t(Math.cos(a) * 0.4, 2.1, Math.sin(a) * 0.4, Math.sin(a) * 0.6, 0, -Math.cos(a) * 0.6));
+        else branch(b, new THREE.Vector3(top.x, 1.45, top.z), new THREE.Vector3(px * 0.9, 2.75, pz * 0.9), 0.1, new RNG(seed * 53 + k), 1.6);
+        if (!lo) arms3.push(new THREE.Vector3(px * 0.8, 2.6, pz * 0.8));
         canopyBlob(b, px, 2.9 + rng.next() * 0.4, pz, 0.95, lo, seed + k, TREE.deepLight, TREE.lime, 0.42);
         if (variant === 6 && !lo) {
           for (let v = 0; v < 3; v++) hangingVine(b, new THREE.Vector3(px + dr.range(-0.5, 0.5), 2.75, pz + dr.range(-0.5, 0.5)), dr.range(0.6, 1.3), dr, TREE.vine, TREE.lime);
         }
       }
       canopyBlob(b, 0, 3.3, 0, 0.9, lo, seed + 9, TREE.deepLight, TREE.lime, 0.4);
+      if (variant === 6 && !lo) for (let v = 0; v < arms3.length; v++) liana(b, arms3[v], arms3[(v + 1) % arms3.length], 0.55, dr, TREE.vine, TREE.lime);
       break;
     }
     case 5: {
       // jungle giant: tall trunk, big buttress roots, dense dark canopy, vines
       trunk(b, 3.3, 0.3, 0.18, lo, rng);
       if (!lo) {
-        roots(b, 4, 0.34, 1.3, dr);
+        roots(b, 4, 0.34, 1.3, new RNG(seed * 17 + 5));
         trunkVine(b, 3.4, 0.24, dr, TREE.vine, TREE.deepLight);
       }
       const pts: [number, number, number][] = [];
@@ -441,10 +439,14 @@ export function treeGeometry(variant: number, lo: boolean, seed: number): THREE.
         if (k > 0) pts.push(p);
         canopyBlob(b, p[0], p[1], p[2], k === 0 ? 1.2 : rng.range(0.7, 0.95), lo, seed + k, TREE.deep, TREE.deepLight, 0.8);
       }
-      branchesTo(b, lo, dr, 3.3, 0.09, pts);
-      if (!lo) for (let v = 0; v < 4; v++) {
+      branchesTo(b, lo, seed, 3.3, 0.09, pts);
+      if (!lo) for (let v = 0; v < 6; v++) {
         const p = pts[v % pts.length];
         hangingVine(b, new THREE.Vector3(p[0] * 1.1, p[1] - 0.5, p[2] * 1.1), dr.range(0.8, 1.8), dr, TREE.vine, TREE.deepLight);
+      }
+      if (!lo) for (let v = 0; v + 2 < pts.length; v += 2) {
+        const a = pts[v], z = pts[v + 2];
+        liana(b, new THREE.Vector3(a[0] * 0.8, a[1] - 0.45, a[2] * 0.8), new THREE.Vector3(z[0] * 0.8, z[1] - 0.45, z[2] * 0.8), dr.range(0.5, 1.0), dr, TREE.vine, TREE.deepLight);
       }
       break;
     }
@@ -458,7 +460,7 @@ export function treeGeometry(variant: number, lo: boolean, seed: number): THREE.
         pts.push(p);
         canopyBlob(b, p[0], p[1], p[2], 0.52, lo, seed + k, TREE.pink, TREE.pinkLight);
       }
-      branchesTo(b, lo, dr, 1.3, 0.05, pts);
+      branchesTo(b, lo, seed, 1.3, 0.05, pts);
       break;
     }
   }

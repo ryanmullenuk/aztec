@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GeoBuilder, tube } from '../render/GeoBuilder';
+import { GeoBuilder, M, P, lumpy, tube } from '../render/GeoBuilder';
 import { RNG } from '../world/rng';
 
 /**
@@ -85,13 +85,16 @@ export function roots(b: GeoBuilder, n: number, r0: number, spread: number, rng:
   }
 }
 
-/** A branch from a trunk point up and out into the canopy, with a side twig. */
+/**
+ * A branch from a trunk point up and out into the canopy, with a side twig. Drawn at mid distance
+ * too (a lighter limb without the twig), so crowns show their wood from further away.
+ */
 export function branch(b: GeoBuilder, from: THREE.Vector3, to: THREE.Vector3, r0: number, rng: RNG, h: number): void {
-  if (!FINE.on) return;
   const mid = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, rng.range(0.05, 0.25), 0));
-  b.add(tube([from, mid, to], (t) => r0 * (1 - 0.6 * t), 5, 4), { color: (p) => barkColor(p, h), sway: (p) => 0.05 + Math.max(0, p.y - from.y) * 0.08 });
   const tw = mid.clone().lerp(to, 0.4);
   const tip = tw.clone().add(new THREE.Vector3(rng.range(-0.4, 0.4), rng.range(0.1, 0.35), rng.range(-0.4, 0.4)));
+  b.add(tube([from, mid, to], (t) => r0 * (1 - 0.6 * t), FINE.on ? 5 : 4, FINE.on ? 4 : 2), { color: (p) => barkColor(p, h), sway: (p) => 0.05 + Math.max(0, p.y - from.y) * 0.08 });
+  if (!FINE.on) return;
   b.add(tube([tw, tw.clone().lerp(tip, 0.5).add(new THREE.Vector3(0, 0.05, 0)), tip], (t) => r0 * 0.35 * (1 - 0.7 * t), 4, 2), { color: BARK.mid, sway: 0.2 });
 }
 
@@ -115,63 +118,165 @@ export function leafGeometry(len: number, w: number, fold = 0.35): THREE.BufferG
   return g;
 }
 
-export interface LeafOpts {
-  /** Leaf colours to pick from (blended per leaf). */
-  cols: THREE.Color[];
-  /** Colour on sunlit top leaves. */
+export interface FoliageOpts {
+  dark: THREE.Color;
+  light: THREE.Color;
+  /** Colour of the sunlit top leaves. */
   sun: THREE.Color;
+  /** Leaf length and half-width at full detail. */
   len: number;
   w: number;
   /** Sway weight at the canopy centre height. */
   sway: number;
-  /** 0..1: favour the lower half of the clump (where the blob edge shows). */
-  lowBias?: number;
+  /** Leaf sprays per unit of radius squared. */
+  density?: number;
+  /** Shaded inner core radius as a fraction of the canopy radius. */
+  core?: number;
 }
 
-/** Leaves scattered over a canopy blob's surface, pointing outward and drooping at the edges. */
-export function leafClump(b: GeoBuilder, cx: number, cy: number, cz: number, R: number, squash: number, n: number, rng: RNG, o: LeafOpts): void {
-  if (!FINE.on) return;
-  for (let k = 0; k < n; k++) {
-    // Mostly around the sides and underside, where the blob outline is seen.
-    const th = rng.range(0, Math.PI * 2);
-    const cph = rng.range(-0.85, 0.7 - (o.lowBias ?? 0) * 0.5);
+const leafCache = new Map<string, THREE.BufferGeometry>();
+function cachedLeaf(len: number, w: number, fold = 0.35): THREE.BufferGeometry {
+  const k = `${len.toFixed(3)}|${w.toFixed(3)}|${fold}`;
+  let g = leafCache.get(k);
+  if (!g) leafCache.set(k, (g = leafGeometry(len, w, fold)));
+  return g;
+}
+
+const _d = new THREE.Vector3();
+const _t1 = new THREE.Vector3();
+const _t2 = new THREE.Vector3();
+const _p = new THREE.Vector3();
+const _one = new THREE.Vector3(1, 1, 1);
+
+/**
+ * A living canopy: a small shaded core (the dark interior between the leaves) wrapped in leaf
+ * sprays, each a twig carrying a fan of drooping leaves, so the crown reads as foliage with gaps,
+ * ragged edges and sunlit tops instead of a smooth ball. All levels share one spray layout (every
+ * random number is always drawn), so changing level only adds or removes detail:
+ *   far  (lo)        - every third spray, with three big leaves, over the core
+ *   mid  (FINE off)  - every spray with four leaves
+ *   near (FINE on)   - seven leaves per spray plus the twig inside each spray
+ */
+export function foliage(b: GeoBuilder, cx: number, cy: number, cz: number, R: number, squash: number, seed: number, lo: boolean, o: FoliageOpts): void {
+  const rng = new RNG(seed * 7 + 3);
+  const core = o.core ?? 0.7;
+  const shade = o.dark.clone().multiplyScalar(0.72);
+  b.add(lumpy(P.sphere(R * core, lo ? 0 : 1), 0.2, seed, squash), {
+    color: (p, nn) => mix(shade, o.dark, nn.y * 0.4 + 0.35 + (p.y - cy) / (R * 3) + (vnoise3(p.x * 3, p.y * 3, p.z * 3) - 0.5) * 0.4),
+    leaf: 1,
+    sway: o.sway,
+    ao: { y0: cy - R, y1: cy + R * 0.5, min: 0.55 },
+  }, M.t(cx, cy, cz));
+  const fine = FINE.on && !lo;
+  const full = Math.max(7, Math.round(R * R * (o.density ?? 19)));
+  // Far away: every third spray, with bigger leaves to cover the same crown.
+  const step = lo ? 3 : 1;
+  const sz = lo ? 1.8 : fine ? 1 : 1.2;
+  for (let k = 0; k < full; k++) {
+    // Evenly spread over the crown (golden-angle spiral) with jitter.
+    const cph = THREE.MathUtils.clamp(0.95 - 1.85 * ((k + 0.5) / full) + rng.range(-0.08, 0.08), -0.92, 0.98);
+    const th = k * 2.39996 + rng.range(-0.4, 0.4);
     const sph = Math.sqrt(1 - cph * cph);
-    const d = new THREE.Vector3(Math.cos(th) * sph, cph, Math.sin(th) * sph);
-    const base = new THREE.Vector3(cx + d.x * R * 0.97, cy + d.y * R * squash * 0.97, cz + d.z * R * 0.97);
-    _a.copy(d).add(new THREE.Vector3(rng.range(-0.35, 0.35), -0.35 - rng.next() * 0.35, rng.range(-0.35, 0.35))).normalize();
-    _q.setFromUnitVectors(_z, _a);
-    _q2.setFromAxisAngle(_a, rng.range(0, Math.PI * 2));
-    const s = rng.range(0.75, 1.25);
-    const m = new THREE.Matrix4().compose(base, _q2.multiply(_q), new THREE.Vector3(s, s, s));
-    const up = d.y * 0.5 + 0.5;
-    const col = mix(mix(rng.pick(o.cols), rng.pick(o.cols), rng.next()), o.sun, Math.max(0, up - 0.5) * 1.5 + (rng.chance(0.25) ? 0.3 : 0)).multiplyScalar(rng.range(0.82, 1.12));
-    b.add(leafGeometry(o.len, o.w), { color: col, leaf: 1, sway: o.sway + Math.max(0, base.y - cy + R) * 0.1 }, m);
+    _d.set(Math.cos(th) * sph, cph, Math.sin(th) * sph);
+    const reach = rng.range(0.8, 1.02);
+    const sc = new THREE.Vector3(cx + _d.x * R * reach, cy + _d.y * R * squash * reach, cz + _d.z * R * reach);
+    const up = _d.y * 0.5 + 0.5;
+    const tone = mix(o.dark, o.light, rng.range(0.25, 0.95) * (0.55 + up * 0.6));
+    const sprayRoll = rng.range(0, Math.PI * 2);
+    const droop = rng.range(0.25, 0.6);
+    const tw = rng.range(0.3, 0.5);
+    const sway = o.sway + Math.max(0, sc.y - cy + R) * 0.1;
+    const show = k % step === 0;
+    // Tangent frame around the spray direction.
+    _t1.set(-_d.z, 0, _d.x);
+    if (_t1.lengthSq() < 1e-4) _t1.set(1, 0, 0);
+    _t1.normalize();
+    _t2.crossVectors(_d, _t1).normalize();
+    for (let j = 0; j < 7; j++) {
+      const a = sprayRoll + (j / 7) * Math.PI * 2 + rng.range(-0.25, 0.25);
+      const spread = rng.range(0.55, 1.0);
+      const ls = rng.range(0.8, 1.2) * sz;
+      const bright = rng.range(0.85, 1.12);
+      const twist = rng.range(0, Math.PI * 2);
+      const pick = lo ? j === 0 || j === 2 || j === 5 : fine || j % 2 === 0;
+      if (!show || !pick) continue;
+      _a.copy(_d).multiplyScalar(0.55).addScaledVector(_t1, Math.cos(a) * spread).addScaledVector(_t2, Math.sin(a) * spread);
+      _a.y -= droop;
+      _a.normalize();
+      _q.setFromUnitVectors(_z, _a);
+      _q2.setFromAxisAngle(_a, twist);
+      _p.copy(sc).addScaledVector(_d, -0.04 * R);
+      let col = mix(tone, o.sun, Math.max(0, up - 0.55) * 1.6 + Math.max(0, _a.y) * 0.3);
+      if (_d.y < -0.2) col = mix(col, shade, 0.35);
+      col = col.multiplyScalar(bright);
+      b.add(cachedLeaf(o.len * ls, o.w * ls), { color: col, leaf: 1, sway }, new THREE.Matrix4().compose(_p, _q2.multiply(_q), _one));
+    }
+    if (fine) {
+      // The twig carrying the spray, running back into the crown.
+      const from = sc.clone().addScaledVector(_d, -R * tw);
+      from.y -= R * 0.08;
+      const mid = from.clone().lerp(sc, 0.5);
+      mid.y += 0.03;
+      const h = cy + R;
+      b.add(tube([from, mid, sc], (t) => 0.018 * (1 - 0.6 * t) * Math.min(1.4, R + 0.3), 3, 2), { color: (p) => barkColor(p, h), sway: sway * 0.8 });
+    }
   }
 }
 
-/** A vine hanging from `top` with leaves along it. */
+/**
+ * A vine hanging from `top` with leaves along it. Mid distance draws the (slightly thicker) cord
+ * only; the random numbers are drawn either way so both levels share one shape.
+ */
 export function hangingVine(b: GeoBuilder, top: THREE.Vector3, len: number, rng: RNG, col: THREE.Color, leafCol: THREE.Color): void {
-  if (!FINE.on) return;
   const pts: THREE.Vector3[] = [];
-  for (let i = 0; i <= 4; i++) {
-    const t = i / 4;
-    pts.push(new THREE.Vector3(top.x + Math.sin(t * 5 + top.x) * 0.06, top.y - len * t, top.z + Math.cos(t * 4 + top.z) * 0.06));
+  const wob = rng.range(0, Math.PI * 2);
+  for (let i = 0; i <= 5; i++) {
+    const t = i / 5;
+    pts.push(new THREE.Vector3(top.x + Math.sin(t * 5 + wob) * 0.07 * t, top.y - len * t, top.z + Math.cos(t * 4 + wob) * 0.07 * t));
   }
-  b.add(tube(pts, () => 0.014, 3, 5), { color: col, sway: (p) => 0.3 + (top.y - p.y) * 0.5 });
-  const nl = Math.max(2, Math.round(len * 5));
+  b.add(tube(pts, (t) => (FINE.on ? 0.016 : 0.022) * (1 - 0.4 * t), 3, FINE.on ? 6 : 3), { color: col, sway: (p) => 0.3 + (top.y - p.y) * 0.5 });
+  const nl = Math.max(3, Math.round(len * 7));
   for (let k = 0; k < nl; k++) {
     const t = (k + 0.5) / nl;
-    const p = new THREE.Vector3(pts[0].x, top.y - len * t, pts[0].z);
     const a = rng.range(0, Math.PI * 2);
-    _a.set(Math.cos(a), -0.6, Math.sin(a)).normalize();
+    const tint = rng.next();
+    const s = rng.range(0.8, 1.3);
+    if (!FINE.on) continue;
+    const p = new THREE.Vector3(pts[0].x + Math.sin(t * 5 + wob) * 0.07 * t, top.y - len * t, pts[0].z + Math.cos(t * 4 + wob) * 0.07 * t);
+    _a.set(Math.cos(a), -0.5, Math.sin(a)).normalize();
     _q.setFromUnitVectors(_z, _a);
-    b.add(leafGeometry(0.1, 0.045), { color: mix(leafCol, col, rng.next() * 0.4), leaf: 1, sway: 0.3 + len * t * 0.5 }, new THREE.Matrix4().compose(p, _q, new THREE.Vector3(1, 1, 1)));
+    b.add(leafGeometry(0.11 * s, 0.05 * s), { color: mix(leafCol, col, tint * 0.4), leaf: 1, sway: 0.3 + len * t * 0.5 }, new THREE.Matrix4().compose(p, _q, new THREE.Vector3(1, 1, 1)));
+  }
+  // A curled tip.
+  if (FINE.on) b.add(leafGeometry(0.14, 0.07), { color: leafCol, leaf: 1, sway: 0.3 + len * 0.5 }, new THREE.Matrix4().compose(pts[5], _q.setFromUnitVectors(_z, _a.set(0.2, -1, 0.1).normalize()), new THREE.Vector3(1, 1, 1)));
+}
+
+/** A liana slung between two points (branch to branch), sagging in the middle, leafy up close. */
+export function liana(b: GeoBuilder, from: THREE.Vector3, to: THREE.Vector3, sag: number, rng: RNG, col: THREE.Color, leafCol: THREE.Color): void {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 6; i++) {
+    const t = i / 6;
+    const p = from.clone().lerp(to, t);
+    p.y -= sag * 4 * t * (1 - t);
+    pts.push(p);
+  }
+  const top = Math.max(from.y, to.y);
+  b.add(tube(pts, () => (FINE.on ? 0.018 : 0.024), 3, FINE.on ? 8 : 4), { color: col, sway: (p) => 0.2 + (top - p.y) * 0.4 });
+  for (let k = 1; k < 9; k++) {
+    const t = k / 9;
+    const a = rng.range(0, Math.PI * 2);
+    const tint = rng.next();
+    if (!FINE.on) continue;
+    const p = from.clone().lerp(to, t);
+    p.y -= sag * 4 * t * (1 - t);
+    _a.set(Math.cos(a), -0.7, Math.sin(a)).normalize();
+    _q.setFromUnitVectors(_z, _a);
+    b.add(leafGeometry(0.1, 0.05), { color: mix(leafCol, col, tint * 0.4), leaf: 1, sway: 0.2 + (top - p.y) * 0.4 }, new THREE.Matrix4().compose(p, _q, new THREE.Vector3(1, 1, 1)));
   }
 }
 
-/** A vine spiralling up a trunk, with small leaves. */
+/** A vine spiralling up a trunk, with small leaves (cord only at mid distance). */
 export function trunkVine(b: GeoBuilder, h: number, r: number, rng: RNG, col: THREE.Color, leafCol: THREE.Color): void {
-  if (!FINE.on) return;
   const pts: THREE.Vector3[] = [];
   const a0 = rng.range(0, Math.PI * 2);
   const turns = rng.range(1.1, 1.8);
@@ -181,11 +286,15 @@ export function trunkVine(b: GeoBuilder, h: number, r: number, rng: RNG, col: TH
     const rr = r * (1 + 0.5 * Math.pow(1 - t, 6)) * (1 - 0.35 * t) + 0.02;
     pts.push(new THREE.Vector3(Math.cos(a) * rr, 0.05 + t * h, Math.sin(a) * rr));
   }
-  b.add(tube(pts, () => 0.018, 3, 18), { color: col, sway: (p) => (p.y / h) * 0.06 });
+  b.add(tube(pts, () => (FINE.on ? 0.02 : 0.026), 3, FINE.on ? 18 : 9), { color: col, sway: (p) => (p.y / h) * 0.06 });
   for (let k = 1; k < 10; k++) {
-    const p = pts[k];
-    _a.set(p.x, 0.2, p.z).normalize();
-    _q.setFromUnitVectors(_z, _a);
-    b.add(leafGeometry(0.11, 0.05), { color: mix(leafCol, col, rng.next() * 0.5), leaf: 1, sway: (p.y / h) * 0.08 }, new THREE.Matrix4().compose(p, _q, new THREE.Vector3(1, 1, 1)));
+    const tint = rng.next();
+    if (!FINE.on) continue;
+    for (let s = 0; s < 2; s++) {
+      const p = pts[k].clone().lerp(pts[k + 1], s * 0.5);
+      _a.set(p.x, 0.25 - s * 0.4, p.z).normalize();
+      _q.setFromUnitVectors(_z, _a);
+      b.add(leafGeometry(0.12, 0.055), { color: mix(leafCol, col, tint * 0.5), leaf: 1, sway: (p.y / h) * 0.08 }, new THREE.Matrix4().compose(p, _q, new THREE.Vector3(1, 1, 1)));
+    }
   }
 }

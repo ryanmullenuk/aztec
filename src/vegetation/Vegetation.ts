@@ -114,6 +114,10 @@ export class Vegetation {
     this.density = RENDER.presets[preset].vegDensity;
     this.makeDefs();
     this.generate();
+  }
+
+  /** Build the meshes once every plant exists (after growIslets). */
+  build(): void {
     this.buildMeshes();
   }
 
@@ -212,124 +216,145 @@ export class Vegetation {
     const N = w.N;
     const dens = this.density;
     for (let cz = 1; cz < N - 1; cz++) {
-      for (let cx = 1; cx < N - 1; cx++) {
-        const i = cz * N + cx;
-        const L = w.layer[i];
-        const bx = w.centerX(cx), bz = w.centerZ(cz);
-        if (L <= 0) {
-          // Shallows: rocks off rocky coasts, reef clusters.
-          if (L >= -2 && w.distWater[i] === 0) {
-            const nearRocky = w.rocky[i - 1] + w.rocky[i + 1] + w.rocky[i - N] + w.rocky[i + N] > 0.5;
-            if (nearRocky && rng.chance(VEG.rockShore * 2.5)) {
-              const x = bx + rng.range(-0.3, 0.3), z = bz + rng.range(-0.3, 0.3);
-              this.add('searock', rng.int(0, 1), x, z, rng.range(0, 6.28), rng.range(0.9, 1.6), rng);
-              this.stampFoam(x, z, 1.4);
-            } else if (L >= -1 && noise.noise(cx * 0.12, cz * 0.12) > 0.45 && rng.chance(0.18)) {
-              this.add('reef', 0, bx + rng.range(-0.4, 0.4), bz + rng.range(-0.4, 0.4), rng.range(0, 6.28), rng.range(0.7, 1.3), rng);
-            }
-          }
-          continue;
-        }
-        if (!Number.isNaN(w.riverY[i]) || w.occ[i] !== 0) continue;
-        const dm = Math.hypot(bx - w.meadow.x, bz - w.meadow.z);
-        if (dm < w.meadow.r - 1) continue;
-        const forest = w.forest[i];
-        const sandy = w.sandy[i];
-        const rocky = w.rocky[i];
-        const edge = dm < w.meadow.r + 5;
-        const jx = () => bx + rng.range(-0.4, 0.4);
-        const jz = () => bz + rng.range(-0.4, 0.4);
+      for (let cx = 1; cx < N - 1; cx++) this.populate(cx, cz, rng, noise, dens);
+    }
+  }
 
-        // Rocks.
-        const rockChance = rocky > 0.5 ? VEG.rockHighland : L >= 5 ? VEG.rockHill : 0.004;
-        if (rng.chance(rockChance)) {
-          const x = jx(), z = jz();
-          if (this.flatEnough(x, z, 0.4, 0.3)) this.add('rock', rng.int(0, 2), x, z, rng.range(0, 6.28), rng.range(0.7, 1.4), rng);
-          continue;
-        }
+  /**
+   * Plants for the grown islets' new land and shallows, from their own random stream and
+   * appended after the original plants (whose order the saves rely on).
+   */
+  growIslets(cells: number[]): void {
+    const w = this.world;
+    const rng = new RNG(w.seed * 31 + 977);
+    const noise = new Simplex2(rng);
+    for (const i of cells) {
+      const cx = i % w.N, cz = (i / w.N) | 0;
+      if (cx > 0 && cz > 0 && cx < w.N - 1 && cz < w.N - 1) this.populate(cx, cz, rng, noise, this.density);
+    }
+    // Reefs and sea rocks the islets now stand on are gone.
+    for (const p of this.plants) if ((p.kind === 'reef' || p.kind === 'searock') && w.layer[p.cell] >= 1) p.state = PlantState.Gone;
+  }
 
-        // One tree per cell at most, chosen by biome. Clustering noise groups trees naturally.
-        const cluster = noise.noise(cx * 0.09 + 50, cz * 0.09 - 30) * 0.5 + 0.5;
-        const river = this.nearRiverCell(cx, cz);
-        const hills = L >= 8 || rocky > 0.4;
-        type Pick = [PlantKind, number, number]; // kind, variant, weight
-        let chance = 0;
-        let table: Pick[] = [];
-        if (sandy > 0.5) {
-          chance = VEG.palmBeach * (0.5 + cluster);
-          table = [['palm', -1, 20], ['broadleaf', 2, 1]];
-        } else if (forest > 0.35) {
-          chance = (0.46 * forest + (river ? 0.15 : 0)) * (0.7 + cluster * 0.6);
-          // The wild island's jungle is rich in bananas and fruit trees.
-          const fruitK = w.isle[i] === 2 ? 3.5 : 1;
-          table = [['broadleaf', 0, 20], ['broadleaf', 1, 18], ['broadleaf', 5, river ? 30 : 14], ['broadleaf', 6, river ? 16 : 9], ['broadleaf', 3, 7], ['broadleaf', 4, 5], ['palm', -1, 14], ['banana', 0, 4 * fruitK], ['apple', 1, 3 * fruitK], ['apple', 0, fruitK > 1 ? 6 : 0]];
-        } else if (hills) {
-          chance = 0.07 * (0.3 + cluster);
-          table = [['broadleaf', 3, 35], ['broadleaf', 2, 30], ['broadleaf', 4, 20], ['palm', -1, 15]];
-        } else if (w.distWater[i] < 9) {
-          chance = 0.05 * (0.3 + cluster);
-          table = [['palm', -1, 45], ['broadleaf', 2, 25], ['broadleaf', 4, 20], ['apple', 1, 5], ['broadleaf', 7, 5]];
-        } else {
-          // Open grassland: mostly clear, with small clusters of trees.
-          chance = cluster > 0.62 ? 0.14 : 0.006;
-          table = [['broadleaf', 2, 35], ['broadleaf', 4, 25], ['broadleaf', 3, 15], ['apple', 1, 10], ['broadleaf', 7, 7], ['palm', -1, 8]];
+  /** Plants for one cell, by its biome (the order of random draws must never change). */
+  private populate(cx: number, cz: number, rng: RNG, noise: Simplex2, dens: number): void {
+    const w = this.world;
+    const N = w.N;
+    const i = cz * N + cx;
+    const L = w.layer[i];
+    const bx = w.centerX(cx), bz = w.centerZ(cz);
+    if (L <= 0) {
+      // Shallows: rocks off rocky coasts, reef clusters.
+      if (L >= -2 && w.distWater[i] === 0) {
+        const nearRocky = w.rocky[i - 1] + w.rocky[i + 1] + w.rocky[i - N] + w.rocky[i + N] > 0.5;
+        if (nearRocky && rng.chance(VEG.rockShore * 2.5)) {
+          const x = bx + rng.range(-0.3, 0.3), z = bz + rng.range(-0.3, 0.3);
+          this.add('searock', rng.int(0, 1), x, z, rng.range(0, 6.28), rng.range(0.9, 1.6), rng);
+          this.stampFoam(x, z, 1.4);
+        } else if (L >= -1 && noise.noise(cx * 0.12, cz * 0.12) > 0.45 && rng.chance(0.18)) {
+          this.add('reef', 0, bx + rng.range(-0.4, 0.4), bz + rng.range(-0.4, 0.4), rng.range(0, 6.28), rng.range(0.7, 1.3), rng);
         }
-        if (edge) chance *= 0.3;
-        if (rng.chance(chance)) {
-          const tot = table.reduce((t, p) => t + p[2], 0);
-          let r = rng.next() * tot;
-          let pick = table[0];
-          for (const p of table) if ((r -= p[2]) <= 0) {
-            pick = p;
-            break;
-          }
-          const [tree, v0] = pick;
-          const x = jx(), z = jz();
-          if (this.flatEnough(x, z, 0.3, 0.28)) {
-            let rot = rng.range(0, Math.PI * 2);
-            let variant = tree === 'palm' ? rng.int(0, 2) : v0;
-            if (tree === 'palm' && sandy > 0.5) {
-              // Beach palms lean out toward the sea.
-              const gx = w.distWater[i - 1] - w.distWater[i + 1];
-              const gz = w.distWater[i - N] - w.distWater[i + N];
-              if (gx || gz) {
-                rot = Math.atan2(-gz, gx);
-                variant = rng.chance(0.7) ? 1 : 2;
-              }
-            }
-            let sc = tree === 'broadleaf' ? rng.range(0.85, 1.3) : tree === 'palm' ? rng.range(0.75, 1.25) : rng.range(0.85, 1.1);
-            if (river) sc *= 1.15;
-            // Occasional young trees.
-            if (tree === 'broadleaf' && rng.chance(0.08)) sc *= 0.55;
-            this.add(tree, variant, x, z, rot, sc, rng);
+      }
+      return;
+    }
+    if (!Number.isNaN(w.riverY[i]) || w.occ[i] !== 0) return;
+    const dm = Math.hypot(bx - w.meadow.x, bz - w.meadow.z);
+    if (dm < w.meadow.r - 1) return;
+    const forest = w.forest[i];
+    const sandy = w.sandy[i];
+    const rocky = w.rocky[i];
+    const edge = dm < w.meadow.r + 5;
+    const jx = () => bx + rng.range(-0.4, 0.4);
+    const jz = () => bz + rng.range(-0.4, 0.4);
+
+    // Rocks.
+    const rockChance = rocky > 0.5 ? VEG.rockHighland : L >= 5 ? VEG.rockHill : 0.004;
+    if (rng.chance(rockChance)) {
+      const x = jx(), z = jz();
+      if (this.flatEnough(x, z, 0.4, 0.3)) this.add('rock', rng.int(0, 2), x, z, rng.range(0, 6.28), rng.range(0.7, 1.4), rng);
+      return;
+    }
+
+    // One tree per cell at most, chosen by biome. Clustering noise groups trees naturally.
+    const cluster = noise.noise(cx * 0.09 + 50, cz * 0.09 - 30) * 0.5 + 0.5;
+    const river = this.nearRiverCell(cx, cz);
+    const hills = L >= 8 || rocky > 0.4;
+    type Pick = [PlantKind, number, number]; // kind, variant, weight
+    let chance = 0;
+    let table: Pick[] = [];
+    if (sandy > 0.5) {
+      chance = VEG.palmBeach * (0.5 + cluster);
+      table = [['palm', -1, 20], ['broadleaf', 2, 1]];
+    } else if (forest > 0.35) {
+      chance = (0.46 * forest + (river ? 0.15 : 0)) * (0.7 + cluster * 0.6);
+      // The wild island's jungle is rich in bananas and fruit trees.
+      const fruitK = w.isle[i] === 2 ? 3.5 : 1;
+      table = [['broadleaf', 0, 20], ['broadleaf', 1, 18], ['broadleaf', 5, river ? 30 : 14], ['broadleaf', 6, river ? 16 : 9], ['broadleaf', 3, 7], ['broadleaf', 4, 5], ['palm', -1, 14], ['banana', 0, 4 * fruitK], ['apple', 1, 3 * fruitK], ['apple', 0, fruitK > 1 ? 6 : 0]];
+    } else if (hills) {
+      chance = 0.07 * (0.3 + cluster);
+      table = [['broadleaf', 3, 35], ['broadleaf', 2, 30], ['broadleaf', 4, 20], ['palm', -1, 15]];
+    } else if (w.distWater[i] < 9) {
+      chance = 0.05 * (0.3 + cluster);
+      table = [['palm', -1, 45], ['broadleaf', 2, 25], ['broadleaf', 4, 20], ['apple', 1, 5], ['broadleaf', 7, 5]];
+    } else {
+      // Open grassland: mostly clear, with small clusters of trees.
+      chance = cluster > 0.62 ? 0.14 : 0.006;
+      table = [['broadleaf', 2, 35], ['broadleaf', 4, 25], ['broadleaf', 3, 15], ['apple', 1, 10], ['broadleaf', 7, 7], ['palm', -1, 8]];
+    }
+    if (edge) chance *= 0.3;
+    if (rng.chance(chance)) {
+      const tot = table.reduce((t, p) => t + p[2], 0);
+      let r = rng.next() * tot;
+      let pick = table[0];
+      for (const p of table) if ((r -= p[2]) <= 0) {
+        pick = p;
+        break;
+      }
+      const [tree, v0] = pick;
+      const x = jx(), z = jz();
+      if (this.flatEnough(x, z, 0.3, 0.28)) {
+        let rot = rng.range(0, Math.PI * 2);
+        let variant = tree === 'palm' ? rng.int(0, 2) : v0;
+        if (tree === 'palm' && sandy > 0.5) {
+          // Beach palms lean out toward the sea.
+          const gx = w.distWater[i - 1] - w.distWater[i + 1];
+          const gz = w.distWater[i - N] - w.distWater[i + N];
+          if (gx || gz) {
+            rot = Math.atan2(-gz, gx);
+            variant = rng.chance(0.7) ? 1 : 2;
           }
         }
-        // Understory.
-        if (forest > 0.35) {
-          const ferns = Math.floor(VEG.fernPerJungleCell * forest * dens + rng.next());
-          for (let k = 0; k < ferns; k++) {
-            const x = jx(), z = jz();
-            if (this.flatEnough(x, z, 0.2, 0.25)) this.add('fern', 0, x, z, rng.range(0, 6.28), rng.range(0.7, 1.3), rng);
-          }
-          if (rng.chance(VEG.bushJungle * forest * dens)) {
-            const x = jx(), z = jz();
-            if (this.flatEnough(x, z, 0.25, 0.25)) this.add(rng.chance(VEG.flowerBushChance) ? 'flowerbush' : 'bush', 0, x, z, rng.range(0, 6.28), rng.range(0.7, 1.2), rng);
-          }
-          if (rng.chance(VEG.appleJungle * forest)) {
-            const x = jx(), z = jz();
-            if (this.flatEnough(x, z, 0.25, 0.25)) this.add('apple', 0, x, z, rng.range(0, 6.28), rng.range(0.9, 1.15), rng);
-          }
-        } else if (sandy < 0.5) {
-          const nearMeadow = edge ? 2.5 : 1;
-          if (rng.chance(VEG.bushMeadow * dens * nearMeadow)) {
-            const x = jx(), z = jz();
-            if (this.flatEnough(x, z, 0.25, 0.25)) this.add(rng.chance(0.55) ? 'flowerbush' : 'bush', 0, x, z, rng.range(0, 6.28), rng.range(0.6, 1.1), rng);
-          }
-          if (rng.chance(VEG.appleMeadow * nearMeadow * 1.5)) {
-            const x = jx(), z = jz();
-            if (this.flatEnough(x, z, 0.25, 0.25)) this.add('apple', 0, x, z, rng.range(0, 6.28), rng.range(0.9, 1.15), rng);
-          }
-        }
+        let sc = tree === 'broadleaf' ? rng.range(0.85, 1.3) : tree === 'palm' ? rng.range(0.75, 1.25) : rng.range(0.85, 1.1);
+        if (river) sc *= 1.15;
+        // Occasional young trees.
+        if (tree === 'broadleaf' && rng.chance(0.08)) sc *= 0.55;
+        this.add(tree, variant, x, z, rot, sc, rng);
+      }
+    }
+    // Understory.
+    if (forest > 0.35) {
+      const ferns = Math.floor(VEG.fernPerJungleCell * forest * dens + rng.next());
+      for (let k = 0; k < ferns; k++) {
+        const x = jx(), z = jz();
+        if (this.flatEnough(x, z, 0.2, 0.25)) this.add('fern', 0, x, z, rng.range(0, 6.28), rng.range(0.7, 1.3), rng);
+      }
+      if (rng.chance(VEG.bushJungle * forest * dens)) {
+        const x = jx(), z = jz();
+        if (this.flatEnough(x, z, 0.25, 0.25)) this.add(rng.chance(VEG.flowerBushChance) ? 'flowerbush' : 'bush', 0, x, z, rng.range(0, 6.28), rng.range(0.7, 1.2), rng);
+      }
+      if (rng.chance(VEG.appleJungle * forest)) {
+        const x = jx(), z = jz();
+        if (this.flatEnough(x, z, 0.25, 0.25)) this.add('apple', 0, x, z, rng.range(0, 6.28), rng.range(0.9, 1.15), rng);
+      }
+    } else if (sandy < 0.5) {
+      const nearMeadow = edge ? 2.5 : 1;
+      if (rng.chance(VEG.bushMeadow * dens * nearMeadow)) {
+        const x = jx(), z = jz();
+        if (this.flatEnough(x, z, 0.25, 0.25)) this.add(rng.chance(0.55) ? 'flowerbush' : 'bush', 0, x, z, rng.range(0, 6.28), rng.range(0.6, 1.1), rng);
+      }
+      if (rng.chance(VEG.appleMeadow * nearMeadow * 1.5)) {
+        const x = jx(), z = jz();
+        if (this.flatEnough(x, z, 0.25, 0.25)) this.add('apple', 0, x, z, rng.range(0, 6.28), rng.range(0.9, 1.15), rng);
       }
     }
   }
@@ -749,6 +774,8 @@ export class Vegetation {
           if (p.kind === 'searock') p.y = Math.max(p.y - 0.05, -0.32);
           // Plants drowned by lowering or lifted into the sea are removed.
           if (this.world.layer[i] <= 0 && p.kind !== 'reef' && p.kind !== 'searock') p.state = PlantState.Gone;
+          // Reefs and sea rocks left high and dry go too.
+          else if (this.world.layer[i] >= 1 && (p.kind === 'reef' || p.kind === 'searock')) p.state = PlantState.Gone;
           this.touch(p);
         }
       }
