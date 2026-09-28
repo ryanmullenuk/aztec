@@ -97,6 +97,8 @@ export interface Settings {
   weather: boolean;
   /** Chunky pixel-art rendering. */
   pixel: boolean;
+  /** God mode only: buildings and upgrades finish the moment they are placed. */
+  instantBuild: boolean;
 }
 
 /** Minimal interface the UI and colony use for sound (implemented by the audio engine). */
@@ -262,6 +264,7 @@ export class Game {
     this.scene.add(this.rig3d.group);
     this.sculptor = new Sculptor(this.world, this.terrain, this.water, this.veg, this.eco);
     this.buildings.onComplete = (b) => this.onBuildingComplete(b);
+    this.buildings.instantBuild = () => this.eco.godMode && this.settings.instantBuild;
 
     this.lighting = new Lighting(this.scene, cfg.shadowSize);
     const seaAngle = Math.atan2(this.world.seaDir.z, this.world.seaDir.x);
@@ -667,7 +670,7 @@ export class Game {
   }
 
   private loadSettings(preset: PresetName): Settings {
-    const def: Settings = { preset, dof: true, dofStrength: RENDER.dof.strength, volume: 0.7, music: 0.5, muted: false, fps: false, autoQuality: true, shadows: true, dayNight: true, weather: true, pixel: false };
+    const def: Settings = { preset, dof: true, dofStrength: RENDER.dof.strength, volume: 0.7, music: 0.5, muted: false, fps: false, autoQuality: true, shadows: true, dayNight: true, weather: true, pixel: false, instantBuild: false };
     try {
       const s = JSON.parse(localStorage.getItem(SAVE.settingsKey) ?? 'null');
       if (s) return { ...def, ...s };
