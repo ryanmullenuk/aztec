@@ -393,6 +393,20 @@ const plungeFrag = /* glsl */ `
  * the middle, with slowly drifting faceted ripple cells and a bright water line at the edge.
  * Partly see-through so the rocks on the bottom show.
  */
+const poolVert = /* glsl */ `
+  #include <common>
+  #include <fog_pars_vertex>
+  attribute float aIn;
+  varying vec2 vUv;
+  varying float vIn;
+  void main() {
+    vUv = uv;
+    vIn = aIn;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
+  }
+`;
 const poolFrag = /* glsl */ `
   #include <common>
   #include <fog_pars_fragment>
@@ -400,6 +414,7 @@ const poolFrag = /* glsl */ `
   uniform float uDay;
   uniform float uR;
   varying vec2 vUv;
+  varying float vIn;
   float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   vec2 hsh2(vec2 p){ return vec2(hsh(p), hsh(p + 17.31)); }
   float vnoise(vec2 p){
@@ -410,8 +425,10 @@ const poolFrag = /* glsl */ `
     vec2 q = vUv * 2.0 - 1.0;
     float ang = atan(q.y, q.x);
     float r = length(q) + (vnoise(vec2(ang * 2.2, 3.0)) - 0.5) * 0.14 + (vnoise(vec2(ang * 7.0, 9.0)) - 0.5) * 0.05;
-    if (r > 1.0) discard;
-    float depth = 1.0 - smoothstep(0.3, 0.98, r);
+    // Only over the basin: never hanging past its edge above lower ground.
+    if (r > 1.0 || vIn < 0.02) discard;
+    // Depth from the real basin under each vertex: pale and sandy at the edges, deep in the middle.
+    float depth = smoothstep(0.05, 1.0, vIn);
     // Linear colours (the output is converted to sRGB): sandy shallows, turquoise, deep teal.
     vec3 shallow = vec3(0.34, 0.62, 0.45);
     vec3 mid = vec3(0.012, 0.45, 0.55);
@@ -433,7 +450,7 @@ const poolFrag = /* glsl */ `
     float line = 1.0 - smoothstep(0.0, 0.07, f2 - f1);
     col = mix(col, vec3(0.35, 0.82, 0.88), line * 0.06);
     // Bright water line against the rim.
-    float rim = smoothstep(0.9, 0.99, r);
+    float rim = 1.0 - smoothstep(0.02, 0.22, vIn);
     col = mix(col, vec3(0.85, 0.95, 0.9), rim * 0.35);
     float a = mix(0.58, 0.9, depth);
     a = max(a, rim * 0.8);
@@ -710,17 +727,48 @@ export class Water {
     }
     if (w.waterfall) {
       const f = w.waterfall;
-      const R = f.poolR + 1.4;
+      // Covers the whole basin (a capsule from the foot of the cliff to the pool); clipped to it below.
+      const R = Math.hypot(f.poolR + 0.6, f.poolR + 1.2) + 0.4;
       const poolMat = new THREE.ShaderMaterial({
         uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: this.shared.uTime, uDay: this.shared.uDay, uR: { value: R } },
-        vertexShader: fallVert,
+        vertexShader: poolVert,
         fragmentShader: poolFrag,
         transparent: true,
         depthWrite: false,
         fog: true,
       });
-      const pool = new THREE.Mesh(new THREE.CircleGeometry(R, 56).rotateX(-Math.PI / 2), poolMat);
-      pool.position.set(f.x + f.dx * (f.poolR + 1.2), f.poolY + 0.004, f.z + f.dz * (f.poolR + 1.2));
+      // A polar grid, each vertex marked whether the basin holds water under it (ground below the
+      // surface but not dropping away), so the surface is clipped to the basin.
+      const cx0 = f.x + f.dx * (f.poolR + 1.2), cz0 = f.z + f.dz * (f.poolR + 1.2);
+      const RINGS = 22, SEG = 72;
+      const pp: number[] = [], uv: number[] = [], inn: number[] = [], ix: number[] = [];
+      for (let j = 0; j <= RINGS; j++) {
+        for (let k = 0; k <= SEG; k++) {
+          const rr = (j / RINGS) * R, an = (k / SEG) * Math.PI * 2;
+          const x = Math.cos(an) * rr, z = Math.sin(an) * rr;
+          pp.push(x, 0, z);
+          uv.push(0.5 + (x / R) * 0.5, 0.5 + (z / R) * 0.5);
+          const gy = w.heightAt(cx0 + x, cz0 + z);
+          // Water depth (0..1 over 0.45 units) where the basin holds water; -1 where the ground drops away.
+          // Only inside the basin (a capsule from the foot of the cliff to the pool centre).
+          const la = x * -f.dz + z * f.dx, ll = f.poolR + 1.2 + x * f.dx + z * f.dz;
+          const dc = ll < f.poolR + 1.2 ? Math.abs(la) : Math.hypot(la, ll - f.poolR - 1.2);
+          const basin = dc < f.poolR + 0.85 && ll > 0.2;
+          inn.push(basin && gy > f.poolY - 1.1 ? THREE.MathUtils.clamp((f.poolY - gy) / 0.45, 0, 1) : -1);
+          if (j < RINGS && k < SEG) {
+            const a0 = j * (SEG + 1) + k;
+            // Wound to face up.
+            ix.push(a0, a0 + 1, a0 + SEG + 1, a0 + 1, a0 + SEG + 2, a0 + SEG + 1);
+          }
+        }
+      }
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3));
+      pg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      pg.setAttribute('aIn', new THREE.Float32BufferAttribute(inn, 1));
+      pg.setIndex(ix);
+      const pool = new THREE.Mesh(pg, poolMat);
+      pool.position.set(cx0, f.poolY + 0.004, cz0);
       pool.renderOrder = 11;
       this.group.add(pool);
     }
@@ -812,6 +860,8 @@ export class Water {
     const rock = (a: number, l: number, y0: number, w: number, h: number, d: number, turn = 0, moss = 0.55, wet = f.poolY + 0.08) => {
       const [x, z] = at(a, l);
       b.add(angularRockGeometry(Math.floor(rng.next() * 1e6)), { color: rockColor(moss, wet), ao: { y0: y0 - 0.2, y1: y0 + h * 0.6, min: 0.6 } }, M.t(x, y0, z, 0, yaw + turn, 0, w / 2, h, d / 2));
+      // Solid: nobody walks through a boulder.
+      this.world.blockCircle(x, z, Math.max(w, d) * 0.42);
       return { x, z, top: y0 + h * 1.02, w, d };
     };
     const ledges: { x: number; z: number; top: number; w: number; d: number; face: number }[] = [];
@@ -836,17 +886,27 @@ export class Water {
     rock(-1.7, 3.7, f.poolY - 0.5, 1.0, 0.62, 0.9, rng.next() * 3, 0.35);
     rock(2.0, 4.9, f.poolY - 0.5, 1.1, 0.68, 1.0, rng.next() * 3, 0.35);
     for (const [a, l, w] of [[0.5, 5.5, 0.9], [-1.1, 2.8, 0.8], [1.4, 6.7, 0.7], [-2.3, 6.0, 0.8]] as const) rock(a, l, f.poolY - 0.62, w, 0.38, w * 0.9, rng.next() * 3, 0);
-    for (const deg of [55, 80, 105, 135, 225, 255, 280, 305]) {
+    for (const deg of [32, 55, 80, 105, 135, 225, 255, 280, 305, 328]) {
       const ang = (deg * Math.PI) / 180;
       const rr = R * rng.range(0.92, 1.08);
       const a = Math.sin(ang) * rr, l = f.poolR + 1.2 + Math.cos(ang) * rr;
       const big = rng.chance(0.45);
       const [x, z] = at(a, l);
-      const g0 = Math.min(this.world.heightAt(x, z), f.poolY + 0.3);
+      // Bedded into the ground (never perched above it).
+      const g0 = this.world.heightAt(x, z);
       const w = big ? rng.range(0.9, 1.3) : rng.range(0.45, 0.7);
-      rock(a, l, g0 - 0.15, w, big ? rng.range(0.6, 0.95) : rng.range(0.3, 0.45), w * rng.range(0.8, 1.1), rng.next() * 3, 0.5);
+      rock(a, l, g0 - 0.22, w, big ? rng.range(0.6, 0.95) : rng.range(0.3, 0.45), w * rng.range(0.8, 1.1), rng.next() * 3, 0.5);
     }
     void pc;
+    // Boulders along the dangerous edges: the cliff top either side of the drop, and the front of
+    // the cliff between the columns, so the gorge reads as enclosed without looking fenced.
+    for (const s of [-1, 1]) {
+      for (const [a, l, w0, h0] of [[3.5, 0.15, 1.1, 0.85], [5.3, -0.2, 1.3, 0.75], [2.4, -2.2, 0.9, 0.6], [4.2, -2.6, 1.0, 0.7], [2.6, 0.45, 1.2, 1.6], [3.9, 1.35, 1.1, 1.1], [5.2, 2.2, 1.0, 0.8]] as const) {
+        const [x, z] = at(s * a, l);
+        const g0 = this.world.heightAt(x, z);
+        rock(s * a, l, g0 - 0.25, w0 * rng.range(0.85, 1.15), h0 * rng.range(0.85, 1.2), w0 * rng.range(0.8, 1.1), rng.next() * 3, 0.6);
+      }
+    }
     // Plants on the ledges: ferns and bushes on the crowns, vines hanging down the faces.
     const fern = fernGeometry(false, 31), bush = bushGeometry(false, false, 41), flower = bushGeometry(true, false, 42);
     const vine = new THREE.Color(0x4c702f), vineLeaf = new THREE.Color(0x7aa83f);
