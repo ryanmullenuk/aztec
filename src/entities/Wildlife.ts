@@ -3,8 +3,12 @@ import { WILDLIFE } from '../config';
 import { fishMaterial } from '../render/materials';
 import { View } from '../render/View';
 
-/** Beyond this distance (squared) fish are drawn with the lighter model. */
-const FISH_LOD2 = 20 * 20;
+/** Beyond this distance (squared) fish are drawn with the lighter model (they're small: it kicks in early). */
+const FISH_LOD2 = 13 * 13;
+/** Beyond this distance (squared) school fish are sub-pixel: neither flocked nor drawn. */
+const FISH_FAR2 = WILDLIFE.fishDrawDistance * WILDLIFE.fishDrawDistance;
+/** Nose-to-tail length of a school fish in world units (an islander is ~0.62 tall). */
+const SCHOOL_FISH_LEN: [number, number] = [0.085, 0.14];
 import { Building } from '../buildings/Buildings';
 import { Islander } from './Islander';
 import { SpatialHash } from '../world/SpatialHash';
@@ -80,6 +84,8 @@ export class Wildlife {
   private fishMeshLo: THREE.InstancedMesh;
   private rng: RNG;
   private time = 0;
+  /** Length of the school-fish model before instance scaling. */
+  private fishModelLen = 0.2;
   /** Positions boats scare fish from. */
   boats: { x: number; z: number }[] = [];
 
@@ -107,7 +113,7 @@ export class Wildlife {
     this.reef = new ReefFish(world, reefPts);
     this.group.add(this.animals.group, this.birds.group, this.monkeys.group, this.critters.group, this.reef.group, this.coral.group);
     const fmat = fishMaterial(11);
-    const cap = Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool);
+    const cap = Math.max(1, WILDLIFE.schools * WILDLIFE.schoolFishShown);
     const mk = (g: THREE.BufferGeometry) => {
       const m = new THREE.InstancedMesh(g, fmat, cap);
       m.castShadow = false;
@@ -117,7 +123,10 @@ export class Wildlife {
       this.group.add(m);
       return m;
     };
-    this.fishMesh = mk(fishGeometry('silver'));
+    const geo = fishGeometry('silver');
+    geo.computeBoundingBox();
+    this.fishModelLen = Math.max(0.01, geo.boundingBox!.max.z - geo.boundingBox!.min.z);
+    this.fishMesh = mk(geo);
     this.fishMeshLo = mk(fishGeometry('silver', 'lo'));
     this.spawnSchools();
     this.shownCount = new Int32Array(this.schools.length);
@@ -151,8 +160,10 @@ export class Wildlife {
       }
       if (!pos) continue;
       this.schools.push({ x: pos.x, z: pos.z, tx: pos.x, tz: pos.z, stock: WILDLIFE.fishPerSchool, max: WILDLIFE.fishPerSchool, deep: true });
-      for (let k = 0; k < WILDLIFE.fishPerSchool; k++) {
-        this.fish.push({ x: pos.x + this.rng.range(-2, 2), y: -0.5 - this.rng.next() * 0.5, z: pos.z + this.rng.range(-2, 2), vx: 0, vz: 0, heading: 0, school: this.schools.length - 1, phase: this.rng.range(0, 10), scale: this.rng.range(0.9, 1.3) });
+      // More fish are drawn than the stock counts (stock is the fishing yield; see shownFor).
+      for (let k = 0; k < WILDLIFE.schoolFishShown; k++) {
+        const len = this.rng.range(SCHOOL_FISH_LEN[0], SCHOOL_FISH_LEN[1]);
+        this.fish.push({ x: pos.x + this.rng.range(-2, 2), y: -0.5 - this.rng.next() * 0.5, z: pos.z + this.rng.range(-2, 2), vx: 0, vz: 0, heading: 0, school: this.schools.length - 1, phase: this.rng.range(0, 10), scale: len / this.fishModelLen });
       }
     }
   }
@@ -185,7 +196,7 @@ export class Wildlife {
       }
       const d = Math.hypot(s.tx - s.x, s.tz - s.z) || 1;
       const nx = s.x + ((s.tx - s.x) / d) * 0.9 * dt, nz = s.z + ((s.tz - s.z) / d) * 0.9 * dt;
-      s.vis = View.sees(s.x, -0.6, s.z, 6);
+      s.vis = View.sees(s.x, -0.6, s.z, 6) && View.dist2(s.x, -0.6, s.z) < FISH_FAR2;
       if (w.heightAt(nx, nz) < -1.8) {
         // Off-screen: the fish simply travel with their school (flocking resumes on screen).
         if (!s.vis) for (const f of this.fish) if (this.schools[f.school] === s) {
@@ -212,16 +223,17 @@ export class Wildlife {
       // Bait-ball swirl: circle the school centre with a slowly changing radius.
       const dx = f.x - s.x, dz = f.z - s.z;
       const dd = Math.hypot(dx, dz) || 1;
-      const want = 1.5 + (f.phase % 1) * 2.6;
+      const want = 1.2 + (f.phase % 1) * 2.4;
       fx += (-dz / dd) * 1.4 + (dx / dd) * (want - dd) * 0.8;
       fz += (dx / dd) * 1.4 + (dz / dd) * (want - dd) * 0.8;
       let sx = 0, sz = 0, ax = 0, az = 0, n = 0;
-      this.fishHash.query(f.x, f.z, 1.5, (o, d2) => {
+      // Twice the fish at under half the size: a tighter neighbourhood keeps the cost flat.
+      this.fishHash.query(f.x, f.z, 1.0, (o, d2) => {
         if (o === f || o.school !== f.school) return;
         n++;
         ax += o.vx;
         az += o.vz;
-        if (d2 < 0.16) {
+        if (d2 < 0.07) {
           sx += f.x - o.x;
           sz += f.z - o.z;
         }
@@ -288,11 +300,11 @@ export class Wildlife {
       const f = this.fish[i];
       const s = this.schools[f.school];
       const n = shown[f.school]++;
-      if (n >= Math.floor(s.stock) || !s.vis || !View.sees(f.x, f.y, f.z, 0.2)) continue;
+      if (n >= this.shownFor(s) || !s.vis || !View.sees(f.x, f.y, f.z, 0.2)) continue;
       const wig = Math.sin(this.time * 4 + f.phase) * 0.05;
       _e.set(0, f.heading + wig, 0, 'YXZ');
       _q.setFromEuler(_e);
-      _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale * 1.2));
+      _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale));
       if (View.dist2(f.x, f.y, f.z) < FISH_LOD2) this.fishMesh.setMatrixAt(hi++, _m);
       else this.fishMeshLo.setMatrixAt(lo++, _m);
     }
@@ -303,6 +315,11 @@ export class Wildlife {
   }
 
   private shownCount = new Int32Array(0);
+
+  /** How many of a school's fish are drawn: its share of full stock, times the fish it shows when full. */
+  private shownFor(s: School): number {
+    return s.max > 0 ? Math.floor((s.stock / s.max) * WILDLIFE.schoolFishShown) : 0;
+  }
 
   // ---------------- Predators (pelicans) ----------------
 
@@ -320,7 +337,7 @@ export class Wildlife {
     let best: Fish | null = null, bd = r * r;
     for (const f of this.fish) {
       const n = shown[f.school]++;
-      if (n >= Math.floor(this.schools[f.school].stock)) continue;
+      if (n >= this.shownFor(this.schools[f.school])) continue;
       const d = (f.x - x) ** 2 + (f.z - z) ** 2;
       if (d < bd) {
         bd = d;

@@ -7,18 +7,24 @@ import { View } from '../render/View';
 import { FishType, fishGeometry } from './animalModels';
 import { SEA_SURFACE } from '../water/Water';
 
-/** Beyond this distance (squared) reef fish use the lighter model. */
-const REEF_LOD2 = 16 * 16;
+/** Beyond this distance (squared) reef fish use the lighter model (they're small: it kicks in early). */
+const REEF_LOD2 = 11 * 11;
 
-const TYPES: FishType[] = ['blueYellow', 'yellow', 'clown', 'idol', 'silver', 'tang'];
-/** Relative abundance and size of each variety. */
+/** Beyond this distance (squared) reef fish are sub-pixel: neither steered nor drawn. */
+const FAR2 = WILDLIFE.fishDrawDistance * WILDLIFE.fishDrawDistance;
+
+const TYPES: FishType[] =['blueYellow', 'yellow', 'clown', 'idol', 'silver', 'tang'];
+/**
+ * Relative abundance, nose-to-tail length in world units (an islander is ~0.62 tall, a canoe
+ * ~1.2 long) and cruising speed of each variety. Small fish are clearly smaller than big ones.
+ */
 const TYPE_INFO: Record<FishType, { weight: number; size: [number, number]; speed: number }> = {
-  blueYellow: { weight: 3, size: [0.9, 1.15], speed: 0.55 },
-  yellow: { weight: 3, size: [0.85, 1.1], speed: 0.5 },
-  clown: { weight: 1.5, size: [0.8, 1], speed: 0.35 },
-  idol: { weight: 1.2, size: [0.9, 1.1], speed: 0.4 },
-  silver: { weight: 2.5, size: [0.9, 1.2], speed: 0.75 },
-  tang: { weight: 1.5, size: [0.9, 1.2], speed: 0.5 },
+  clown: { weight: 1.5, size: [0.055, 0.075], speed: 0.24 },
+  blueYellow: { weight: 3, size: [0.065, 0.09], speed: 0.36 },
+  silver: { weight: 2.5, size: [0.09, 0.13], speed: 0.55 },
+  yellow: { weight: 3, size: [0.1, 0.13], speed: 0.36 },
+  idol: { weight: 1.2, size: [0.14, 0.18], speed: 0.3 },
+  tang: { weight: 1.5, size: [0.17, 0.24], speed: 0.4 },
 };
 
 interface Reef {
@@ -82,9 +88,20 @@ export class ReefFish {
   /** Lighter geometry for fish far from the camera. */
   private meshesLo = new Map<FishType, THREE.InstancedMesh>();
   private time = 0;
+  /** Nose-to-tail length of each variety's model (before instance scaling). */
+  private modelLen = new Map<FishType, number>();
 
   constructor(private world: World, reefPoints: { x: number; z: number }[]) {
     this.rng = new RNG(world.seed * 59 + 17);
+    // Model length per variety, so each fish can be scaled to its real world length.
+    const geoHi = new Map<FishType, THREE.BufferGeometry>();
+    for (const t of TYPES) {
+      const g = fishGeometry(t, 'hi');
+      g.computeBoundingBox();
+      const bb = g.boundingBox!;
+      this.modelLen.set(t, Math.max(0.01, bb.max.z - bb.min.z));
+      geoHi.set(t, g);
+    }
     this.findReefs(reefPoints);
     this.spawn();
     // Drawn after the water, softly blended, so their colours read through the surface. They are
@@ -95,7 +112,7 @@ export class ReefFish {
     for (const t of TYPES) {
       const n = this.fish.filter((f) => this.schools[f.school].type === t).length;
       for (const lo of [false, true]) {
-        const m = new THREE.InstancedMesh(fishGeometry(t, lo ? 'lo' : 'hi'), mat, Math.max(1, n));
+        const m = new THREE.InstancedMesh(lo ? fishGeometry(t, 'lo') : geoHi.get(t)!, mat, Math.max(1, n));
         m.castShadow = false;
         m.frustumCulled = false;
         m.renderOrder = 12;
@@ -144,21 +161,23 @@ export class ReefFish {
     if (!this.reefs.length) return;
     const nS = this.rng.int(FAUNA.reefSchools[0], FAUNA.reefSchools[1]);
     let total = 0;
-    for (let s = 0; s < nS && total < WILDLIFE.reefFish + 40; s++) {
+    for (let s = 0; s < nS && total < WILDLIFE.reefFish + 80; s++) {
       const reef = s % this.reefs.length;
       const R = this.reefs[reef];
       const type = this.pickType();
       // Big fish swim in small groups; small ones in bigger schools.
-      const size = type === 'tang' || type === 'idol' ? this.rng.int(5, 9) : this.rng.int(FAUNA.reefSchoolSize[0], FAUNA.reefSchoolSize[1]);
+      const size = type === 'tang' || type === 'idol' ? this.rng.int(10, 18) : this.rng.int(FAUNA.reefSchoolSize[0], FAUNA.reefSchoolSize[1]);
       const sc: RSchool = { type, reef, x: R.x, z: R.z, tx: R.x, tz: R.z, heading: this.rng.range(0, 6.28), speed: TYPE_INFO[type].speed, timer: 0, excursion: 0, vis: true };
       this.schools.push(sc);
-      const spread = 0.35 + Math.sqrt(size) * 0.14;
+      // Schools of small fish pack tighter than the old, bigger fish did.
+      const spread = 0.22 + Math.sqrt(size) * 0.09;
+      const [a, b] = TYPE_INFO[type].size;
+      const len = this.modelLen.get(type) ?? 0.2;
       for (let k = 0; k < size; k++) {
-        const [a, b] = TYPE_INFO[type].size;
         const f: RFish = {
           school: this.schools.length - 1, x: R.x + this.rng.range(-1, 1), y: -0.4, z: R.z + this.rng.range(-1, 1), heading: sc.heading,
-          speed: 0, ox: this.rng.range(-spread, spread), oz: this.rng.range(-spread, spread), oy: this.rng.range(-0.12, 0.12),
-          phase: this.rng.range(0, 10), scale: this.rng.range(a, b), dart: 0, gone: 0,
+          speed: 0, ox: this.rng.range(-spread, spread), oz: this.rng.range(-spread, spread), oy: this.rng.range(-0.08, 0.08),
+          phase: this.rng.range(0, 10), scale: this.rng.range(a, b) / len, dart: 0, gone: 0,
         };
         this.fish.push(f);
         total++;
@@ -229,7 +248,7 @@ export class ReefFish {
         s.heading += Math.max(-0.7 * dt, Math.min(0.7 * dt, dh));
         const sp = s.speed * (0.6 + 0.4 * Math.cos(dh));
         const nx = s.x + Math.sin(s.heading) * sp * dt, nz = s.z + Math.cos(s.heading) * sp * dt;
-        s.vis = View.sees(s.x, -0.4, s.z, 3.5);
+        s.vis = View.sees(s.x, -0.4, s.z, 3.5) && View.dist2(s.x, -0.4, s.z) < FAR2;
         if (this.roam(nx, nz)) {
           s.x = nx;
           s.z = nz;
@@ -258,7 +277,7 @@ export class ReefFish {
         // Personal slots drift so the school breathes and reshapes.
         const ph = this.time * 0.25 + f.phase;
         const c = Math.cos(s.heading), sn = Math.sin(s.heading);
-        const ox = f.ox + Math.sin(ph) * 0.18, oz = f.oz + Math.cos(ph * 1.3) * 0.18;
+        const ox = f.ox + Math.sin(ph) * 0.1, oz = f.oz + Math.cos(ph * 1.3) * 0.1;
         let tx = s.x + ox * c + oz * sn, tz = s.z - ox * sn + oz * c;
         let flee = false;
         const scare = (x: number, z: number, r: number) => {
@@ -277,7 +296,7 @@ export class ReefFish {
         f.dart = Math.max(0, f.dart - dt);
         const dx = tx - f.x, dz = tz - f.z;
         const d = Math.hypot(dx, dz);
-        const maxS = f.dart > 0 ? 3.2 : s.speed * 1.9;
+        const maxS = f.dart > 0 ? 2.4 : s.speed * 1.9;
         const targetSpeed = Math.min(maxS, d * 1.6 + s.speed * 0.3);
         f.speed += (targetSpeed - f.speed) * Math.min(1, dt * (f.dart > 0 ? 8 : 2));
         if (d > 0.02) {
@@ -331,7 +350,8 @@ export class ReefFish {
       const wig = Math.sin(this.time * (3 + f.speed * 4) + f.phase) * (0.03 + f.speed * 0.02);
       _e.set(0, f.heading + wig, 0, 'YXZ');
       _q.setFromEuler(_e);
-      _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale * 1.7));
+      // (f.scale already maps the model to the fish's world length.)
+      _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale));
       m.setMatrixAt(i, _m);
       c.set(s.type, i + 1);
     }
