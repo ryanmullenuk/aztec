@@ -178,6 +178,7 @@ export class Terrain {
     colr.needsUpdate = true;
     mask.needsUpdate = true;
     fmask.needsUpdate = true;
+    this.retriangulate(P, i0, i1, j0, j1);
     // Refresh bounds of the chunks we touched.
     for (const c of this.chunks) {
       if (c.i1 < i0 || c.i0 > i1 || c.j1 < j0 || c.j0 > j1) continue;
@@ -194,6 +195,39 @@ export class Terrain {
       const g = c.mesh.geometry;
       g.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, (minY + maxY) / 2, cz), Math.hypot(hw, hd, hh));
       g.boundingBox = new THREE.Box3(new THREE.Vector3(cx - hw, minY - 0.5, cz - hd), new THREE.Vector3(cx + hw, maxY + 0.5, cz + hd));
+    }
+  }
+
+  /**
+   * Split each grid square along the diagonal whose corners are closest in height, so the
+   * triangles follow the slope. A fixed (or checkerboard) split turns a terrace edge or bank that
+   * runs across the grid into a sawtooth of light and dark triangles.
+   */
+  private retriangulate(P: Float32Array, i0: number, i1: number, j0: number, j1: number): void {
+    const V = this.M + 1;
+    for (const c of this.chunks) {
+      const qi0 = Math.max(i0, c.i0), qi1 = Math.min(i1, c.i1), qj0 = Math.max(j0, c.j0), qj1 = Math.min(j1, c.j1);
+      if (qi0 >= qi1 || qj0 >= qj1) continue;
+      const attr = c.mesh.geometry.index!;
+      const I = attr.array as Uint32Array;
+      const w = c.i1 - c.i0;
+      for (let j = qj0; j < qj1; j++) {
+        for (let i = qi0; i < qi1; i++) {
+          const a = j * V + i, b = a + 1, cc = a + V, d = cc + 1;
+          const dad = Math.abs(P[a * 3 + 1] - P[d * 3 + 1]), dbc = Math.abs(P[b * 3 + 1] - P[cc * 3 + 1]);
+          // Flat ground keeps the alternating split (a less regular look).
+          const alongAD = Math.abs(dad - dbc) < 1e-4 ? !((i + j) & 1) : dad < dbc;
+          let k = ((j - c.j0) * w + (i - c.i0)) * 6;
+          if (alongAD) {
+            I[k++] = a; I[k++] = cc; I[k++] = d;
+            I[k++] = a; I[k++] = d; I[k++] = b;
+          } else {
+            I[k++] = a; I[k++] = cc; I[k++] = b;
+            I[k++] = b; I[k++] = cc; I[k++] = d;
+          }
+        }
+      }
+      attr.needsUpdate = true;
     }
   }
 
