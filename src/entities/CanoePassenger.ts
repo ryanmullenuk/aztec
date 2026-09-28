@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { loadGlbPeople, GlbPeople } from './glbPeople';
+import { bakePose, loadGlbPeople, GlbPeople } from './glbPeople';
 import { stylisedMaterial } from '../render/materials';
 
-/** A seated copy of the same character parts used by the islanders ashore. */
+/** A seated copy of the same character models used by the islanders ashore (a baked pose). */
 export class CanoePassenger extends THREE.Group {
   private disposed = false;
   private geometries: THREE.BufferGeometry[] = [];
@@ -22,50 +22,31 @@ export class CanoePassenger extends THREE.Group {
 
   private seat(models: GlbPeople): void {
     this.clear();
-    const g = this.gender, sk = models.skel[g];
+    const g = this.gender;
     const body = new THREE.Group();
     body.scale.setScalar(this.bodyScale * (g === 'f' ? 0.98 : 1));
     // Hips sit just above the bench; feet rest inside the hull.
     body.position.y = 0.37;
     this.add(body);
+    // Seated: thighs forward along the bench, shins down, hands resting forward on the knees.
+    const geo = bakePose(models[g], {
+      spine: [0.08, 0, 0],
+      thighL: [-Math.PI / 2, 0, 0.05], thighR: [-Math.PI / 2, 0, -0.05],
+      shinL: [Math.PI / 2, 0, 0], shinR: [Math.PI / 2, 0, 0],
+      upper_armL: [-0.35, 0, 0.08], upper_armR: [-0.35, 0, -0.08],
+      forearmL: [-1.05, 0, 0], forearmR: [-1.05, 0, 0],
+    });
     const skin = new THREE.Color(0xc98450), gold = new THREE.Color(0xd9a521);
-    const part = (key: string, parent: THREE.Object3D, x = 0, y = 0, z = 0): THREE.Group => {
-      const joint = new THREE.Group();
-      joint.position.set(x, y, z);
-      parent.add(joint);
-      const source = models.parts.get(key);
-      if (source) {
-        // Do not mutate geometries or per-instance attributes owned by IslanderRig.
-        const geo = source.clone();
-        geo.deleteAttribute('iAccent');
-        const colors = geo.getAttribute('color'), tags = geo.getAttribute('aMat');
-        for (let i = 0; i < colors.count; i++) {
-          const tag = tags.getX(i);
-          const tint = tag === 1 ? skin : tag === 2 ? gold : null;
-          if (tint) colors.setXYZ(i, colors.getX(i) * tint.r, colors.getY(i) * tint.g, colors.getZ(i) * tint.b);
-        }
-        this.geometries.push(geo);
-        const mesh = new THREE.Mesh(geo, this.material);
-        mesh.castShadow = mesh.receiveShadow = true;
-        joint.add(mesh);
-      }
-      return joint;
-    };
-    const pelvis = part(`pelvis_${g}`, body);
-    const chest = part(`chest_${g}`, pelvis, 0, sk.chestY);
-    chest.rotation.x = 0.08;
-    part(`head_${g}`, chest, 0, sk.neckY);
-    for (const [side, sign] of [['L', 1], ['R', -1]] as const) {
-      const thigh = part(`thigh_${g}${side}`, pelvis, sign * sk.hipX, sk.hipDY ?? -0.03);
-      thigh.rotation.x = -Math.PI / 2;
-      const shin = part(`shin_${g}${side}`, thigh, 0, -sk.thigh);
-      shin.rotation.x = Math.PI / 2;
-      const arm = part(`uarm_${g}${side}`, chest, sign * sk.shoulderX, sk.shoulderY);
-      arm.rotation.x = -0.35;
-      arm.rotation.z = sign * 0.08;
-      const forearm = part(`farm_${g}${side}`, arm, 0, -sk.upper);
-      forearm.rotation.x = -1.05;
+    const colors = geo.getAttribute('color'), tags = geo.getAttribute('aMat');
+    for (let i = 0; i < colors.count; i++) {
+      const tag = tags.getX(i);
+      const tint = tag === 1 ? skin : tag === 2 ? gold : null;
+      if (tint) colors.setXYZ(i, colors.getX(i) * tint.r, colors.getY(i) * tint.g, colors.getZ(i) * tint.b);
     }
+    this.geometries.push(geo);
+    const mesh = new THREE.Mesh(geo, this.material);
+    mesh.castShadow = mesh.receiveShadow = true;
+    body.add(mesh);
   }
 
   /** Late model loads must not bring passengers back after they have disembarked. */

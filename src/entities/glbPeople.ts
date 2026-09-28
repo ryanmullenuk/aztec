@@ -168,3 +168,63 @@ export function loadGlbPeople(): Promise<GlbPeople> {
   pending = Promise.all([loadOne(loader, url('m')), loadOne(loader, url('f'))]).then(([m, f]) => ({ m, f }));
   return pending;
 }
+
+const PARENT: Record<BoneName, BoneName | null> = {
+  hips: null, spine: 'hips', chest: 'spine', neck: 'chest', head: 'neck',
+  shoulderL: 'chest', upper_armL: 'shoulderL', forearmL: 'upper_armL', handL: 'forearmL',
+  shoulderR: 'chest', upper_armR: 'shoulderR', forearmR: 'upper_armR', handR: 'forearmR',
+  thighL: 'hips', shinL: 'thighL', footL: 'shinL', thighR: 'hips', shinR: 'thighR', footR: 'shinR',
+};
+
+/**
+ * A static copy of a model in a fixed pose (CPU skinned), for figures that never move on their
+ * own, such as canoe passengers. Rotations are Euler XYZ per bone with the islander rig's
+ * conventions: limbs hang straight down at zero (so upper arms and thighs are absolute to their
+ * parent, not the model's A-pose), negative X swings a thigh / upper arm forward, positive shin X
+ * bends the knee, negative forearm X bends the elbow. The hips sit at the origin.
+ */
+export function bakePose(model: GlbModel, rot: Partial<Record<BoneName, [number, number, number]>>): THREE.BufferGeometry {
+  const J = model.joint, L = model.len;
+  const W: THREE.Matrix4[] = [];
+  const e = new THREE.Euler(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), o = new THREE.Vector3();
+  for (const b of BONES) {
+    const par = PARENT[b];
+    if (!par) o.set(0, 0, 0);
+    else if (b.startsWith('forearm')) o.set(0, -L.upper, 0);
+    else if (b.startsWith('hand')) o.set(0, -L.fore, 0);
+    else if (b.startsWith('shin')) o.set(0, -L.thigh, 0);
+    else if (b.startsWith('foot')) o.set(0, -L.shin, 0);
+    else o.copy(J[b]).sub(J[par]);
+    const r = rot[b] ?? [0, 0, 0];
+    q.setFromEuler(e.set(r[0], r[1], r[2]));
+    const local = new THREE.Matrix4().compose(o, q, one);
+    W.push(par ? W[BI[par]].clone().multiply(local) : local);
+  }
+  // Bind-pose hips at the origin: shift every skin matrix down by the hip height.
+  const lift = new THREE.Matrix4().makeTranslation(0, J.hips.y, 0);
+  const S = W.map((w, i) => w.clone().multiply(model.bindInv[i]).multiply(lift));
+  const src = model.geometry;
+  const geo = src.clone();
+  geo.deleteAttribute('iAccent');
+  const P = geo.getAttribute('position'), N = geo.getAttribute('normal');
+  const SI = src.getAttribute('aSkinI'), SW = src.getAttribute('aSkinW');
+  const m = new THREE.Matrix4(), nm = new THREE.Matrix3(), p = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let i = 0; i < P.count; i++) {
+    m.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    for (let k = 0; k < 4; k++) {
+      const w = SW.getComponent(i, k);
+      if (w <= 0) continue;
+      const s = S[SI.getComponent(i, k)].elements;
+      for (let j = 0; j < 16; j++) m.elements[j] += s[j] * w;
+    }
+    // Vertices were stored relative to the bind hips; put them back before skinning.
+    p.fromBufferAttribute(P, i).sub(o.set(0, J.hips.y, 0)).applyMatrix4(m);
+    P.setXYZ(i, p.x, p.y, p.z);
+    n.fromBufferAttribute(N, i).applyMatrix3(nm.setFromMatrix4(m)).normalize();
+    N.setXYZ(i, n.x, n.y, n.z);
+  }
+  geo.deleteAttribute('aSkinI');
+  geo.deleteAttribute('aSkinW');
+  geo.computeBoundingSphere();
+  return geo;
+}
