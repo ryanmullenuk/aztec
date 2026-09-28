@@ -14,7 +14,7 @@ import { CameraRig } from './render/CameraRig';
 import { FX } from './render/materials';
 import { Input } from './ui/Input';
 import { UI } from './ui/UI';
-import { PAINT_TOOLS, TOOLS, ToolId } from './ui/tools';
+import { PAINT_TOOLS, TOOLBAR, TOOLS, ToolId } from './ui/tools';
 import { PlantState, Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { Wildflowers } from './vegetation/Wildflowers';
@@ -1293,8 +1293,12 @@ export class Game {
   private onKey(e: KeyboardEvent): void {
     const k = e.key.toLowerCase();
     if (k >= '1' && k <= '9') {
-      const t = TOOLS[parseInt(k, 10) - 1];
-      if (t) this.setTool(t.id);
+      const t = TOOLBAR[parseInt(k, 10) - 1];
+      if (t?.id === 'terrain') this.ui.toggleTerrain();
+      else if (t) {
+        this.ui.closePopups();
+        this.setTool(t.id);
+      }
     } else if (k === ' ') {
       e.preventDefault();
       this.togglePause();
