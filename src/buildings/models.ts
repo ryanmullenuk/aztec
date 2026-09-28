@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COLORS } from '../config';
-import { GeoBuilder, M, P, lumpy } from '../render/GeoBuilder';
+import { GeoBuilder, M, P, doubleSide, lumpy, ribbon, tube } from '../render/GeoBuilder';
 import { RNG } from '../world/rng';
 
 const c = (h: number) => new THREE.Color(h);
@@ -121,25 +121,30 @@ export function firepitModel(): BuildingModel {
   b.add(P.cyl(0.45, 0.48, 0.03, 12), { color: c(0x3a2a22) }, M.t(0, 0.015, 0, 0, 0, 0, 1, 1, 0.72));
   for (let k = 0; k < 4; k++) b.add(P.cyl(0.035, 0.035, 0.5, 5), { color: c(0x2e2018) }, M.t(0, 0.06, 0, Math.PI / 2, (k / 4) * Math.PI, 0));
   b.add(P.sphere(0.14, 0), { color: c(0xe8702a) }, M.t(0, 0.08, 0, 0, 0, 0, 1.6, 0.4, 1.1));
-  // Forked posts and the spit.
-  for (const x of [-0.72, 0.72]) {
-    b.add(P.cyl(0.03, 0.035, 0.75, 5), { color: K.timber }, M.t(x, 0.37, 0));
-    b.add(P.cyl(0.02, 0.02, 0.16, 4), { color: K.timber }, M.t(x - 0.04, 0.78, 0, 0, 0, 0.5));
-    b.add(P.cyl(0.02, 0.02, 0.16, 4), { color: K.timber }, M.t(x + 0.04, 0.78, 0, 0, 0, -0.5));
+  // Forked posts and the spit (low, so the pig hangs just above the embers).
+  const spitY = 0.42;
+  for (const x of [-0.66, 0.66]) {
+    b.add(P.cyl(0.024, 0.03, spitY + 0.02, 5), { color: K.timber }, M.t(x, (spitY + 0.02) / 2, 0));
+    b.add(P.cyl(0.016, 0.016, 0.11, 4), { color: K.timber }, M.t(x - 0.028, spitY + 0.05, 0, 0, 0, 0.5));
+    b.add(P.cyl(0.016, 0.016, 0.11, 4), { color: K.timber }, M.t(x + 0.028, spitY + 0.05, 0, 0, 0, -0.5));
   }
-  b.add(P.cyl(0.015, 0.015, 1.6, 5), { color: K.timberDark }, M.t(0, 0.72, 0, 0, 0, Math.PI / 2));
-  b.add(P.box(0.03, 0.18, 0.03), { color: K.timberDark }, M.t(0.84, 0.64, 0));
-  // Roast pig: golden-brown body, head, snout, ears and trotters.
-  const pig = (p: THREE.Vector3, n: THREE.Vector3) => c(0xb86a32).lerp(c(0xe0a060), Math.max(0, n.y) * 0.6).lerp(c(0x6e3418), Math.max(0, -n.y) * 0.4 + (Math.sin(p.x * 30) > 0.8 ? 0.2 : 0));
-  b.add(P.sphere(0.2, 1), { color: pig }, M.t(0, 0.72, 0, 0, 0, 0, 1.6, 0.85, 0.9));
-  b.add(P.sphere(0.12, 1), { color: pig }, M.t(0.34, 0.74, 0, 0, 0, 0, 1.1, 0.95, 0.95));
-  b.add(P.cyl(0.05, 0.06, 0.07, 6), { color: c(0x9a5028) }, M.t(0.47, 0.73, 0, 0, 0, Math.PI / 2));
-  for (const z of [-1, 1]) b.add(P.cone(0.04, 0.07, 4), { color: c(0x8a4a24) }, M.t(0.32, 0.85, z * 0.06, 0, 0, -0.4));
-  for (const [x, z] of [[0.18, 1], [0.18, -1], [-0.2, 1], [-0.2, -1]]) b.add(P.cyl(0.025, 0.02, 0.14, 5), { color: c(0x7a3e1e) }, M.t(x, 0.6, z * 0.09, z * 0.5, 0, 0));
+  b.add(P.cyl(0.012, 0.012, 1.46, 5), { color: K.timberDark }, M.t(0, spitY, 0, 0, 0, Math.PI / 2));
+  b.add(P.box(0.024, 0.13, 0.024), { color: K.timberDark }, M.t(0.74, spitY - 0.06, 0));
+  // Roast pig (a suckling pig, about two thirds of an islander long): golden-brown body, head,
+  // snout, ears and trotters. Laid out at full size about the spit, shrunk by S and centred on the pit.
+  const S = 0.5, ox = -0.09;
+  const pm = (x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) =>
+    M.t(S * (x + ox), spitY + S * y, S * z, rx, ry, rz, S * sx, S * sy, S * sz);
+  const pig = (p: THREE.Vector3, n: THREE.Vector3) => c(0xb86a32).lerp(c(0xe0a060), Math.max(0, n.y) * 0.6).lerp(c(0x6e3418), Math.max(0, -n.y) * 0.4 + (Math.sin(p.x * 60) > 0.8 ? 0.2 : 0));
+  b.add(P.sphere(0.2, 1), { color: pig }, pm(0, 0, 0, 0, 0, 0, 1.6, 0.85, 0.9));
+  b.add(P.sphere(0.12, 1), { color: pig }, pm(0.34, 0.02, 0, 0, 0, 0, 1.1, 0.95, 0.95));
+  b.add(P.cyl(0.05, 0.06, 0.07, 6), { color: c(0x9a5028) }, pm(0.47, 0.01, 0, 0, 0, Math.PI / 2));
+  for (const z of [-1, 1]) b.add(P.cone(0.04, 0.07, 4), { color: c(0x8a4a24) }, pm(0.32, 0.13, z * 0.06, 0, 0, -0.4));
+  for (const [x, z] of [[0.18, 1], [0.18, -1], [-0.2, 1], [-0.2, -1]]) b.add(P.cyl(0.025, 0.02, 0.14, 5), { color: c(0x7a3e1e) }, pm(x, -0.12, z * 0.09, z * 0.5, 0, 0));
   // A basket and a pot beside it.
   b.add(P.cyl(0.14, 0.11, 0.14, 8), { color: K.rope }, M.t(-0.75, 0.07, 0.6));
   b.add(P.uvSphere(0.11, 8, 6), { color: K.terracotta }, M.t(0.8, 0.1, 0.6, 0, 0, 0, 1, 0.9, 1));
-  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.18, 0)], height: 1.0 };
+  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.18, 0)], height: 0.8 };
 }
 
 /** Well: a round stone well with a timber frame, rope and bucket under a little tiled roof. */
@@ -462,6 +467,15 @@ export function farmModel(w: number, d: number, kind: 'veg' | 'maize' = 'veg'): 
       rail(-0.5, z0, x1, z1);
     } else rail(x0, z0, x1, z1);
   }
+  // Earthed-up planting ridges under each crop row (the crops mesh stands on them).
+  const rows = kind === 'maize' ? maizeLayout(w, d) : vegLayout(w, d);
+  const soilTop = c(0x6e4a2c), soilSide = c(0x563823);
+  for (const r of rows) {
+    if (!r.zs.length) continue;
+    const z0 = Math.min(...r.zs) - 0.2, z1 = Math.max(...r.zs) + 0.2;
+    const rw = kind === 'maize' ? 0.13 : 0.17;
+    b.add(P.cyl(rw, rw, z1 - z0, 6), { color: (_p, n) => (n.y > 0.6 ? soilTop : soilSide).clone() }, M.t(r.x, 0, (z0 + z1) / 2, Math.PI / 2, 0, 0, 1, 1, 0.32));
+  }
   if (kind === 'maize') {
     // Cuexcomatl: a raised maize crib of woven cane on a stone base, with a thatched cap.
     const gx = -hw + 0.6, gz = -hd + 0.6;
@@ -488,51 +502,251 @@ export function farmModel(w: number, d: number, kind: 'veg' | 'maize' = 'veg'): 
 export function cropModel(w: number, d: number, ripe: boolean, crop: 'veg' | 'maize' | 'chinampa' = 'maize'): THREE.BufferGeometry {
   if (crop === 'veg') return vegCrops(w, d, ripe);
   if (crop === 'chinampa') return chinampaCrops(w, d, ripe);
-  return maizeCrops(w, d, ripe, 1.55);
+  return maizeCrops(w, d, ripe);
 }
 
-/** Beans twining up pole tripods, rows of squash vines with fruit, and chilli bushes. */
+type VegKind = 'bean' | 'squash' | 'chilli' | 'tomato' | 'amaranth';
+/** One planted row running along z at `x`, with the z of each plant. */
+interface CropRow {
+  x: number;
+  zs: number[];
+  kind: VegKind | 'maize';
+}
+
+const VEG_ORDER: VegKind[] = ['bean', 'squash', 'chilli', 'bean', 'tomato', 'amaranth'];
+const VEG_SPACING: Record<VegKind, number> = { bean: 0.46, squash: 0.56, chilli: 0.34, tomato: 0.4, amaranth: 0.3 };
+
+/** Vegetable rows, shared by the farm's soil ridges and its crops. Keeps the shelter and scarecrow corners clear. */
+function vegLayout(w: number, d: number): CropRow[] {
+  const rows = Math.max(3, Math.floor(w * 1.5));
+  const out: CropRow[] = [];
+  for (let r = 0; r < rows; r++) {
+    const x = -w / 2 + 0.6 + (r / Math.max(1, rows - 1)) * (w - 1.2);
+    const kind = VEG_ORDER[r % VEG_ORDER.length];
+    const sp = VEG_SPACING[kind];
+    const n = Math.floor((d - 1.2) / sp);
+    const zs: number[] = [];
+    for (let k = 0; k <= n; k++) {
+      const z = -(n * sp) / 2 + k * sp;
+      if (z < -d / 2 + 1.1 && (x < -w / 2 + 1.1 || x > w / 2 - 0.9)) continue;
+      zs.push(z);
+    }
+    out.push({ x, zs, kind });
+  }
+  return out;
+}
+
+/** Maize hills in staggered rows; clears the crib, shelter and scarecrow at the back. */
+function maizeLayout(w: number, d: number): CropRow[] {
+  const rows = Math.max(2, Math.floor(w * 1.4));
+  const cols = Math.max(2, Math.floor(d * 1.9));
+  const dz = (d - 1.3) / (cols - 1);
+  const out: CropRow[] = [];
+  for (let r = 0; r < rows; r++) {
+    const x = -w / 2 + 0.55 + (r / (rows - 1)) * (w - 1.1);
+    const zs: number[] = [];
+    for (let k = 0; k < cols; k++) {
+      const z = -d / 2 + 0.55 + k * dz + (r % 2 ? dz * 0.5 : 0);
+      if (z > d / 2 - 0.5) continue;
+      if (z < -d / 2 + 1.15 && (x < -w / 2 + 1.25 || x > w / 2 - 1.05)) continue;
+      if (Math.abs(x) < 0.3 && z < -d / 2 + 0.95) continue;
+      zs.push(z);
+    }
+    out.push({ x, zs, kind: 'maize' });
+  }
+  return out;
+}
+
+const _up = new THREE.Vector3(0, 1, 0);
+/** Place a y-axis primitive of height `len` so it starts at (x, y, z) and runs along the unit vector `dir`. */
+function along(x: number, y: number, z: number, dir: THREE.Vector3, len: number): THREE.Matrix4 {
+  const q = new THREE.Quaternion().setFromUnitVectors(_up, dir);
+  return new THREE.Matrix4().compose(new THREE.Vector3(x + (dir.x * len) / 2, y + (dir.y * len) / 2, z + (dir.z * len) / 2), q, new THREE.Vector3(1, 1, 1));
+}
+const tilted = (a: number, tilt: number) => new THREE.Vector3(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt));
+
+/** A long strap leaf arching out from (x, y, z) towards angle `a` and drooping at the tip (double sided). */
+function archLeaf(
+  b: GeoBuilder, x: number, y: number, z: number, a: number, L: number, W: number,
+  color: THREE.Color, sway: (p: THREE.Vector3) => number, segs = 3, lift = 0.55, droop = 0.75
+): void {
+  const dx = Math.cos(a), dz = Math.sin(a);
+  const g = ribbon(
+    (t) => new THREE.Vector3(x + dx * L * t, y + L * (lift * t - droop * t * t), z + dz * L * t),
+    (t) => Math.max(0.002, W * Math.sin(Math.PI * Math.min(1, 0.25 + 0.75 * t))),
+    segs,
+    new THREE.Vector3(-dz, 0, dx),
+    0.3
+  );
+  b.add(doubleSide(g), { color, leaf: 1, sway });
+}
+
+/** A flattened octahedron: a cheap, crisp low-poly leaf (24 vertices). */
+const leafGeo = (r: number) => new THREE.OctahedronGeometry(r, 0);
+
+const VG = {
+  leaf: c(0x5fa83a), leafDark: c(0x3f8a2e), leafLight: c(0x7cc04c),
+  pole: c(0x8a6a44), vine: c(0x4a8a2c), stem: c(0x6a7a30),
+  pod: c(0x8fc24a), podPurple: c(0x6a3a72), beanFlower: c(0xe0452c),
+  squashLeaf: c(0x4f9a34), squashLeafLight: c(0x6ab544),
+  pumpkin: c(0xe8862a), pumpkinDeep: c(0xd66a1e), squashYellow: c(0xf0c43a), squashGreen: c(0x6f9e3e), squashFlower: c(0xf5b82a),
+  chilliLeaf: c(0x4a9432), chilliRed: c(0xd62f28), chilliOrange: c(0xe8742a), chilliGreen: c(0x5f9e32), white: c(0xf4f0e0),
+  tomLeaf: c(0x5a9a36), tomRed: c(0xe23a24), tomOrange: c(0xf07a2a), tomGreen: c(0x9ac850), tomFlower: c(0xf2d230),
+  amaStem: c(0x7a7a3a), amaStemRipe: c(0x8a4a3a), amaRed: c(0xb42a54), amaGold: c(0xd8742e), amaGreen: c(0x86a844),
+};
+
+/**
+ * Milpa garden rows: runner beans climbing A-frames of poles, sprawling squash with big leaves
+ * and orange/yellow fruit, chilli bushes, staked tomatoes and crimson amaranth plumes.
+ * Unripe plants flower and carry small green fruit.
+ */
 function vegCrops(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const rng = new RNG(ripe ? 17 : 18);
-  const leaf = c(0x5fa83a), leafDark = c(0x3f8a2e), pole = c(0x8a6a44);
-  const rows = Math.max(3, Math.floor(w * 1.5));
-  for (let r = 0; r < rows; r++) {
-    const x = -w / 2 + 0.6 + (r / Math.max(1, rows - 1)) * (w - 1.2);
-    const n = Math.floor((d - 1.2) / 0.42);
-    const kind = r % 3;
-    for (let k = 0; k <= n; k++) {
-      const z = -d / 2 + 0.6 + k * 0.42 + (kind === 1 ? 0.12 : 0);
-      if (z > d / 2 - 0.5) continue;
-      if (kind === 0) {
-        // Bean tripod, the vines climbing it.
-        for (let l = 0; l < 3; l++) {
-          const a = (l / 3) * Math.PI * 2 + r;
-          b.add(P.cyl(0.01, 0.014, 0.78, 3), { color: pole, sway: (p) => p.y * 0.2 }, M.t(x + Math.cos(a) * 0.09, 0.38, z + Math.sin(a) * 0.09, Math.sin(a) * 0.2, 0, -Math.cos(a) * 0.2));
-        }
-        for (let l = 0; l < 6; l++) {
-          const a = rng.range(0, Math.PI * 2), y = 0.12 + l * 0.11;
-          b.add(P.sphere(0.075 - l * 0.005, 0), { color: (l % 2 ? leaf : leafDark).clone(), leaf: 1, sway: (p) => p.y * 0.5 }, M.t(x + Math.cos(a) * 0.07, y, z + Math.sin(a) * 0.07, 0, a, 0, 1, 0.65, 1));
-          if (ripe && l % 2 === 0) b.add(P.cyl(0.01, 0.007, 0.1, 3), { color: c(0x9fc85a), sway: 0.4 }, M.t(x + Math.cos(a) * 0.11, y - 0.04, z + Math.sin(a) * 0.11));
-        }
-      } else if (kind === 1) {
-        // Squash: sprawling broad leaves with fruit among them.
-        for (let l = 0; l < 4; l++) {
-          const a = rng.range(0, Math.PI * 2);
-          b.add(P.sphere(0.12, 0), { color: (l % 2 ? leaf : leafDark).clone(), leaf: 1, sway: 0.15 }, M.t(x + Math.cos(a) * 0.13, 0.06, z + Math.sin(a) * 0.13, 0, a, 0, 1.35, 0.4, 1.1));
-        }
-        if (ripe || rng.next() < 0.35) b.add(P.uvSphere(0.1, 8, 6), { color: ripe ? (rng.next() < 0.5 ? c(0xe8902a) : c(0xe8c24a)) : c(0x7fae4a) }, M.t(x + 0.09, 0.08, z - 0.06, 0, 0, 0, 1.25, 0.85, 1));
-      } else {
-        // Chilli bushes with red (ripe) or green pods.
-        b.add(P.sphere(0.13, 1), { color: leafDark, leaf: 1, sway: (p) => p.y * 0.4 }, M.t(x, 0.15, z, 0, 0, 0, 1, 0.95, 1));
-        for (let l = 0; l < 7; l++) {
-          const a = rng.range(0, Math.PI * 2);
-          b.add(P.cone(0.018, 0.065, 4), { color: ripe ? c(0xd8342a) : c(0x6fae3a), sway: 0.4 }, M.t(x + Math.cos(a) * 0.12, 0.12 + rng.next() * 0.1, z + Math.sin(a) * 0.12, Math.PI, 0, 0));
-        }
-      }
+  for (const row of vegLayout(w, d)) {
+    if (!row.zs.length) continue;
+    const x = row.x;
+    if (row.kind === 'bean') {
+      // Ridge pole tying the A-frames together along the row.
+      const z0 = Math.min(...row.zs), z1 = Math.max(...row.zs);
+      b.add(P.cyl(0.008, 0.008, z1 - z0 + 0.1, 4, true), { color: VG.pole, sway: (p) => p.y * 0.12 }, M.t(x, 0.71, (z0 + z1) / 2, Math.PI / 2, 0, 0));
+    }
+    for (const z of row.zs) {
+      if (row.kind === 'bean') beanFrame(b, rng, x, z, ripe);
+      else if (row.kind === 'squash') squashPlant(b, rng, x + rng.range(-0.03, 0.03), z, ripe);
+      else if (row.kind === 'chilli') chilliPlant(b, rng, x + rng.range(-0.03, 0.03), z, ripe);
+      else if (row.kind === 'tomato') tomatoPlant(b, rng, x, z, ripe);
+      else amaranthPlant(b, rng, x + rng.range(-0.04, 0.04), z, ripe);
     }
   }
   return b.build();
+}
+
+/** Two poles leaning into an A, each twined by a bean vine with leaves and hanging pods (or red flowers). */
+function beanFrame(b: GeoBuilder, rng: RNG, x: number, z: number, ripe: boolean): void {
+  const top = 0.7, spread = 0.13;
+  const leaves = [VG.leaf, VG.leafDark, VG.leafLight];
+  for (const s of [-1, 1]) {
+    const bx = x + s * spread;
+    const dir = new THREE.Vector3(-s * spread, top, 0).normalize();
+    const len = Math.hypot(spread, top) + 0.03;
+    b.add(P.cyl(0.009, 0.013, len, 4, true), { color: VG.pole, sway: (p) => p.y * 0.12 }, along(bx, 0, z, dir, len));
+    // Twining vine spiralling up the pole.
+    const pts: THREE.Vector3[] = [];
+    const ph = rng.range(0, Math.PI * 2);
+    for (let i = 0; i <= 6; i++) {
+      const t = (i / 6) * 0.9, a = ph + t * 2.2 * Math.PI * 2;
+      pts.push(new THREE.Vector3(bx + dir.x * len * t + Math.cos(a) * 0.02, dir.y * len * t + 0.01, z + Math.sin(a) * 0.02));
+    }
+    b.add(tube(pts, () => 0.006, 3, 10), { color: VG.vine, sway: (p) => p.y * 0.25 });
+    const on = (t: number, off: number, a: number) =>
+      new THREE.Vector3(bx + dir.x * len * t + Math.cos(a) * off, dir.y * len * t, z + Math.sin(a) * off);
+    for (let l = 0; l < 4; l++) {
+      const a = rng.range(0, Math.PI * 2), p = on(0.2 + l * 0.2, 0.045, a);
+      b.add(leafGeo(0.05), { color: leaves[(l + (s > 0 ? 1 : 0)) % 3], leaf: 1, sway: (q) => q.y * 0.35 }, M.t(p.x, p.y, p.z, rng.range(-0.5, 0.5), a, rng.range(-0.3, 0.3), 1, 0.28, 0.75));
+    }
+    if (ripe) {
+      for (let l = 0; l < 3; l++) {
+        const p = on(0.3 + l * 0.2, 0.035, rng.range(0, Math.PI * 2));
+        b.add(P.cyl(0.007, 0.005, 0.1, 3, true), { color: rng.next() < 0.25 ? VG.podPurple : VG.pod, sway: (q) => q.y * 0.4 }, M.t(p.x, p.y - 0.05, p.z, rng.range(-0.3, 0.3), 0, rng.range(-0.3, 0.3)));
+      }
+    } else {
+      for (const t of [0.45, 0.75]) {
+        const p = on(t, 0.04, rng.range(0, Math.PI * 2));
+        b.add(new THREE.TetrahedronGeometry(0.018), { color: VG.beanFlower, sway: (q) => q.y * 0.4 }, M.t(p.x, p.y, p.z));
+      }
+    }
+  }
+}
+
+/** A squash vine sprawling along the row under big leaves, with pumpkins and yellow squash (or flowers). */
+function squashPlant(b: GeoBuilder, rng: RNG, x: number, z: number, ripe: boolean): void {
+  const ph = rng.range(0, 6);
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const t = i / 4;
+    pts.push(new THREE.Vector3(x + Math.sin(t * 5 + ph) * 0.08, 0.025, z - 0.24 + t * 0.48));
+  }
+  b.add(tube(pts, () => 0.009, 3, 8), { color: VG.vine, sway: 0.04 });
+  for (let l = 0; l < 5; l++) {
+    const p = pts[l];
+    const side = l % 2 ? 1 : -1;
+    b.add(leafGeo(0.1), { color: l % 2 ? VG.squashLeaf : VG.squashLeafLight, leaf: 1, sway: 0.12 },
+      M.t(p.x + side * rng.range(0.03, 0.09), 0.07 + rng.next() * 0.05, p.z, rng.range(-0.35, 0.35), rng.range(0, Math.PI * 2), rng.range(-0.3, 0.3), 1, 0.3, 0.9));
+  }
+  const fx = x + (rng.next() < 0.5 ? -1 : 1) * 0.09, fz = z + rng.range(-0.12, 0.12);
+  if (ripe) {
+    b.add(P.uvSphere(0.075, 7, 4), { color: rng.next() < 0.5 ? VG.pumpkin : VG.pumpkinDeep }, M.t(fx, 0.06, fz, 0, 0, 0, 1.15, 0.8, 1.15));
+    b.add(P.cyl(0.008, 0.011, 0.035, 4, true), { color: VG.stem }, M.t(fx, 0.13, fz, 0, 0, 0.3));
+    if (rng.next() < 0.6) b.add(P.uvSphere(0.045, 6, 4), { color: VG.squashYellow }, M.t(x - (fx - x) * 0.8, 0.045, z - (fz - z), 0, rng.range(0, 3), 0, 1, 0.9, 2.1));
+  } else {
+    b.add(P.uvSphere(0.04, 6, 4), { color: VG.squashGreen }, M.t(fx, 0.04, fz, 0, rng.range(0, 3), 0, 1, 0.9, 1.5));
+    for (let l = 0; l < 2; l++) {
+      const p = pts[1 + l * 2];
+      b.add(P.cone(0.03, 0.05, 5), { color: VG.squashFlower, sway: 0.15 }, M.t(p.x + rng.range(-0.05, 0.05), 0.14, p.z, Math.PI, 0, 0));
+    }
+  }
+}
+
+/** A small bushy chilli plant hung with red, orange and green pods (white flowers while unripe). */
+function chilliPlant(b: GeoBuilder, rng: RNG, x: number, z: number, ripe: boolean): void {
+  const sway = (p: THREE.Vector3) => p.y * 0.4;
+  b.add(P.cyl(0.007, 0.011, 0.14, 3, true), { color: VG.stem, sway }, M.t(x, 0.07, z));
+  const ph = rng.range(0, 6);
+  for (let k = 0; k < 3; k++) {
+    const a = ph + k * 2.1;
+    b.add(leafGeo(0.065), { color: k % 2 ? VG.leafDark : VG.chilliLeaf, leaf: 1, sway }, M.t(x + Math.cos(a) * 0.04, 0.13 + k * 0.035, z + Math.sin(a) * 0.04, 0, a, 0, 1, 0.8, 1));
+  }
+  for (let l = 0; l < 7; l++) {
+    const a = rng.range(0, Math.PI * 2), y = 0.1 + rng.next() * 0.12;
+    const px = x + Math.cos(a) * 0.075, pz = z + Math.sin(a) * 0.075;
+    if (!ripe && l < 2) {
+      b.add(new THREE.TetrahedronGeometry(0.014), { color: VG.white, sway }, M.t(px, y + 0.06, pz));
+      continue;
+    }
+    const r = rng.next();
+    const col = ripe ? (r < 0.65 ? VG.chilliRed : r < 0.82 ? VG.chilliOrange : VG.chilliGreen) : VG.chilliGreen;
+    b.add(P.cone(0.012, 0.06, 4), { color: col, sway }, M.t(px, y, pz, Math.PI + rng.range(-0.4, 0.4), 0, rng.range(-0.4, 0.4)));
+  }
+}
+
+/** A tomato plant tied to a stake, with round red and orange fruit (green fruit and yellow flowers while unripe). */
+function tomatoPlant(b: GeoBuilder, rng: RNG, x: number, z: number, ripe: boolean): void {
+  const sway = (p: THREE.Vector3) => p.y * 0.35;
+  b.add(P.cyl(0.007, 0.009, 0.46, 3, true), { color: VG.pole, sway: (p) => p.y * 0.1 }, M.t(x + 0.03, 0.23, z));
+  for (let k = 0; k < 3; k++) {
+    const o = k % 2 ? 0.02 : -0.02;
+    b.add(leafGeo(0.07), { color: k === 1 ? VG.leafDark : VG.tomLeaf, leaf: 1, sway }, M.t(x + o, 0.1 + k * 0.105, z - o, 0, k * 1.3, 0, 1, 0.85, 1));
+  }
+  const n = ripe ? 6 : 4;
+  for (let l = 0; l < n; l++) {
+    const a = rng.range(0, Math.PI * 2), y = 0.08 + rng.next() * 0.22;
+    const px = x + Math.cos(a) * 0.065, pz = z + Math.sin(a) * 0.065;
+    if (!ripe && l < 2) {
+      b.add(new THREE.TetrahedronGeometry(0.014), { color: VG.tomFlower, sway }, M.t(px, y, pz));
+      continue;
+    }
+    const r = rng.next();
+    const col = ripe ? (r < 0.7 ? VG.tomRed : r < 0.9 ? VG.tomOrange : VG.tomGreen) : VG.tomGreen;
+    b.add(P.uvSphere(ripe ? 0.028 : 0.022, 5, 3), { color: col, sway }, M.t(px, y, pz));
+  }
+}
+
+/** Amaranth (huauhtli): a slim stem with a few leaves and drooping crimson or gold seed plumes. */
+function amaranthPlant(b: GeoBuilder, rng: RNG, x: number, z: number, ripe: boolean): void {
+  const H = rng.range(0.46, 0.6) * (ripe ? 1 : 0.85);
+  const sway = (p: THREE.Vector3) => p.y * 0.45;
+  b.add(P.cyl(0.008, 0.013, H, 4, true), { color: ripe ? VG.amaStemRipe : VG.amaStem, sway }, M.t(x, H / 2, z));
+  for (let k = 0; k < 2; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    b.add(leafGeo(0.05), { color: k ? VG.leafDark : VG.leaf, leaf: 1, sway }, M.t(x + Math.cos(a) * 0.04, H * (0.35 + k * 0.25), z + Math.sin(a) * 0.04, 0, a, 0.3, 1, 0.3, 0.6));
+  }
+  const plume = ripe ? (rng.next() < 0.78 ? VG.amaRed : VG.amaGold) : VG.amaGreen;
+  const s = ripe ? 1 : 0.65;
+  b.add(P.cone(0.032 * s, 0.2 * s, 5), { color: plume, sway }, M.t(x + 0.02, H + 0.08 * s, z, 0, 0, -0.3));
+  for (const side of [-1, 1]) {
+    b.add(P.cone(0.02 * s, 0.11 * s, 4), { color: plume, sway }, M.t(x + side * 0.035, H * 0.82, z, 0, 0, side * -0.7));
+  }
 }
 
 /** Raised chinampa beds (three strips along z): maize, marigolds, beans and greens. */
@@ -646,31 +860,68 @@ export function smokehouseModel(w: number, d: number): BuildingModel {
   return { finished: b.build(), torches: [new THREE.Vector3(hx + 0.55, 0, hz + 0.9)], height: 1.35 };
 }
 
-/** Maize plants in neat rows (scaled vertically by growth). Cobs are coloured by `ripe`. */
-function maizeCrops(w: number, d: number, ripe: boolean, tall = 1): THREE.BufferGeometry {
+const MZ = {
+  stalk: c(0x5f9e36), stalkRipe: c(0xb3a653),
+  leaf: c(0x5aa638), leafDark: c(0x4b9430), leafRipe: c(0x9fa447), leafDry: c(0xcdb370),
+  husk: c(0xe0cc92), huskGreen: c(0x78b443),
+  kernel: c(0xf4c430), kernelDeep: c(0xe8a526),
+  silk: c(0xe8dca0), tassel: c(0xdcb45c), tasselGreen: c(0xb4c860),
+};
+
+/**
+ * Tall maize in staggered hills (scaled vertically by growth): a stalk with long leaves arching
+ * off alternate sides, cobs in husks with silk and a branching tassel on top. Ripe plants turn
+ * straw-coloured with golden tassels and husks peeled back from yellow cobs.
+ */
+function maizeCrops(w: number, d: number, ripe: boolean): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const rng = new RNG(ripe ? 7 : 8);
-  const rows = Math.floor(w * 1.6);
-  const cols = Math.floor(d * 2.4);
-  const green = c(0x6fae3a), gold = c(0xd8b84a), tassel = c(0xe7d27a);
-  for (let r = 0; r < rows; r++) {
-    for (let k = 0; k < cols; k++) {
-      const x = -w / 2 + 0.55 + (r / Math.max(1, rows - 1)) * (w - 1.1);
-      const z = -d / 2 + 0.55 + (k / Math.max(1, cols - 1)) * (d - 1.3);
-      // Leave room for the crib and shelter in the back corners of the big maize field.
-      if (tall > 1 && z < -d / 2 + 1.15 && (x < -w / 2 + 1.25 || x > w / 2 - 1.05)) continue;
-      const h = rng.range(0.4, 0.55) * tall;
-      const stalk = ripe ? gold : green;
-      b.add(P.cyl(0.015, 0.02, h, 4), { color: stalk, sway: (p) => p.y * 0.4 }, M.t(x, h / 2, z));
-      for (let l = 0; l < 2; l++) {
-        const a = rng.range(0, Math.PI * 2);
-        b.add(P.box(0.02, 0.2, 0.05), { color: stalk.clone().multiplyScalar(0.9), leaf: 1, sway: (p) => p.y * 0.4 }, M.t(x + Math.cos(a) * 0.06, h * 0.5 + l * 0.1, z + Math.sin(a) * 0.06, Math.cos(a) * 0.8, a, Math.sin(a) * 0.8));
-      }
-      if (ripe) b.add(P.cyl(0.025, 0.02, 0.1, 5), { color: tassel, sway: 0.3 }, M.t(x + 0.03, h * 0.65, z, 0, 0, 0.4));
-      b.add(P.cone(0.02, 0.07, 4), { color: tassel, sway: 0.5 }, M.t(x, h + 0.03, z));
+  for (const row of maizeLayout(w, d)) {
+    for (const z0 of row.zs) {
+      const x = row.x + rng.range(-0.05, 0.05), z = z0 + rng.range(-0.04, 0.04);
+      maizePlant(b, rng, x, z, rng.range(0.88, 1.06) * (ripe ? 1 : 0.9), ripe);
     }
   }
   return b.build();
+}
+
+function maizePlant(b: GeoBuilder, rng: RNG, x: number, z: number, h: number, ripe: boolean): void {
+  const sway = (p: THREE.Vector3) => p.y * 0.3 + Math.hypot(p.x - x, p.z - z) * 0.6;
+  b.add(P.cyl(0.012, 0.022, h, 5, true), { color: ripe ? MZ.stalkRipe : MZ.stalk, sway }, M.t(x, h / 2, z));
+  // Leaves on alternate sides, slowly spiralling, long and drooping at the tips.
+  const a0 = rng.range(0, Math.PI * 2);
+  for (let k = 0; k < 4; k++) {
+    const a = a0 + k * (Math.PI + 0.3) + rng.range(-0.3, 0.3);
+    const col = ripe ? (k < 2 ? MZ.leafDry : MZ.leafRipe) : k % 2 ? MZ.leaf : MZ.leafDark;
+    archLeaf(b, x, h * (0.2 + k * 0.17), z, a, h * (0.44 - k * 0.035), 0.034, col, sway);
+  }
+  // Cobs between the leaf sides.
+  const cobs = ripe && rng.next() < 0.55 ? 2 : 1;
+  for (let ci = 0; ci < cobs; ci++) {
+    const ac = a0 + Math.PI / 2 + ci * Math.PI + rng.range(-0.3, 0.3);
+    const yc = h * (0.42 + ci * 0.14);
+    const dir = tilted(ac, ripe ? 0.6 : 0.35);
+    const bx = x + Math.cos(ac) * 0.018, bz = z + Math.sin(ac) * 0.018;
+    if (ripe) {
+      // Husk sheath round the base, one husk leaf peeled down, yellow kernels showing.
+      b.add(P.cyl(0.03, 0.022, 0.06, 5, true), { color: MZ.husk, sway }, along(bx, yc, bz, dir, 0.06));
+      b.add(P.cyl(0.015, 0.027, 0.14, 5), { color: rng.next() < 0.3 ? MZ.kernelDeep : MZ.kernel, sway }, along(bx + dir.x * 0.03, yc + dir.y * 0.03, bz + dir.z * 0.03, dir, 0.14));
+      archLeaf(b, bx + dir.x * 0.05, yc + dir.y * 0.05, bz + dir.z * 0.05, ac + rng.range(-0.8, 0.8), 0.12, 0.02, MZ.husk, sway, 2, 0.3, 1.0);
+    } else {
+      b.add(P.cyl(0.013, 0.022, 0.11, 5), { color: MZ.huskGreen, sway }, along(bx, yc, bz, dir, 0.11));
+      b.add(P.cone(0.014, 0.05, 3), { color: MZ.silk, sway }, along(bx + dir.x * 0.1, yc + dir.y * 0.1, bz + dir.z * 0.1, dir, 0.05));
+    }
+  }
+  // Tassel: a central spike with branches (spread wide and golden when ripe, tight and green before).
+  const tc = ripe ? MZ.tassel : MZ.tasselGreen;
+  const spike = ripe ? 0.17 : 0.12;
+  b.add(P.cone(0.011, spike, 3), { color: tc, sway }, M.t(x, h - 0.01 + spike / 2, z));
+  const nb = ripe ? 3 : 2;
+  for (let k = 0; k < nb; k++) {
+    const a = a0 + (k / nb) * Math.PI * 2 + 0.4;
+    const len = ripe ? 0.12 : 0.08;
+    b.add(P.cone(0.007, len, 3), { color: tc, sway }, along(x, h + 0.02, z, tilted(a, ripe ? 1.1 : 0.5), len));
+  }
 }
 
 /** Butcher: an adobe workshop with a striped awning over the meat counter, beside the animal pen (pen centre at local +w/4). */
