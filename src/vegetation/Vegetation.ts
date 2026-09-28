@@ -17,7 +17,7 @@ import {
   contactTexture,
   fernGeometry,
   palmGeometry,
-  rockGeometry,
+  rockGeometry, seaRockGeometry,
   stumpGeometry,
 } from './models';
 
@@ -148,8 +148,8 @@ export class Vegetation {
     mid('flowerbush0', () => bushGeometry(true, false, 42));
     mid('apple0', () => bushGeometry(false, false, 43, true));
     for (let v = 0; v < 3; v++) d(`rock${v}`, rockGeometry(v, 61 + v), undefined, false);
-    d('searock0', rockGeometry(2, 71), undefined, false);
-    d('searock1', rockGeometry(1, 72), undefined, false);
+    d('searock0', seaRockGeometry(71), undefined, false);
+    d('searock1', seaRockGeometry(72), undefined, false);
     d('reef0', rockGeometry(2, 81, true), undefined, false, false, 1.5);
     d('stump', stumpGeometry(), undefined, false, false, 1.4);
   }

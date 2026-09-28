@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COLORS } from '../config';
 import { GeoBuilder, M, P, lumpy, ribbon, tube } from '../render/GeoBuilder';
 import { RNG } from '../world/rng';
+import { angularRockGeometry, rockColor } from '../render/rocks';
 import { BARK, FINE, barkTrunk, barkColor, branch, foliage, hangingVine, leafGeometry, liana, roots, trunkVine } from './detail';
 
 const c = (h: number) => new THREE.Color(h);
@@ -305,6 +306,19 @@ export function rockGeometry(variant: number, seed: number, reef = false): THREE
       const a = rng.range(0, Math.PI * 2);
       b.add(P.cone(0.07, 0.35, 5), { color: rng.chance(0.5) ? PAL.coral : c(0x3f9a8a), sway: 0.15 }, M.t(Math.cos(a) * 0.5, 0.25, Math.sin(a) * 0.5, rng.range(-0.3, 0.3), 0, rng.range(-0.3, 0.3)));
     }
+  }
+  return b.build();
+}
+
+/** Sea rock: a chunky faceted block with one or two smaller ones beside it, wet low down. */
+export function seaRockGeometry(seed: number): THREE.BufferGeometry {
+  const rng = new RNG(seed);
+  const b = new GeoBuilder();
+  b.add(angularRockGeometry(seed * 7 + 1, { tilt: 0.2 }), { color: rockColor(0.18, 0.22) }, M.t(0, -0.05, 0, 0, rng.next() * 6.28, 0, 0.62, 0.66, 0.55));
+  const n = rng.int(1, 2);
+  for (let k = 0; k < n; k++) {
+    const a = rng.range(0, Math.PI * 2), sz = rng.range(0.25, 0.38);
+    b.add(angularRockGeometry(seed * 7 + 3 + k), { color: rockColor(0.1, 0.22) }, M.t(Math.cos(a) * 0.62, -0.08, Math.sin(a) * 0.62, 0, rng.next() * 6.28, 0, sz, sz * 1.1, sz * 0.9));
   }
   return b.build();
 }
