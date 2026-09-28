@@ -226,9 +226,9 @@ const SKIN_COMMON = `
     return boneMat(aSkinI.x) * aSkinW.x + boneMat(aSkinI.y) * aSkinW.y + boneMat(aSkinI.z) * aSkinW.z + boneMat(aSkinI.w) * aSkinW.w;
   }`;
 
-/** The people material with instanced GPU skinning, and a matching shadow depth material. */
-export function peopleSkinnedMaterial(bones: THREE.DataTexture): { mat: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
-  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }), 0.45);
+/** The people material with instanced GPU skinning (and the model's colour texture), and a matching shadow depth material. */
+export function peopleSkinnedMaterial(bones: THREE.DataTexture, map: THREE.Texture | null = null): { mat: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
+  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, map, roughness: 0.78, metalness: 0 }), 0.45);
   const base = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
     base.call(mat, shader, r);
