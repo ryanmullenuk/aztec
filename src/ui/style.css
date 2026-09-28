@@ -25,7 +25,8 @@ html, body {
   /* Share the available viewport height with the renderer. */
   height: var(--app-h, 100%);
   overflow: hidden;
-  background: #007d83;
+  /* Neutral backing for iOS system chrome; teal belongs only to the splash. */
+  background: #000;
   font-family: var(--font);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
