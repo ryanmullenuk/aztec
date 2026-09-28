@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Where } from '../ui/where';
 import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { HALL } from '../buildings/models';
@@ -19,7 +20,7 @@ export interface ColonyHooks {
   /** Fisher reached the jetty: board a boat. Returns true if a boat accepted the crew. */
   boardBoat?: (isl: Islander, jetty: Building) => boolean;
   sfx?: (name: string, x: number, z: number) => void;
-  notify?: (text: string) => void;
+  notify?: (text: string, at?: Where) => void;
   /** Animals kept in a building's pen. */
   penCount?: (b: Building) => number;
   /** Capture API (animals are only ever caught when the player orders it). */
@@ -488,7 +489,7 @@ export class Colony {
       b.residents.push(kid.id);
       const parent = adults.find((a) => a.gender === 'f')!;
       kid.skin = parent.skin;
-      this.hooks.notify?.(`${kid.name} was born to ${parent.name}!`);
+      this.hooks.notify?.(`${kid.name} was born to ${parent.name}!`, () => (kid.hidden ? null : { x: kid.x, z: kid.z }));
       this.onBirth(kid);
     }
   }
@@ -1214,7 +1215,7 @@ export class Colony {
         this.hooks.putInPen?.(t.target, b);
         if (isl.carry?.kind === 'chicken') isl.carry = null;
         t.phase = 2;
-        this.hooks.notify?.(`${isl.name} penned an animal at the ${b.label}.`);
+        this.hooks.notify?.(`${isl.name} penned an animal at the ${b.label}.`, { x: b.x, z: b.z });
         this.releaseTask(isl);
         break;
       }
@@ -1264,7 +1265,7 @@ export class Colony {
           isl.tool = 'spear';
           isl.x = b.door.x;
           isl.z = b.door.z;
-          this.hooks.notify?.(`${isl.name} is now ${isl.warrior === 'jaguar' ? 'a Jaguar' : 'an Eagle'} warrior.`);
+          this.hooks.notify?.(`${isl.name} is now ${isl.warrior === 'jaguar' ? 'a Jaguar' : 'an Eagle'} warrior.`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
           this.onWarrior(isl);
           this.releaseTask(isl);
         }
@@ -1688,14 +1689,14 @@ export class Colony {
   /** Caught by a jaguar (or an alligator): badly hurt (limping, shaken), or killed. */
   maul(isl: Islander, killed: boolean, by = 'a jaguar'): void {
     if (killed) {
-      this.hooks.notify?.(`${isl.name} was killed by ${by}.`);
+      this.hooks.notify?.(`${isl.name} was killed by ${by}.`, { x: isl.x, z: isl.z });
       this.remove(isl);
       return;
     }
     isl.injured = 180;
     isl.happy = Math.max(0, isl.happy - 0.3);
     isl.rest = Math.max(0, isl.rest - 0.3);
-    this.hooks.notify?.(`${isl.name} was ${by === 'a jaguar' ? 'mauled' : 'bitten'} by ${by} and is badly hurt.`);
+    this.hooks.notify?.(`${isl.name} was ${by === 'a jaguar' ? 'mauled' : 'bitten'} by ${by} and is badly hurt.`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
     this.alarm(isl.x, isl.z, 1);
   }
 
@@ -1804,7 +1805,7 @@ export class Colony {
       if (isl.child && isl.age > ISLANDER.childGrowDays * 600) {
         isl.child = false;
         isl.role = 'idle';
-        this.hooks.notify?.(`${isl.name} has grown up.`);
+        this.hooks.notify?.(`${isl.name} has grown up.`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
       }
       if (isl.happy > ISLANDER.happyThreshold) happy++;
       if (!isl.task) {
