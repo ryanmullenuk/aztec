@@ -206,7 +206,7 @@ export class UI {
       this.buildItems.set(key, b);
     }
     // Paths: drag-to-paint tools rather than a building.
-    const pathItem = (id: 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal', name: string, iconKey: string, cost: string, tip: string) => {
+    const pathItem = (id: 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal' | 'regrass', name: string, iconKey: string, cost: string, tip: string) => {
       const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
       b.onclick = () => this.game.setTool(id);
       this.addTip(b, tip);
@@ -217,6 +217,7 @@ export class UI {
     pathItem('canal', 'Water canal', 'b_canal', `${icon('wood')}${PATHS.canalWood}`, `<b>Water canal</b><br>Hold and drag outward from a river, pool or the sea to dig a channel and bring water into the village. Chinampas can be built beside canals.<br><span class="c">${icon('wood')} ${PATHS.canalWood} per section</span>`);
     pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
     pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path, bridge or canal</b><br>Hold and drag over a path, bridge or canal to take it away (canals are filled back in).');
+    pathItem('regrass', 'Restore grass', 'b_regrass', 'Free', '<b>Restore grass</b><br>Hold and drag over bare, trodden earth or old dirt tracks to grow the grass back. Stone paths stay (use Remove path for those).');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
   }

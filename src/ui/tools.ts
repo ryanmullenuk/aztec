@@ -1,9 +1,9 @@
 import { BuildingKey, POWERS } from '../config';
 
-export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal';
+export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal' | 'regrass';
 
 /** The drag-to-paint Build tools (paths, bridges, canals). */
-export const PAINT_TOOLS: ToolId[] = ['path', 'dirtpath', 'unpath', 'bridge', 'canal'];
+export const PAINT_TOOLS: ToolId[] = ['path', 'dirtpath', 'unpath', 'bridge', 'canal', 'regrass'];
 
 export interface ToolDef {
   id: ToolId;
