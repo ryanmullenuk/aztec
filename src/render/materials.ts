@@ -179,13 +179,9 @@ let people: THREE.MeshStandardMaterial | null = null;
  * Character material: the stylised patches plus per-instance skin tone (vertices tagged aMat = 1)
  * and per-instance accent cloth colour (aMat = 2, from the instanced `iAccent` attribute).
  */
-export function peopleMaterial(): THREE.MeshStandardMaterial {
-  if (people) return people;
-  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }), 0.45);
-  const base = mat.onBeforeCompile;
-  mat.onBeforeCompile = (shader, r) => {
-    base.call(mat, shader, r);
-    shader.vertexShader = shader.vertexShader
+/** Per-person skin tone (aMat 1, from the instance colour) and accent cloth (aMat 2, from iAccent). */
+function peopleColours(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         attribute float aMat;
         attribute vec3 iAccent;`)
@@ -198,9 +194,65 @@ export function peopleMaterial(): THREE.MeshStandardMaterial {
           vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, isSkin);
         #endif
         vColor.rgb *= mix(vec3(1.0), iAccent, isAccent);`);
+}
+
+export function peopleMaterial(): THREE.MeshStandardMaterial {
+  if (people) return people;
+  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }), 0.45);
+  const base = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    base.call(mat, shader, r);
+    peopleColours(shader);
   };
   people = mat;
   return mat;
+}
+
+/**
+ * GPU skinning for instanced characters: each instance's bone matrices are one row of
+ * `bones` (4 RGBA float texels per bone, column-major), looked up by gl_InstanceID and
+ * blended by the vertex's aSkinI / aSkinW (4 influences).
+ */
+const SKIN_COMMON = `
+  attribute vec4 aSkinI;
+  attribute vec4 aSkinW;
+  uniform highp sampler2D uBones;
+  mat4 boneMat(float b) {
+    int x = int(b + 0.5) * 4;
+    return mat4(texelFetch(uBones, ivec2(x, gl_InstanceID), 0), texelFetch(uBones, ivec2(x + 1, gl_InstanceID), 0),
+                texelFetch(uBones, ivec2(x + 2, gl_InstanceID), 0), texelFetch(uBones, ivec2(x + 3, gl_InstanceID), 0));
+  }
+  mat4 skinMatrix() {
+    return boneMat(aSkinI.x) * aSkinW.x + boneMat(aSkinI.y) * aSkinW.y + boneMat(aSkinI.z) * aSkinW.z + boneMat(aSkinI.w) * aSkinW.w;
+  }`;
+
+/** The people material with instanced GPU skinning, and a matching shadow depth material. */
+export function peopleSkinnedMaterial(bones: THREE.DataTexture): { mat: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
+  const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }), 0.45);
+  const base = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    base.call(mat, shader, r);
+    peopleColours(shader);
+    shader.uniforms.uBones = { value: bones };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>${SKIN_COMMON}`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        mat4 skinM = skinMatrix();
+        objectNormal = normalize(mat3(skinM) * objectNormal);`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        transformed = (skinM * vec4(transformed, 1.0)).xyz;`);
+  };
+  mat.customProgramCacheKey = () => 'people-skinned';
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depth.onBeforeCompile = (shader) => {
+    shader.uniforms.uBones = { value: bones };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>${SKIN_COMMON}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        transformed = (skinMatrix() * vec4(transformed, 1.0)).xyz;`);
+  };
+  depth.customProgramCacheKey = () => 'people-skinned-depth';
+  return { mat, depth };
 }
 
 /**
