@@ -4,6 +4,7 @@ import { ISLANDER } from '../config';
 import { peopleMaterial } from '../render/materials';
 import { Islander } from './Islander';
 import { PartKey, SKELETON, Skeleton, buildPeopleParts } from './PeopleModels';
+import { loadGlbPeople } from './glbPeople';
 
 /** World units per metre: islanders are modelled at ~1.8 m and stand ~0.62 units tall. */
 const S0 = 0.62 / 1.8;
@@ -260,24 +261,23 @@ export class IslanderRig {
   readonly ring: THREE.Mesh;
 
   constructor() {
-    const mat = peopleMaterial();
     const parts = buildPeopleParts();
-    for (const [key, geo] of Object.entries(parts) as [PartKey, THREE.BufferGeometry][]) {
-      const cap = ISLANDER.max * (PAIRED.has(key) ? 2 : 1);
-      const acc = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
-      acc.setUsage(THREE.DynamicDrawUsage);
-      geo.setAttribute('iAccent', acc);
-      const mesh = new THREE.InstancedMesh(geo, mat, cap);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      mesh.count = 0;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.setColorAt(0, new THREE.Color(1, 1, 1));
-      this.meshes.set(key, mesh);
-      this.accents.set(key, acc);
-      this.group.add(mesh);
-    }
+    for (const [key, geo] of Object.entries(parts) as [PartKey, THREE.BufferGeometry][]) this.addMesh(key, geo, ISLANDER.max * (PAIRED.has(key) ? 2 : 1));
+    // The rigged character models replace the built-in bodies once they have loaded.
+    loadGlbPeople()
+      .then((glb) => {
+        for (const [key, geo] of glb.parts) {
+          const old = this.meshes.get(key);
+          if (old) {
+            geo.setAttribute('iAccent', this.accents.get(key)!);
+            old.geometry.dispose();
+            old.geometry = geo;
+          } else this.addMesh(key, geo, ISLANDER.max);
+        }
+        this.skel = glb.skel;
+        this.glb = true;
+      })
+      .catch((err) => console.warn('Islander models failed to load; keeping the built-in ones.', err));
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(0.22, 0.3, 24).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffe28a, transparent: true, opacity: 0.9, depthWrite: false })
@@ -285,6 +285,27 @@ export class IslanderRig {
     this.ring.visible = false;
     this.ring.renderOrder = 5;
     this.group.add(this.ring);
+  }
+
+  /** Joint offsets: the built-in bodies' until the character models load, then theirs. */
+  private skel: Record<'m' | 'f', Skeleton> = SKELETON;
+  /** Character models loaded: limbs are separate left and right parts. */
+  private glb = false;
+
+  private addMesh(key: string, geo: THREE.BufferGeometry, cap: number): void {
+    const acc = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+    acc.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('iAccent', acc);
+    const mesh = new THREE.InstancedMesh(geo, peopleMaterial(), cap);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+    this.meshes.set(key, mesh);
+    this.accents.set(key, acc);
+    this.group.add(mesh);
   }
 
   private rot(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, order: THREE.EulerOrder = 'XYZ', s = 1): THREE.Matrix4 {
@@ -315,9 +336,10 @@ export class IslanderRig {
       // Off screen: skip posing the jointed body (the villager keeps working as normal).
       if (!View.sees(isl.x, isl.y + 0.35, isl.z, 0.6)) continue;
       const g = isl.gender;
-      const sk = SKELETON[g];
+      const sk = this.skel[g];
       const p = poseFor(isl, g === 'f', sk);
-      const side_ = (base: string, _s: number) => `${base}_${g}`;
+      // Character-model limbs are sided: -1 is the -x side (R), +1 the +x side (L).
+      const side_ = this.glb ? (base: string, s: number) => `${base}_${g}${s < 0 ? 'R' : 'L'}` : (base: string, _s: number) => `${base}_${g}`;
       this.skin.setHex(isl.skin);
       this.accent.setHex(isl.cloth2);
       const sc = S0 * (isl.child ? ISLANDER.childScale : 1) * (g === 'f' ? 0.98 : 1);
@@ -331,7 +353,7 @@ export class IslanderRig {
       this.put(`pelvis_${g}`, M.pelvis);
       // Legs.
       for (const [side, th, sh] of [[-1, p.thL, p.shL], [1, p.thR, p.shR]] as [number, number, number][]) {
-        M.th.multiplyMatrices(M.pelvis, this.rot(this.tmp, side * sk.hipX, -0.03, 0, th, 0, side * 0.03));
+        M.th.multiplyMatrices(M.pelvis, this.rot(this.tmp, side * sk.hipX, sk.hipDY ?? -0.03, 0, th, 0, side * 0.03));
         this.put(side_(`thigh`, side), M.th);
         M.sh.multiplyMatrices(M.th, this.rot(this.tmp, 0, -sk.thigh, 0, sh, 0, 0));
         this.put(side_(`shin`, side), M.sh);
@@ -366,7 +388,7 @@ export class IslanderRig {
         const log = c === 'log';
         // A captured chicken is tucked under the arm; everything else rides on the head.
         if (c === 'chicken') M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0.2, sk.neckY - 0.3, 0.12, 0, 0.3, 0));
-        else M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0, log ? 0.62 : sk.neckY + 0.42, log ? -0.02 : 0.02, 0, log ? 0.25 : 0, 0));
+        else M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0, log ? sk.shoulderY + 0.15 : sk.neckY + 0.42, log ? -0.02 : 0.02, 0, log ? 0.25 : 0, 0));
         this.put(LOADS[c], M.out);
       }
     }

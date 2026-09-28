@@ -33,6 +33,8 @@ const C = (c: number) => ({ color: c });
 export interface Skeleton {
   hipY: number;
   hipX: number;
+  /** Hip joint height above the pelvis origin (default -0.03). */
+  hipDY?: number;
   thigh: number;
   shin: number;
   chestY: number;
