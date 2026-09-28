@@ -1,3 +1,5 @@
+import { serialize } from '../world/Save';
+import { islandFile, parseIslandFile, downloadIsland, MAX_ISLAND_FILE_BYTES } from '../world/IslandFile';
 import { DOGS, FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
 import { MONKEY_BASE } from '../entities/Monkeys';
 import { DOG_BASE } from '../entities/Dogs';
@@ -448,9 +450,11 @@ export class UI {
         <button class="obtn gold" data-a="save">${ICONS.o_save}<span>Save</span></button>
         <button class="obtn green" data-a="tutorial">${ICONS.o_tutorial}<span>Tutorial</span></button>
         <button class="obtn cyan" data-a="help">${ICONS.o_help}<span>How to play</span></button>
-        <button class="obtn wide" data-a="copy">${ICONS.o_link}<span>Copy link</span></button>
+        <button class="obtn wide" data-a="copy">${ICONS.o_link}<span>Copy Island</span></button>
       </div>
-      <p class="muted small">Progress autosaves every minute in this browser. Share the link to let friends play the same island.</p>`;
+      <button class="obtn wide" data-a="load">${ICONS.o_save}<span>Load Island</span></button>
+      <input type="file" data-a="island-file" accept=".json,application/json" class="hidden">
+      <p class="muted small">Progress autosaves in this browser. Copy Island shares or downloads a saved copy of your build and progress. Use Load Island to open a shared save. Each copy progresses independently.</p>`;
     const close = el('button', 'ib small close', ICONS.close);
     close.onclick = () => this.toggle(this.settings, false);
     card.querySelector('.card-head')!.appendChild(close);
@@ -497,12 +501,35 @@ export class UI {
       this.toast('Island saved.');
     };
     card.querySelector<HTMLButtonElement>('[data-a="copy"]')!.onclick = async () => {
-      const url = `${location.origin}${location.pathname}`;
       try {
-        await navigator.clipboard.writeText(url);
-        this.toast('Link copied. Share it to play this island.');
+        const file = islandFile(serialize(this.game));
+        if (navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: this.game.islandName });
+            return;
+          } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') return;
+          }
+        }
+        downloadIsland(file);
+        this.toast('Island copy downloaded. Share the file, then open it with Load Island.');
       } catch {
-        prompt('Copy this link:', url);
+        this.toast('Could not create an island copy. Please try again.');
+      }
+    };
+    const fileInput = card.querySelector<HTMLInputElement>('[data-a="island-file"]')!;
+    card.querySelector<HTMLButtonElement>('[data-a="load"]')!.onclick = () => fileInput.click();
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = '';
+      if (!file) return;
+      try {
+        if (file.size > MAX_ISLAND_FILE_BYTES) throw new Error('Island file is too large.');
+        const save = parseIslandFile(await file.text());
+        if (!confirm(`Load ${save.name || 'this island'}? This replaces your current island. Use Copy Island first if you want to keep it.`)) return;
+        this.game.importIsland(save);
+      } catch (e) {
+        this.toast(e instanceof Error && !(e instanceof SyntaxError) ? e.message : 'This file is not a valid island save.');
       }
     };
     card.querySelector<HTMLButtonElement>('[data-a="help"]')!.onclick = () => {

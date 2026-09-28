@@ -186,3 +186,15 @@ All tuning values live in `src/config.ts`.
 - Weather events: tropical storms that damage buildings, droughts and floods on the rivers.
 - A volcano on the highlands: rumbles, ash, lava flows that reshape the terrain, and fertile soil afterwards.
 - Trade canoes between islets, more building upgrades, festivals and seasonal events.
+
+### Share a saved island
+
+In Settings, **Copy Island** creates a `.aztlan.json` snapshot of the current build,
+terrain, islanders, resources and saved progress. It opens the device's share sheet
+where file sharing is supported, otherwise downloads the file. Send that file to
+another player; they can open Settings → **Load Island** and select it. Loading
+asks before replacing their current island. Export the current island first to
+keep a backup. Copies progress independently; this is not a live multiplayer link.
+Files must come from a compatible version of the game and island layout.
+
+Save-file checks: `npx tsx --test tests/island-file.test.ts`.

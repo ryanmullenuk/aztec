@@ -1336,6 +1336,15 @@ export class Game {
   /** Set when leaving for a new island so the old one isn't saved on unload. */
   private noSave = false;
 
+  importIsland(save: SaveData): void {
+    // Write first: if storage is full, keep playing the current island unchanged.
+    try { localStorage.setItem(SAVE.key, JSON.stringify(save)); }
+    catch { throw new Error('Not enough browser storage to load this island. Your current island is unchanged.'); }
+    // Prevent visibility/unload autosaves from replacing the imported snapshot.
+    this.noSave = true;
+    location.reload();
+  }
+
   newIsland(): void {
     this.noSave = true;
     try {
