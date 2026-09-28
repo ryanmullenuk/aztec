@@ -53,7 +53,7 @@ export class GrassTufts {
     for (let cz = 1; cz < N - 1; cz++) {
       for (let cx = 1; cx < N - 1; cx++) {
         const i = cz * N + cx;
-        if (!w.isLandCell(i) || w.sandy[i] > 0.4 || w.rocky[i] > 0.35) continue;
+        if (!w.isLandCell(i) || w.sandy[i] > 0.4 || w.rocky[i] > 0.35 || w.swamp[i] > 0.35) continue;
         // Thick in open meadows, sparser on the shaded jungle floor.
         const want = VEG.tuftsPerCell * density * (1 - w.forest[i] * 0.7);
         const n = Math.floor(want + rng.next());
