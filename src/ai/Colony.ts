@@ -143,6 +143,7 @@ export class Colony {
     const d = Math.hypot(dx, dz);
     let speed = (run ? ISLANDER.runSpeed : ISLANDER.walkSpeed) * (isl.child ? 0.8 : 1);
     if (isl.hunger <= 0.02) speed *= 0.7;
+    if (isl.injured > 0) speed *= 0.6;
     const cell = this.world.cellIndexAt(isl.x, isl.z);
     if (cell >= 0) {
       speed *= 1 - this.world.forest[cell] * 0.35;
@@ -1342,11 +1343,104 @@ export class Colony {
         if (r !== 'walking') this.releaseTask(isl);
         break;
       }
+      case 'flee': {
+        // Running for shelter; indoors at home they stay hidden until the danger passes.
+        if (t.stage < 2) {
+          const r = this.travel(isl, dt, t.x, t.z, { goalRadius: 0.6 }, true);
+          if (r === 'walking') return;
+          t.stage = 2;
+          t.timer = 12 + this.rnd() * 8;
+          const home = this.bld.byId(t.target);
+          if (home && home.complete && r === 'arrived') isl.hidden = true;
+        }
+        isl.anim = 'idle';
+        t.timer -= dt;
+        if (t.timer <= 0) {
+          isl.hidden = false;
+          this.releaseTask(isl);
+        }
+        break;
+      }
     }
     void w;
   }
 
   onWarrior: (isl: Islander) => void = () => {};
+
+  // ---------------- Danger ----------------
+
+  /**
+   * A predator is near: villagers within range drop what they're doing and run for shelter (their
+   * home, else the nearest finished building away from the threat); warriors go to meet it.
+   */
+  alarm(x: number, z: number, r: number): Islander[] {
+    const warriors: Islander[] = [];
+    for (const isl of this.list) {
+      if (isl.hidden || isl.sleeping) continue;
+      const d = Math.hypot(isl.x - x, isl.z - z);
+      if (d > r) continue;
+      if (isl.warrior) {
+        if (isl.task?.kind !== 'capture') {
+          this.cancelTask(isl);
+          this.setTask(isl, 'goto', -1, x + (isl.x - x) * 0.25, z + (isl.z - z) * 0.25);
+        }
+        warriors.push(isl);
+        continue;
+      }
+      if (isl.task?.kind === 'flee') continue;
+      this.cancelTask(isl);
+      const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
+      let dest = home && home.complete && Math.hypot(home.door.x - isl.x, home.door.z - isl.z) < 30 ? home : undefined;
+      if (!dest) {
+        // The nearest finished building that isn't toward the threat.
+        let bd = Infinity;
+        for (const b of this.bld.list) {
+          if (!b.complete || b.key === 'torch' || b.key === 'jetty' || b.key === 'tradedock') continue;
+          const db = Math.hypot(b.door.x - isl.x, b.door.z - isl.z);
+          const toward = (b.door.x - isl.x) * (x - isl.x) + (b.door.z - isl.z) * (z - isl.z) > 0 && db > d * 0.5;
+          if (toward || db > 35) continue;
+          if (db < bd) {
+            bd = db;
+            dest = b;
+          }
+        }
+      }
+      if (dest) this.setTask(isl, 'flee', dest === home ? dest.id : -1, dest.door.x, dest.door.z);
+      else {
+        const a = Math.atan2(isl.z - z, isl.x - x);
+        this.setTask(isl, 'flee', -1, isl.x + Math.cos(a) * 10, isl.z + Math.sin(a) * 10);
+      }
+    }
+    return warriors;
+  }
+
+  /** Caught by a jaguar (or an alligator): badly hurt (limping, shaken), or killed. */
+  maul(isl: Islander, killed: boolean, by = 'a jaguar'): void {
+    if (killed) {
+      this.hooks.notify?.(`${isl.name} was killed by ${by}.`);
+      this.remove(isl);
+      return;
+    }
+    isl.injured = 180;
+    isl.happy = Math.max(0, isl.happy - 0.3);
+    isl.rest = Math.max(0, isl.rest - 0.3);
+    this.hooks.notify?.(`${isl.name} was ${by === 'a jaguar' ? 'mauled' : 'bitten'} by ${by} and is badly hurt.`);
+    this.alarm(isl.x, isl.z, 1);
+  }
+
+  /** Remove an islander from the village for good. */
+  remove(isl: Islander): void {
+    this.releaseTask(isl);
+    for (const b of this.bld.list) {
+      b.residents = b.residents.filter((id) => id !== isl.id);
+      b.workers.delete(isl.id);
+      b.builders.delete(isl.id);
+    }
+    this.list = this.list.filter((i) => i !== isl);
+    this.onRemoved(isl);
+  }
+
+  onRemoved: (isl: Islander) => void = () => {};
 
   /**
    * The player calls for help on a building site: the nearest free adults drop what they're
@@ -1423,6 +1517,7 @@ export class Colony {
     for (const isl of this.list) {
       isl.animT += dt;
       isl.age += dt;
+      if (isl.injured > 0) isl.injured = Math.max(0, isl.injured - dt);
       isl.hunger = Math.max(0, isl.hunger - ISLANDER.hungerDrain * dt * (isl.child ? 0.6 : 1));
       if (!isl.sleeping) isl.rest = Math.max(0, isl.rest - ISLANDER.restDrain * dt);
       if (this.eco.godMode) {
@@ -1500,6 +1595,7 @@ export class Colony {
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
       case 'bonfire': return 'Singing and telling stories at the bonfire';
+      case 'flee': return isl.hidden ? 'Sheltering indoors from a jaguar' : 'Running for shelter: jaguar!';
       case 'sleep': return 'Going to bed';
       case 'wander': return 'Strolling';
       case 'spearfish': return (t.stage ?? 0) < 2 ? 'Heading to the shore to fish' : 'Spear fishing';
