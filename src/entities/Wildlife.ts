@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { WILDLIFE } from '../config';
 import { fishMaterial } from '../render/materials';
+import { View } from '../render/View';
+
+/** Beyond this distance (squared) fish are drawn with the lighter model. */
+const FISH_LOD2 = 20 * 20;
 import { Building } from '../buildings/Buildings';
 import { Islander } from './Islander';
 import { SpatialHash } from '../world/SpatialHash';
@@ -24,6 +28,8 @@ export interface School {
   stock: number;
   max: number;
   deep: boolean;
+  /** On screen this frame (full flocking); off-screen schools just carry their fish along. */
+  vis?: boolean;
 }
 
 interface Fish {
@@ -38,7 +44,6 @@ interface Fish {
   scale: number;
 }
 
-const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -71,6 +76,8 @@ export class Wildlife {
   private fish: Fish[] = [];
   private fishHash = new SpatialHash<Fish>(3);
   private fishMesh: THREE.InstancedMesh;
+  /** The same fish in lighter geometry for those far from the camera. */
+  private fishMeshLo: THREE.InstancedMesh;
   private rng: RNG;
   private time = 0;
   /** Positions boats scare fish from. */
@@ -99,12 +106,21 @@ export class Wildlife {
     const reefPts = [...this.coral.patches.map((p) => ({ x: p.x, z: p.z })), ...veg.plants.filter((p) => p.kind === 'reef' || p.kind === 'searock').map((p) => ({ x: p.x, z: p.z }))];
     this.reef = new ReefFish(world, reefPts);
     this.group.add(this.animals.group, this.birds.group, this.monkeys.group, this.critters.group, this.reef.group, this.coral.group);
-    this.fishMesh = new THREE.InstancedMesh(fishGeometry('silver'), fishMaterial(11), Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool));
-    this.fishMesh.castShadow = false;
-    this.fishMesh.frustumCulled = false;
-    this.fishMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.group.add(this.fishMesh);
+    const fmat = fishMaterial(11);
+    const cap = Math.max(1, WILDLIFE.schools * WILDLIFE.fishPerSchool);
+    const mk = (g: THREE.BufferGeometry) => {
+      const m = new THREE.InstancedMesh(g, fmat, cap);
+      m.castShadow = false;
+      m.frustumCulled = false;
+      m.count = 0;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.group.add(m);
+      return m;
+    };
+    this.fishMesh = mk(fishGeometry('silver'));
+    this.fishMeshLo = mk(fishGeometry('silver', 'lo'));
     this.spawnSchools();
+    this.shownCount = new Int32Array(this.schools.length);
   }
 
   // ---------------- Pens (delegated) ----------------
@@ -169,7 +185,13 @@ export class Wildlife {
       }
       const d = Math.hypot(s.tx - s.x, s.tz - s.z) || 1;
       const nx = s.x + ((s.tx - s.x) / d) * 0.9 * dt, nz = s.z + ((s.tz - s.z) / d) * 0.9 * dt;
+      s.vis = View.sees(s.x, -0.6, s.z, 6);
       if (w.heightAt(nx, nz) < -1.8) {
+        // Off-screen: the fish simply travel with their school (flocking resumes on screen).
+        if (!s.vis) for (const f of this.fish) if (this.schools[f.school] === s) {
+          f.x += nx - s.x;
+          f.z += nz - s.z;
+        }
         s.x = nx;
         s.z = nz;
       } else {
@@ -179,10 +201,13 @@ export class Wildlife {
         s.tz = s.z + Math.cos(out) * 12;
       }
     }
+    for (const th of this.threats) th.t -= dt;
+    if (this.threats.length) this.threats = this.threats.filter((th) => th.t > 0);
     this.fishHash.clear();
-    for (const f of this.fish) this.fishHash.insert(f);
+    for (const f of this.fish) if (this.schools[f.school].vis) this.fishHash.insert(f);
     for (const f of this.fish) {
       const s = this.schools[f.school];
+      if (!s.vis) continue;
       let fx = (s.x - f.x) * 0.6, fz = (s.z - f.z) * 0.6;
       // Bait-ball swirl: circle the school centre with a slowly changing radius.
       const dx = f.x - s.x, dz = f.z - s.z;
@@ -216,6 +241,7 @@ export class Wildlife {
         }
       };
       if (cursor) scare(cursor.x, cursor.z, WILDLIFE.fishFleeRadius);
+      for (const th of this.threats) scare(th.x, th.z, th.r);
       for (const bt of this.boats) scare(bt.x, bt.z, WILDLIFE.fishFleeRadius * 0.8);
       fx += Math.sin(this.time * 0.8 + f.phase) * 0.4;
       fz += Math.cos(this.time * 0.7 + f.phase * 1.3) * 0.4;
@@ -253,25 +279,63 @@ export class Wildlife {
   }
 
   private renderSchools(): void {
-    // Hide fish beyond a school's current stock (over-fishing visibly thins schools).
-    const shown = new Map<number, number>();
+    // Only fish on screen are drawn (packed to the front); far ones use the lighter model.
+    // A school shows as many fish as its current stock (over-fishing visibly thins it).
+    const shown = this.shownCount;
+    shown.fill(0);
+    let hi = 0, lo = 0;
     for (let i = 0; i < this.fish.length; i++) {
       const f = this.fish[i];
       const s = this.schools[f.school];
-      const n = shown.get(f.school) ?? 0;
-      shown.set(f.school, n + 1);
-      if (n >= Math.floor(s.stock)) {
-        this.fishMesh.setMatrixAt(i, ZERO);
-        continue;
-      }
+      const n = shown[f.school]++;
+      if (n >= Math.floor(s.stock) || !s.vis || !View.sees(f.x, f.y, f.z, 0.2)) continue;
       const wig = Math.sin(this.time * 4 + f.phase) * 0.05;
       _e.set(0, f.heading + wig, 0, 'YXZ');
       _q.setFromEuler(_e);
       _m.compose(_p.set(f.x, f.y, f.z), _q, _s.setScalar(f.scale * 1.2));
-      this.fishMesh.setMatrixAt(i, _m);
+      if (View.dist2(f.x, f.y, f.z) < FISH_LOD2) this.fishMesh.setMatrixAt(hi++, _m);
+      else this.fishMeshLo.setMatrixAt(lo++, _m);
     }
-    this.fishMesh.count = this.fish.length;
+    this.fishMesh.count = hi;
+    this.fishMeshLo.count = lo;
     this.fishMesh.instanceMatrix.needsUpdate = true;
+    this.fishMeshLo.instanceMatrix.needsUpdate = true;
+  }
+
+  private shownCount = new Int32Array(0);
+
+  // ---------------- Predators (pelicans) ----------------
+
+  private threats: { x: number; z: number; r: number; t: number }[] = [];
+
+  /** A dive or a strike: fish nearby dart away for a moment. */
+  scatter(x: number, z: number, r: number): void {
+    this.threats.push({ x, z, r, t: 1.6 });
+  }
+
+  /** The nearest fish a predator can see near a point (only fish a school's stock shows). */
+  fishNear(x: number, z: number, r: number): { x: number; y: number; z: number; school: number } | null {
+    const shown = this.shownCount;
+    shown.fill(0);
+    let best: Fish | null = null, bd = r * r;
+    for (const f of this.fish) {
+      const n = shown[f.school]++;
+      if (n >= Math.floor(this.schools[f.school].stock)) continue;
+      const d = (f.x - x) ** 2 + (f.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = f;
+      }
+    }
+    return best ? { x: best.x, y: best.y, z: best.z, school: best.school } : null;
+  }
+
+  /** A fish caught from a school (the school visibly thins, and regrows over time). */
+  takeFish(school: number): boolean {
+    const s = this.schools[school];
+    if (!s || s.stock < 1) return false;
+    s.stock -= 1;
+    return true;
   }
 
   /** Nearest deep school with fish, for a boat. */

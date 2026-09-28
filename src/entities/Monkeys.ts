@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { View } from '../render/View';
 import { FAUNA } from '../config';
 import { peopleMaterial } from '../render/materials';
 import { RNG } from '../world/rng';
@@ -85,6 +86,7 @@ interface Troop {
 }
 
 const _m = new THREE.Matrix4();
+const _hang = new THREE.Matrix4();
 const _b = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -640,6 +642,7 @@ export class Monkeys {
     const chest = new THREE.Matrix4(), J = new THREE.Matrix4(), T = new THREE.Matrix4();
     for (const m of this.list) {
       if (m.dead) continue;
+      if (!View.sees(m.x, m.y, m.z, 0.5)) continue;
       const t = this.time + m.phase;
       let pitch = 0, roll = 0, bodyY = 0;
       let armL = -0.25, armR = -0.25, armLz = 0.25, armRz = -0.25;
@@ -803,8 +806,8 @@ export class Monkeys {
         // Pivot at the hands on the branch.
         local(_b, m.x, m.y + 0.02, m.z, 0, yaw, 0, s);
         L.copy(_b);
-        _b.multiply(local(new THREE.Matrix4(), 0, 0, 0, hangSwing, 0, 0));
-        _b.multiply(local(new THREE.Matrix4(), 0, -0.3, 0, 0, 0, 0));
+        _b.multiply(local(_hang, 0, 0, 0, hangSwing, 0, 0));
+        _b.multiply(local(_hang, 0, -0.3, 0, 0, 0, 0));
       } else {
         local(_b, m.x, m.y + bodyY * s, m.z, pitch, yaw, roll, s);
       }

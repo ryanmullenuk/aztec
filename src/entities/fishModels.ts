@@ -8,13 +8,16 @@ type V2 = [number, number];
 
 const col = (hex: number) => new THREE.Color(hex);
 
+/** Build detail: 'lo' is for fish far from the camera (same shape and colours, fewer faces). */
+let LO = false;
+
 /**
  * A fish body: elliptical rings along z from the nose (+len/2) back to a slim tail stalk,
  * heights and widths set by the profile. Returns the geometry and a helper giving the
  * body's top/bottom/side at any z, so fins can grow straight out of the skin.
  */
 function body(len: number, h: number, w: number, opts: { hump?: number; snout?: number; peduncle?: number } = {}) {
-  const rings = 18, seg = 12;
+  const rings = LO ? 9 : 18, seg = LO ? 7 : 12;
   const pd = opts.peduncle ?? 0.16;
   const prof = (t: number) => {
     // t: 0 at the nose, 1 at the tail stalk. Blunt round front, long taper behind.
@@ -115,7 +118,7 @@ class FishBuilder {
 
   /** Fin along the back (up = 1) or belly (up = -1). */
   private ridge(spec: FinSpec, up: 1 | -1, c: Col): void {
-    const n = 7;
+    const n = LO ? 4 : 7;
     const base: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
     const [za, zb] = spec.z;
     const span = za - zb;
@@ -144,7 +147,7 @@ class FishBuilder {
     const z = this.B.z1 + 0.004;
     const y0 = this.B.mid(this.B.z1);
     const hs = Math.max(this.B.half(this.B.z1) * 1.05, 0.004);
-    const n = 7;
+    const n = LO ? 4 : 7;
     const base: THREE.Vector3[] = [], edge: THREE.Vector3[] = [];
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
@@ -193,10 +196,10 @@ class FishBuilder {
     const y = this.B.mid(z) + this.B.half(z) * up;
     const sx = this.B.side(z) * 0.86;
     for (const s of [-1, 1]) {
-      this.b.add(P.sphere(r, 1), { color: iris }, M.t(s * sx, y, z, 0, 0, 0, 0.55, 1, 1));
-      this.b.add(P.sphere(r * 0.62, 1), { color: 0x08080a }, M.t(s * (sx + r * 0.32), y, z + r * 0.05, 0, 0, 0, 0.5, 1, 1));
+      this.b.add(P.sphere(r, LO ? 0 : 1), { color: iris }, M.t(s * sx, y, z, 0, 0, 0, 0.55, 1, 1));
+      this.b.add(P.sphere(r * 0.62, LO ? 0 : 1), { color: 0x08080a }, M.t(s * (sx + r * 0.32), y, z + r * 0.05, 0, 0, 0, 0.5, 1, 1));
       // A tiny catchlight.
-      this.b.add(P.sphere(r * 0.18, 0), { color: 0xffffff }, M.t(s * (sx + r * 0.5), y + r * 0.3, z + r * 0.2));
+      if (!LO) this.b.add(P.sphere(r * 0.18, 0), { color: 0xffffff }, M.t(s * (sx + r * 0.5), y + r * 0.3, z + r * 0.2));
     }
     return this;
   }
@@ -232,7 +235,16 @@ function shade(back: number, belly: number, split = 0): Col {
   return (p) => a.clone().lerp(b, THREE.MathUtils.smoothstep(-p.y + split, -0.012, 0.014));
 }
 
-export function fishGeometry(t: FishType): THREE.BufferGeometry {
+export function fishGeometry(t: FishType, detail: 'hi' | 'lo' = 'hi'): THREE.BufferGeometry {
+  LO = detail === 'lo';
+  try {
+    return buildFish(t);
+  } finally {
+    LO = false;
+  }
+}
+
+function buildFish(t: FishType): THREE.BufferGeometry {
   switch (t) {
     case 'blueYellow': {
       // Royal gramma: violet-blue front fading into a golden rear half.

@@ -40,7 +40,7 @@ export type CarryKind = ResourceKey | 'log' | 'chicken';
 
 /** A task is a small state machine the AI steps through. */
 export interface Task {
-  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire';
+  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire' | 'flee';
   stage: number;
   /** Plant id, building id or islander id depending on kind. */
   target: number;
@@ -97,6 +97,8 @@ export interface Islander {
   /** Waving up at the player (seconds left), and time until they might wave again. */
   waveT: number;
   waveCool: number;
+  /** Seconds left limping from a wild-animal attack. */
+  injured: number;
   hidden: boolean;
   think: number;
   lastMeal?: ResourceKey;
@@ -153,6 +155,7 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
     hidden: false,
     lastBonfire: -1,
     waveT: 0,
+    injured: 0,
     waveCool: 3 + Math.random() * 12,
     think: rnd(),
     stuck: 0,

@@ -1202,14 +1202,19 @@ export class Marine {
     if (f >= 1) w.foam.visible = false;
   }
 
-  private burst(x: number, z: number, n: number, speed: number, radius: number): void {
+  /** A splash of droplets (whales breaching, birds diving, a lunging alligator). */
+  splash(x: number, z: number, n: number, speed: number, radius: number, y = 0.05): void {
+    this.burst(x, z, n, speed, radius, y);
+  }
+
+  private burst(x: number, z: number, n: number, speed: number, radius: number, y = 0.05): void {
     for (let k = 0; k < n; k++) {
       const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * radius;
       const up = speed * (0.5 + this.rng.next() * 0.8);
       const out = speed * 0.35 * (0.3 + this.rng.next());
       // Mostly fine droplets, with the odd bigger clump of water.
       const big = this.rng.next() < 0.05;
-      this.spray.spawn(x + Math.cos(a) * r, 0.05, z + Math.sin(a) * r, Math.cos(a) * out, up, Math.sin(a) * out, 0.8 + this.rng.next() * 0.9, big ? 0.14 + this.rng.next() * 0.12 : 0.04 + this.rng.next() * 0.08, big ? 0.12 : 0.03);
+      this.spray.spawn(x + Math.cos(a) * r, y, z + Math.sin(a) * r, Math.cos(a) * out, up, Math.sin(a) * out, 0.8 + this.rng.next() * 0.9, big ? 0.14 + this.rng.next() * 0.12 : 0.04 + this.rng.next() * 0.08, big ? 0.12 : 0.03);
     }
   }
 

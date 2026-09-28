@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { View } from '../render/View';
 import { ISLANDER } from '../config';
 import { peopleMaterial } from '../render/materials';
 import { Islander } from './Islander';
@@ -311,6 +312,8 @@ export class IslanderRig {
     const M = this.m;
     for (const isl of list) {
       if (isl.hidden) continue;
+      // Off screen: skip posing the jointed body (the villager keeps working as normal).
+      if (!View.sees(isl.x, isl.y + 0.35, isl.z, 0.6)) continue;
       const g = isl.gender;
       const sk = SKELETON[g];
       const p = poseFor(isl, g === 'f', sk);

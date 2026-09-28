@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { View } from '../render/View';
 import { FAUNA, SPECIES, SpeciesDef, SpeciesKey, WARRIOR, WILDLIFE } from '../config';
 import { Building } from '../buildings/Buildings';
 import { peopleMaterial } from '../render/materials';
@@ -131,6 +132,9 @@ const TROT = [0, 0.5, 0.5, 0];
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
+// Scratch matrices for posing (reused every frame rather than allocated per animal).
+const _front = new THREE.Matrix4(), _rear = new THREE.Matrix4(), _tmp = new THREE.Matrix4();
+const _J = new THREE.Matrix4(), _T = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
@@ -858,19 +862,19 @@ export class Animals {
     const bob = moving ? (fast ? Math.abs(Math.sin(G * 2)) * 0.022 : Math.abs(Math.sin(G * 2)) * 0.008) * a.scale : Math.sin(a.phase * 2) * 0.002;
     const drop = lie * (q.spineY - q.hipY * 0.35);
     compose(_m, a.x, a.y + (q.spineY - drop) * a.scale + bob, a.z, 0, a.heading, lie * 0.08, a.scale);
-    const front = new THREE.Matrix4().multiplyMatrices(_m, compose(new THREE.Matrix4(), 0, 0, 0, frontPitch + flex, bendYaw * 0.5, 0));
-    const rear = new THREE.Matrix4().multiplyMatrices(_m, compose(new THREE.Matrix4(), 0, 0, 0, -flex, -bendYaw * 0.5, 0));
+    const front = _front.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, frontPitch + flex, bendYaw * 0.5, 0));
+    const rear = _rear.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, -flex, -bendYaw * 0.5, 0));
     this.put(`${a.bodyKey}_F`, front, a.color);
     this.put(`${a.bodyKey}_R`, rear, a.color);
     const [hx, hy, hz] = q.head;
-    _m2.multiplyMatrices(front, compose(new THREE.Matrix4(), hx, hy, hz, headTilt - frontPitch, a.lookYaw + bendYaw * 0.5, 0));
+    _m2.multiplyMatrices(front, compose(_tmp, hx, hy, hz, headTilt - frontPitch, a.lookYaw + bendYaw * 0.5, 0));
     this.put(a.headKey, _m2, a.color);
     // Legs.
     const L = q.hipY, l1 = L * q.seg[0], l2 = L * q.seg[1];
     const amp = moving ? (fast ? 0.62 : 0.34) * Math.min(1, a.speed * 2 + 0.3) : 0;
     const offs = fast ? TROT : WALK;
     const hindY = hindHipY(q);
-    const J = new THREE.Matrix4(), T = new THREE.Matrix4();
+    const J = _J, T = _T;
     for (let k = 0; k < 4; k++) {
       const isFront = k < 2, side = k % 2 === 0 ? 1 : -1;
       const ph = G + offs[k] * Math.PI * 2;
@@ -913,6 +917,8 @@ export class Animals {
     for (const a of this.list) {
       if (!a.alive) continue;
       if (a.heldMode === 'carry') continue; // drawn in the islander's arms
+      // Off screen: no limbs to pose (it keeps living; the pose picks up again when seen).
+      if (!View.sees(a.x, a.y + 0.2 * a.scale, a.z, 0.5 * a.scale + 0.2)) continue;
       const rig = RIG[a.sp];
       if (a.sp !== 'chicken') {
         this.drawQuad(a, dt);
@@ -936,13 +942,13 @@ export class Animals {
       this.put(a.bodyKey, _m, a.color);
       // Head: pecks, grazes, turns to look.
       const [hx, hy, hz] = rig.head;
-      _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), hx, hy, hz, headTilt, a.lookYaw, 0));
+      _m2.multiplyMatrices(_m, compose(_tmp, hx, hy, hz, headTilt, a.lookYaw, 0));
       this.put(a.headKey, _m2, a.color);
       // Legs.
       rig.legs.forEach(([lx, ly, lz], k) => {
         const sw = moving ? Math.sin(ph + (k % 2 ? Math.PI : 0) + (k > 1 ? Math.PI : 0)) * (fast ? 0.8 : 0.5) : 0;
         const fold = resting ? (a.sp === 'chicken' ? 1.4 : k < 2 ? -1.4 : 1.4) : 0;
-        _m2.multiplyMatrices(_m, compose(new THREE.Matrix4(), lx, ly, lz, sw + fold, 0, 0));
+        _m2.multiplyMatrices(_m, compose(_tmp, lx, ly, lz, sw + fold, 0, 0));
         this.put(`leg_${a.sp}`, _m2, a.color);
       });
       if (rig.wings) {

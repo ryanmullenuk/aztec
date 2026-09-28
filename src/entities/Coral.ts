@@ -200,10 +200,26 @@ export class Coral {
       }
     }
     const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 }), 0.2);
+    // Split each kind into spatial chunks so reefs off screen are culled (one island-wide mesh
+    // per kind would always be drawn).
+    const CH = 24;
+    const pos = new THREE.Vector3();
     for (const kind of Object.keys(items) as CoralKind[]) {
-      const list = items[kind];
-      if (!list.length) continue;
-      const mesh = new THREE.InstancedMesh(geos[kind], mat, list.length);
+      const buckets = new Map<string, { m: THREE.Matrix4; c: THREE.Color }[]>();
+      for (const it of items[kind]) {
+        pos.setFromMatrixPosition(it.m);
+        const k = `${Math.floor(pos.x / CH)},${Math.floor(pos.z / CH)}`;
+        let b = buckets.get(k);
+        if (!b) buckets.set(k, (b = []));
+        b.push(it);
+      }
+      for (const list of buckets.values()) this.addChunk(geos[kind], mat, list);
+    }
+  }
+
+  private addChunk(geo: THREE.BufferGeometry, mat: THREE.Material, list: { m: THREE.Matrix4; c: THREE.Color }[]): void {
+    {
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
       list.forEach((it, i) => {
         mesh.setMatrixAt(i, it.m);
         mesh.setColorAt(i, it.c);

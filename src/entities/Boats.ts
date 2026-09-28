@@ -508,6 +508,11 @@ export class Boats {
     } else b.net.visible = false;
   }
 
+  /** Canoes out netting fish (stirred-up fish draw pelicans). */
+  fishing(): { x: number; z: number }[] {
+    return this.list.filter((b) => b.state === 'netting').map((b) => ({ x: b.x, z: b.z }));
+  }
+
   positions(): { x: number; z: number }[] {
     return this.list.map((b) => ({ x: b.x, z: b.z }));
   }

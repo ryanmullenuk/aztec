@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+
+/** Zero-scale matrix for parts that are tucked away (reused, not allocated per frame). */
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 import { FAUNA, WILDLIFE } from '../config';
 import { peopleMaterial } from '../render/materials';
 import { RNG } from '../world/rng';
@@ -400,7 +403,7 @@ export class Birds {
       flapPose(g.flap, g.amp, _fp, panic ? 0.05 : 0.2, 0.28);
       mixPose(_fp, FOLDED, g.fold, _wp);
       this.wings('gullW', gi, _m, [0.026, 0.028, 0.03], GULL_WING, _wp);
-      ms.gullLegs.setMatrixAt(gi, onGround || g.state === 'land' ? _m : new THREE.Matrix4().makeScale(0, 0, 0));
+      ms.gullLegs.setMatrixAt(gi, onGround || g.state === 'land' ? _m : HIDDEN);
       gi++;
     }
     let ti = 0;
