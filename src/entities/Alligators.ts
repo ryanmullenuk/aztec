@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ALLIGATORS } from '../config';
-import { GeoBuilder, M, P, facet } from '../render/GeoBuilder';
+import { ColorFn, GeoBuilder, M, P, facet } from '../render/GeoBuilder';
 import { View } from '../render/View';
 import { RNG } from '../world/rng';
 import { SpatialHash } from '../world/SpatialHash';
@@ -31,63 +31,169 @@ interface Gator {
   react: number;
   preyKind: 'villager' | 'dog' | null;
   preyId: number;
+  // ---- Animation only (smoothed) ----
+  /** Gait phase (cycles) and blend weights: walking, swimming (legs tucked), basking. */
+  gph: number;
+  walkW: number;
+  swimW: number;
+  baskW: number;
+  /** Tail wave amplitude and spine bend. */
+  tailA: number;
+  spine: number;
+  lift: number;
 }
 
 const C = (c: number) => ({ color: c });
-const BACK = 0x3a4428, BELLY = 0x8a8a5a, SCUTE = 0x2a3220;
+const BACK = 0x3a4428, BELLY = 0x8a8a5a, SCUTE = 0x2a3220, SKIN_D = 0x323a22;
 
-/** Body: low, broad, armoured back with rows of scutes, pale belly. Faces +z, centre at origin. */
-function bodyGeo(): THREE.BufferGeometry {
+/** Rig dimensions (body frame at the spine joint; faces +z). */
+const ALG = {
+  head: [0, 0.01, 0.17] as [number, number, number],
+  tail: [0, 0.004, -0.17] as [number, number, number],
+  tailLen: [0.11, 0.1, 0.1, 0.09],
+  tailR: [0.05, 0.04, 0.028, 0.017, 0.006],
+  /** Shoulder and hip roots (right side). */
+  legF: [0.068, -0.014, 0.1] as [number, number, number],
+  legR: [0.072, -0.01, -0.105] as [number, number, number],
+  L1: 0.055,
+  L2: 0.05,
+  /** Neutral foot reach out to the side, and the step length per gait cycle. */
+  reach: 0.075,
+  stride: 0.16,
+};
+
+/** Gait: fraction of the cycle a foot is planted, step lift, how much the spine and tail swing. */
+const GATOR_GAIT = { duty: 0.6, lift: 0.028, spine: 0.16, walkTail: 0.3 };
+/** Tail sculling amplitude (radians at the tip) swimming, and the travelling wave's lag per segment. */
+const GATOR_SWIM = { tail: 0.55, lag: 0.85 };
+
+const backCol = (p: THREE.Vector3, n: THREE.Vector3) => new THREE.Color(n.y < -0.25 || p.y < -0.022 ? BELLY : BACK).multiplyScalar(0.94 + 0.08 * Math.sin(p.z * 160) * Math.sin(p.x * 120));
+
+/**
+ * Front or rear half of the body (they overlap at the spine joint so it can bend without a gap):
+ * low and broad, pale belly with transverse scale rows, armoured back with keeled osteoderms in
+ * rows, and the big nuchal scutes behind the head on the front half.
+ */
+function bodyHalf(front: boolean): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.sphere(0.1, 1), { color: (p) => new THREE.Color(p.y < -0.02 ? BELLY : BACK) }, M.t(0, 0, 0, 0, 0, 0, 1, 0.45, 1.9));
-  for (let k = 0; k < 7; k++) for (const x of [-0.035, 0, 0.035]) b.add(P.box(0.022, 0.018, 0.03), C(SCUTE), M.t(x, 0.045 - Math.abs(x) * 0.25, -0.15 + k * 0.05));
+  const z0 = front ? 0.065 : -0.065;
+  b.add(P.sphere(0.1, 1), { color: backCol }, M.t(0, 0, z0, 0, 0, 0, front ? 1 : 0.97, 0.46, front ? 1.3 : 1.35));
+  // Belly scale rows.
+  for (let k = 0; k < 4; k++) b.add(P.box(0.13, 0.004, 0.006), C(0x7a7a4e), M.t(0, -0.043, z0 + (k - 1.5) * 0.035));
+  // Osteoderm rows along the back.
+  const rows = front ? [0.0, 0.03, 0.06, 0.09, 0.12] : [-0.02, -0.05, -0.08, -0.11, -0.14];
+  for (const z of rows)
+    for (const x of [-0.05, -0.022, 0.022, 0.05]) {
+      const y = 0.046 * Math.sqrt(Math.max(0, 1 - (x / 0.1) ** 2)) * 0.95;
+      b.add(P.cone(0.012, 0.014, 4), C(SCUTE), M.t(x, y, z, 0, Math.PI / 4, 0, 1, 1, 1.4));
+    }
+  if (front) for (const x of [-0.03, -0.012, 0.012, 0.03]) b.add(P.cone(0.014, 0.02, 4), C(SCUTE), M.t(x, 0.044, 0.15, 0, Math.PI / 4, 0, 1, 1, 1.2));
+  // Neck skin joining the head.
+  if (front) b.add(P.sphere(0.06, 1), { color: backCol }, M.t(0, 0.005, 0.16, 0, 0, 0, 1, 0.55, 0.9));
   return facet(b.build());
 }
 
-/** Head with the upper jaw: flat broad snout, raised eyes and nostrils (all that shows above water). */
+/** A tapered box running from z0 along +z (snout, jaw), width and height interpolated. */
+function taperBox(len: number, w0: number, w1: number, h0: number, h1: number, z0: number, y0: number): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(1, 1, 1, 2, 1, 4);
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const u = p.getZ(i) + 0.5;
+    // A broad, rounded U-shaped snout: the tip narrows only at the very end.
+    const w = w0 + (w1 - w0) * u * u;
+    const h = h0 + (h1 - h0) * u;
+    p.setXYZ(i, p.getX(i) * w, y0 + p.getY(i) * h, z0 + u * len);
+  }
+  return g;
+}
+
+/** Head with the upper jaw: broad skull, long rounded snout, raised eyes and brows, nostril knob, teeth. */
 function headGeo(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.box(0.1, 0.045, 0.1), C(BACK), M.t(0, 0.012, 0.03));
-  b.add(P.box(0.075, 0.03, 0.16), C(0x3e4a2c), M.t(0, 0.004, 0.14));
-  b.add(P.sphere(0.012, 0), C(0x2a2a1a), M.t(0, 0.022, 0.215));
+  b.add(taperBox(0.09, 0.1, 0.085, 0.046, 0.034, -0.02, 0.012), C(BACK));
+  b.add(taperBox(0.13, 0.08, 0.052, 0.03, 0.022, 0.06, 0.004), { color: (p) => new THREE.Color(Math.sin(p.z * 150) > 0.7 ? SKIN_D : 0x3e4a2c) });
+  b.add(P.sphere(0.013, 0), C(0x2a2a1a), M.t(0, 0.02, 0.18, 0, 0, 0, 1.3, 0.8, 1));
+  for (const x of [-1, 1]) b.add(P.sphere(0.004, 0), C(0x0c0c08), M.t(x * 0.006, 0.027, 0.183));
   // Teeth along the upper jaw.
-  for (let k = 0; k < 6; k++) for (const x of [-1, 1]) b.add(P.cone(0.004, 0.014, 3), C(0xe8e0c8), M.t(x * 0.035, -0.014, 0.08 + k * 0.025, Math.PI, 0, 0));
+  for (let k = 0; k < 7; k++) {
+    const z = 0.07 + k * 0.018, w = 0.04 - k * 0.0018;
+    for (const x of [-1, 1]) b.add(P.cone(0.0035, 0.013, 3), C(0xe8e0c8), M.t(x * w, -0.012, z, Math.PI, 0, 0));
+  }
   for (const x of [-1, 1]) {
-    b.add(P.sphere(0.015, 0), C(0x3a4428), M.t(x * 0.028, 0.04, 0.03));
-    b.add(P.sphere(0.008, 0), C(0xc8a030), M.t(x * 0.03, 0.046, 0.036));
+    // Bony brows and the raised eyes with yellow irises and dark slit pupils.
+    b.add(P.sphere(0.016, 0), C(SCUTE), M.t(x * 0.028, 0.04, 0.02, 0, 0, 0, 1, 0.9, 1.2));
+    b.add(P.sphere(0.009, 0), C(0xc8a030), M.t(x * 0.032, 0.047, 0.03));
+    b.add(P.box(0.002, 0.009, 0.003), C(0x0c0c08), M.t(x * 0.039, 0.048, 0.034));
   }
   return facet(b.build());
 }
 
+/** Lower jaw, from its hinge at the back of the skull: pale underneath, teeth pointing up. */
 function jawGeo(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.box(0.07, 0.018, 0.2), C(BELLY), M.t(0, -0.008, 0.1));
-  for (let k = 0; k < 5; k++) for (const x of [-1, 1]) b.add(P.cone(0.004, 0.012, 3), C(0xe8e0c8), M.t(x * 0.03, 0.006, 0.05 + k * 0.03));
+  b.add(taperBox(0.2, 0.085, 0.05, 0.02, 0.014, 0, -0.01), { color: (_p, n) => new THREE.Color(n.y > 0.5 ? 0xb89a8a : BELLY) });
+  for (let k = 0; k < 6; k++) for (const x of [-1, 1]) b.add(P.cone(0.0035, 0.012, 3), C(0xe8e0c8), M.t(x * (0.036 - k * 0.002), 0.004, 0.05 + k * 0.024));
   return facet(b.build());
 }
 
-function tailGeo(len: number, r0: number, r1: number): THREE.BufferGeometry {
+/** One tail segment from its joint trailing along −z: laterally flattened, with its crest scutes. */
+function tailGeo(k: number): THREE.BufferGeometry {
+  const len = ALG.tailLen[k], r0 = ALG.tailR[k], r1 = ALG.tailR[k + 1];
   const b = new GeoBuilder();
-  b.add(P.cyl(r1, r0, len, 6), { color: (p) => new THREE.Color(p.y < -0.01 ? BELLY : BACK) }, M.t(0, 0, -len / 2, Math.PI / 2, 0, 0, 1, 1, 0.7));
-  // A double crest of scutes down the tail.
-  for (let k = 0; k < 5; k++) b.add(P.box(0.012, 0.022, 0.025), C(SCUTE), M.t(0, r0 * 0.6, -len * (0.1 + k * 0.18)));
+  const flat = 0.8 - k * 0.1;
+  b.add(P.sphere(r0 * 0.98, 0), { color: backCol }, M.t(0, 0, 0, 0, 0, 0, flat, 0.9, 1));
+  b.add(P.cyl(r1, r0, len, 7), { color: (p, n) => new THREE.Color(n.y < -0.3 ? BELLY : BACK) }, M.t(0, 0, -len / 2, -Math.PI / 2, 0, 0, flat, 1, 1.05));
+  // A double crest near the body that merges into a single one toward the tip.
+  for (let j = 0; j < 4; j++) {
+    const z = -len * (0.12 + j * 0.24), r = r0 + (r1 - r0) * (0.12 + j * 0.24);
+    const h = 0.012 + r * 0.25;
+    if (k < 2) for (const x of [-1, 1]) b.add(P.box(0.008, h, 0.02), C(SCUTE), M.t(x * r * 0.35, r * 0.85, z));
+    else b.add(P.box(0.008, h * 1.3, 0.022), C(SCUTE), M.t(0, r * 0.95, z));
+  }
   return facet(b.build());
 }
 
-function legGeo(): THREE.BufferGeometry {
+/** A limb segment from its joint out along +x (symmetric front-to-back, so it serves both sides). */
+function limbSeg(len: number, r0: number, r1: number): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.cyl(0.014, 0.02, 0.08, 5), C(BACK), M.t(0.04, -0.01, 0, 0, 0, Math.PI / 2 + 0.4));
-  b.add(P.box(0.04, 0.008, 0.035), C(0x2e3620), M.t(0.075, -0.035, 0.01));
+  b.add(P.sphere(r0 * 1.1, 0), C(BACK));
+  b.add(P.cyl(r1, r0, len, 6), { color: (p, n) => new THREE.Color(n.y < -0.3 ? BELLY : BACK) }, M.t(len / 2, 0, 0, 0, 0, -Math.PI / 2));
   return facet(b.build());
 }
 
-const _b = new THREE.Matrix4(), _m = new THREE.Matrix4(), _t = new THREE.Matrix4();
+/** Foot from the wrist / ankle, lying flat and pointing forward: splayed clawed toes (webbed at the back). */
+function footGeo(toes: number, len: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(P.box(0.03, 0.01, 0.026), C(SKIN_D), M.t(0, -0.004, 0.008));
+  for (let k = 0; k < toes; k++) {
+    const a = -0.9 + (k / (toes - 1)) * 1.8;
+    b.add(P.box(0.006, 0.006, len), C(SKIN_D), M.t(Math.sin(a) * len * 0.55, -0.006, 0.01 + Math.cos(a) * len * 0.55, 0, a, 0));
+    b.add(P.cone(0.003, 0.008, 3), C(0x1a1a10), M.t(Math.sin(a) * len * 1.05, -0.006, 0.01 + Math.cos(a) * len * 1.05, Math.PI / 2, 0, 0));
+  }
+  if (toes === 4) b.add(P.cone(len * 0.8, len, 3), C(SKIN_D), M.t(0, -0.007, 0.022, Math.PI / 2, 0, 0, 1, 1, 0.1));
+  return facet(b.build());
+}
+
+const _b = new THREE.Matrix4(), _m = new THREE.Matrix4(), _t = new THREE.Matrix4(), _r = new THREE.Matrix4();
+const _f = new THREE.Matrix4(), _c = new THREE.Matrix4();
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
 const WHITE = new THREE.Color(1, 1, 1);
 function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
   _e.set(rx, ry, rz, 'YXZ');
   _q.setFromEuler(_e);
   return out.compose(_p.set(x, y, z), _q, _s.set(s, s, s));
+}
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const TAIL_KEYS = ['tail0', 'tail1', 'tail2', 'tail3'];
+
+const _ik = { a: 0, b: 0 };
+/** Two-bone IK in the leg's vertical plane: foot at (h out, v up) from the shoulder/hip; elbow up. */
+function legIK(h: number, v: number, L1: number, L2: number): void {
+  const d = THREE.MathUtils.clamp(Math.hypot(h, v), Math.abs(L1 - L2) + 1e-4, (L1 + L2) * 0.999);
+  const phi = Math.atan2(v, h);
+  const al = Math.acos(THREE.MathUtils.clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  _ik.a = phi + al;
+  _ik.b = Math.atan2(v - L1 * Math.sin(_ik.a), h - L1 * Math.cos(_ik.a)) - _ik.a;
 }
 
 export interface GatorHooks {
@@ -120,12 +226,17 @@ export class Alligators {
     this.findPlaces();
     this.spawn();
     const n = ALLIGATORS.max + 1;
-    this.meshes.add('body', bodyGeo(), n);
+    this.meshes.add('bodyF', bodyHalf(true), n);
+    this.meshes.add('bodyR', bodyHalf(false), n);
     this.meshes.add('head', headGeo(), n);
     this.meshes.add('jaw', jawGeo(), n);
-    this.meshes.add('tail0', tailGeo(0.2, 0.05, 0.035), n);
-    this.meshes.add('tail1', tailGeo(0.2, 0.035, 0.012), n);
-    this.meshes.add('leg', legGeo(), n * 4);
+    for (let k = 0; k < 4; k++) this.meshes.add(`tail${k}`, tailGeo(k), n);
+    this.meshes.add('upperF', limbSeg(ALG.L1, 0.017, 0.014), n * 2);
+    this.meshes.add('lowerF', limbSeg(ALG.L2, 0.014, 0.011), n * 2);
+    this.meshes.add('footF', footGeo(5, 0.024), n * 2);
+    this.meshes.add('upperR', limbSeg(ALG.L1, 0.021, 0.016), n * 2);
+    this.meshes.add('lowerR', limbSeg(ALG.L2, 0.016, 0.012), n * 2);
+    this.meshes.add('footR', footGeo(4, 0.03), n * 2);
   }
 
   private findPlaces(): void {
@@ -157,6 +268,7 @@ export class Alligators {
         this.list.push({
           swamp: si, x: p.x, y: 0, z: p.z, heading: this.rng.range(0, 6.28), state: 'float', timer: this.rng.range(5, 25), tx: p.x, tz: p.z,
           cool: 0, jaw: 0, sweep: this.rng.next() * 6, sink: 0, speed: 0, scale: this.rng.range(0.9, 1.2), react: this.rng.next(), preyKind: null, preyId: -1,
+          gph: this.rng.next(), walkW: 0, swimW: 0, baskW: 0, tailA: 0.1, spine: 0, lift: 0,
         });
       }
     });
@@ -168,7 +280,7 @@ export class Alligators {
 
   update(dt: number): void {
     if (dt > 0 && this.hooks) for (const g of this.list) this.think(g, dt);
-    this.draw();
+    this.draw(dt);
   }
 
   private pickPool(g: Gator): { x: number; z: number } {
@@ -374,39 +486,106 @@ export class Alligators {
 
   // ---------------- Drawing ----------------
 
-  private draw(): void {
+  private draw(dt: number): void {
     const m = this.meshes;
     m.begin();
     for (const g of this.list) {
       if (!View.sees(g.x, g.y, g.z, 0.6)) continue;
-      const s = g.scale;
-      const walking = g.state === 'crawl' || g.state === 'retreat' || g.state === 'lunge';
-      const sw = Math.sin(g.sweep);
-      // The body snakes side to side as it swims or crawls.
-      const bodyYaw = walking || g.state === 'swim' ? sw * 0.12 : 0;
-      compose(_b, g.x, g.y + (walking ? 0.03 : 0) * s, g.z, g.state === 'lunge' ? -0.12 : 0, g.heading + bodyYaw, 0, s);
-      m.put('body', _b, WHITE);
-      // Head and jaw at the front, the jaw hinging down.
-      _m.multiplyMatrices(_b, compose(_t, 0, 0.012, 0.17, -g.jaw * 0.25, -bodyYaw * 0.8, 0));
-      m.put('head', _m, WHITE);
-      _m.multiply(compose(_t, 0, -0.012, 0.0, g.jaw * 0.75, 0, 0));
-      m.put('jaw', _m, WHITE);
-      // Tail sweeps in an S behind.
-      const tailA = (g.state === 'swim' ? 0.45 : walking ? 0.3 : 0.08) * Math.sin(g.sweep - 0.6);
-      _m.multiplyMatrices(_b, compose(_t, 0, 0.005, -0.17, 0, -tailA, 0));
-      m.put('tail0', _m, WHITE);
-      _m.multiply(compose(_t, 0, 0, -0.2, 0, -tailA * 1.4 + Math.sin(g.sweep - 1.4) * 0.2, 0));
-      m.put('tail1', _m, WHITE);
-      // Splayed legs: tucked back while swimming, walking in a diagonal gait on land.
-      for (let k = 0; k < 4; k++) {
-        const front = k < 2, side = k % 2 ? -1 : 1;
-        const swimTuck = !walking && g.state !== 'bask' ? 0.9 : 0;
-        const stepA = walking ? Math.sin(g.sweep * 1.6 + (k === 0 || k === 3 ? 0 : Math.PI)) * 0.5 : 0;
-        _m.multiplyMatrices(_b, compose(_t, side * 0.075, -0.015, front ? 0.1 : -0.1, 0, side > 0 ? stepA - swimTuck : Math.PI - stepA + swimTuck, 0));
-        m.put('leg', _m, WHITE);
-      }
+      this.drawGator(g, dt);
     }
     m.end();
+  }
+
+  private drawGator(g: Gator, dt: number): void {
+    const m = this.meshes;
+    const s = g.scale;
+    const walking = g.state === 'crawl' || g.state === 'retreat' || g.state === 'lunge';
+    const swimming = g.state === 'swim' || g.state === 'dive';
+    const lunge = g.state === 'lunge';
+    g.walkW += ((walking ? 1 : 0) - g.walkW) * Math.min(1, dt * (walking ? 6 : 3));
+    g.swimW += ((swimming ? 1 : 0) - g.swimW) * Math.min(1, dt * 3);
+    g.baskW += ((g.state === 'bask' ? 1 : 0) - g.baskW) * Math.min(1, dt * 2);
+    g.lift += ((walking ? (lunge ? 0.045 : 0.03) : 0) - g.lift) * Math.min(1, dt * 5);
+    g.tailA += ((swimming ? GATOR_SWIM.tail : lunge ? 0.6 : walking ? GATOR_GAIT.walkTail : g.state === 'float' ? 0.1 : 0.05) - g.tailA) * Math.min(1, dt * 3);
+    // Gait phase: cycles per second so the planted feet keep pace with the body.
+    g.gph += dt * (g.speed / (ALG.stride * s));
+    const gp = g.gph * Math.PI * 2;
+    // Spine: bends side to side in time with the diagonal steps on land; a small recoil to each
+    // tail stroke when swimming.
+    g.spine = Math.sin(gp) * GATOR_GAIT.spine * g.walkW + Math.sin(g.sweep + 1.2) * 0.06 * g.swimW * (1 - g.walkW);
+    const pitch = lunge ? -0.12 : 0;
+    const roll = Math.sin(gp) * 0.035 * g.walkW;
+    const by = g.y + g.lift * s;
+    compose(_r, g.x, by, g.z, pitch, g.heading, roll, s);
+    _b.multiplyMatrices(_r, compose(_t, 0, 0, 0, 0, g.spine * 0.5, 0));
+    m.put('bodyF', _b, WHITE);
+    _f.multiplyMatrices(_r, compose(_t, 0, 0, 0, 0, -g.spine * 0.5, 0));
+    m.put('bodyR', _f, WHITE);
+    // Head: held steady against the spine's swing; raised a touch afloat so eyes and nostrils clear
+    // the surface; the lower jaw drops wide in a lunge (the head tips back as it opens).
+    const headP = (g.state === 'float' ? -0.05 : 0) - g.jaw * 0.25 - (lunge ? 0.1 : 0) - g.baskW * 0.06;
+    _m.multiplyMatrices(_b, compose(_t, ALG.head[0], ALG.head[1], ALG.head[2], headP, -g.spine * 0.9, 0));
+    m.put('head', _m, WHITE);
+    _m.multiply(compose(_t, 0, -0.012, -0.015, g.jaw * 0.8, 0, 0));
+    m.put('jaw', _m, WHITE);
+    // Tail: a travelling wave from base to tip (bigger toward the tip); it continues the spine's
+    // curve on land and lies along the ground behind the raised body.
+    _m.multiplyMatrices(_f, compose(_t, ALG.tail[0], ALG.tail[1], ALG.tail[2], -g.lift * 1.4, -g.spine * 0.6 + g.tailA * 0.35 * Math.sin(g.sweep), 0));
+    m.put('tail0', _m, WHITE);
+    for (let k = 1; k < 4; k++) {
+      const a = g.tailA * (0.35 + k * 0.22) * Math.sin(g.sweep - k * GATOR_SWIM.lag) - g.spine * 0.25;
+      _m.multiply(compose(_t, 0, 0, -ALG.tailLen[k - 1], k === 1 ? g.lift * 1.2 : 0, a, 0));
+      m.put(TAIL_KEYS[k], _m, WHITE);
+    }
+    // Legs: a sprawling walk in diagonal pairs (RF with LH, LF with RH), feet planted and solved with
+    // IK; pressed back along the flanks when swimming; splayed and hanging afloat; sprawled flat
+    // on the mud when basking.
+    const groundL = (this.world.heightAt(g.x, g.z) - by) / s;
+    for (let k = 0; k < 4; k++) {
+      const front = k < 2, side = k % 2 ? -1 : 1;
+      const root = front ? ALG.legF : ALG.legR;
+      const off = (front ? side > 0 : side < 0) ? 0 : 0.5;
+      const local = (((g.gph + off) % 1) + 1) % 1;
+      const A = ALG.stride * GATOR_GAIT.duty * 0.5;
+      let dz: number, lift = 0;
+      if (local < GATOR_GAIT.duty) dz = A * (1 - (2 * local) / GATOR_GAIT.duty);
+      else {
+        const e = (local - GATOR_GAIT.duty) / (1 - GATOR_GAIT.duty);
+        dz = -A + 2 * A * e * e * (3 - 2 * e);
+        lift = Math.sin(Math.PI * e) * GATOR_GAIT.lift;
+      }
+      const maxDown = -(ALG.L1 + ALG.L2) * 0.97;
+      const v = Math.max(maxDown, groundL - root[1] + lift);
+      // Walk pose (IK to the stepping foot).
+      const fwd = dz + (front ? 0.02 : -0.015);
+      legIK(Math.hypot(ALG.reach, fwd), v, ALG.L1, ALG.L2);
+      let yaw = Math.atan2(fwd, ALG.reach), ua = _ik.a, lb = _ik.b;
+      // Bask pose: sprawled on the mud.
+      const bfwd = front ? 0.035 : -0.05;
+      legIK(Math.hypot(ALG.reach * 1.1, bfwd), Math.max(maxDown, groundL - root[1]), ALG.L1, ALG.L2);
+      const byaw = Math.atan2(bfwd, ALG.reach * 1.1);
+      // Float pose: hanging splayed, sculling slowly.
+      const fyaw = (front ? 0.35 : -0.35) + Math.sin(g.sweep * 0.7 + k) * 0.1, fa = -0.55, fb = -0.55;
+      // Swim pose: pressed back along the body.
+      const tyaw = front ? -1.3 : -1.45, ta = -0.05, tb = -0.12;
+      const wW = g.walkW, bW = g.baskW * (1 - wW);
+      yaw = lerp(lerp(lerp(fyaw, byaw, bW), yaw, wW), tyaw, g.swimW);
+      ua = lerp(lerp(lerp(fa, _ik.a, bW), ua, wW), ta, g.swimW);
+      lb = lerp(lerp(lerp(fb, _ik.b, bW), lb, wW), tb, g.swimW);
+      const part = front ? _b : _f;
+      compose(_c, side * root[0], root[1], root[2], 0, side > 0 ? -yaw : Math.PI + yaw, ua);
+      _m.multiplyMatrices(part, _c);
+      m.put(front ? 'upperF' : 'upperR', _m, WHITE);
+      _c.multiply(compose(_t, ALG.L1, 0, 0, 0, 0, lb));
+      _m.multiplyMatrices(part, _c);
+      m.put(front ? 'lowerF' : 'lowerR', _m, WHITE);
+      // Foot: at the end of the lower leg, lying flat, toes turned out (back along the body when tucked).
+      _c.multiply(compose(_t, ALG.L2, 0, 0, 0, 0, 0));
+      const e = _c.elements;
+      const footYaw = side * lerp(front ? 0.35 : 0.5, 2.7, g.swimW);
+      _m.multiplyMatrices(part, compose(_t, e[12], e[13], e[14], 0, footYaw, 0));
+      m.put(front ? 'footF' : 'footR', _m, WHITE);
+    }
   }
 }
 

@@ -1,14 +1,31 @@
 import * as THREE from 'three';
 import { WATERBIRDS } from '../config';
 import { View } from '../render/View';
+import { SEA_SURFACE } from '../water/Water';
 import { RNG } from '../world/rng';
 import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
-import { FOLDED, flapPose, mixPose, pose, wingMatrices, wingParts } from './birdWings';
+import { DIVE, FLARE, FOLDED, flapPose, mixPose, pose, trimPose, wingMatrices, wingParts } from './birdWings';
 import { Islander } from './Islander';
 import { QuadMeshes } from './quadRig';
 import { RFish } from './ReefFish';
-import { HER, HERON_WING, PEL, PELICAN_WING, heldFish, heronBody, heronHead, heronLegLower, heronLegUpper, heronNeck, pelicanBody, pelicanHead, pelicanLeg, pelicanNeck } from './waterBirdModels';
+import {
+  HER, HERON_WING, PEL, PELICAN_WING, heldFish, heronBody, heronFoot, heronHead, heronLegLower, heronLegUpper, heronNeck,
+  pelicanBody, pelicanFoot, pelicanHead, pelicanJaw, pelicanLeg, pelicanNeck,
+} from './waterBirdModels';
+
+/** A heron's foot: planted in the world, or swinging (p 0..1 from p0) from where it lifted (sx, sy, sz). */
+interface Foot {
+  x: number;
+  y: number;
+  z: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  p: number;
+  p0: number;
+  lift: number;
+}
 
 type Kind = 'pelican' | 'heron';
 type BState =
@@ -65,12 +82,65 @@ interface Bird {
   phase: number;
   react: number;
   vy: number;
+  // Animation only (smoothed): third neck bend, pelican jaw and pouch, landing flare, dive blend,
+  // stretch envelope, how grounded (legs on the ground) and the heron's planted feet.
+  n3: number;
+  jaw: number;
+  pouch: number;
+  flare: number;
+  dv: number;
+  stretchE: number;
+  gnd: number;
+  feet: [Foot, Foot];
+  feetOk: boolean;
+}
+
+const foot = (): Foot => ({ x: 0, y: 0, z: 0, sx: 0, sy: 0, sz: 0, p: -1, p0: 0, lift: 0 });
+
+// ---------------- Tuning ----------------
+
+/** Height above the sea at which a diving pelican starts folding its wings tight. */
+const PELICAN_TUCK_HEIGHT = 1.0;
+/** Body roll with each waddling step. */
+const PELICAN_WADDLE = 0.1;
+/** Heron legs: hip-to-foot height when standing (legs slightly flexed), the foot's forward offset
+ *  under the hip, half a stride when stalking (world units), step lift, and how far a foot may drift
+ *  from its neutral spot before the heron takes a settling step. */
+const HERON_STAND = (HER.legU + HER.legL) * Math.cos(0.3);
+const HERON_FOOT_FWD = -(HER.legU * Math.sin(0.3) + HER.legL * Math.sin(-0.3));
+const HERON_REACH = 0.036;
+const HERON_LIFT = 0.05;
+const HERON_SETTLE = 0.03;
+/** Forward-back neck bob (radians) with each stalking step. */
+const HERON_NECK_BOB = 0.16;
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const _keys: Record<string, string[]> = {};
+/** Part keys for a prefix (wing panels 0–5, then Neck0–2, Head), built once rather than per frame. */
+function keys(prefix: string): string[] {
+  return (_keys[prefix] ??= ['0', '1', '2', '3', '4', '5', 'Neck0', 'Neck1', 'Neck2', 'Head'].map((n) => prefix + n));
+}
+const _ik = { a1: 0, a2: 0 };
+/**
+ * Two-bone leg IK in the vertical plane through the hip: foot at (df forward, dv up) from the hip.
+ * Angles are from straight down (+ back); the joint between the bones points backward (a bird's
+ * ankle), and an out-of-reach foot is approached as closely as the leg allows.
+ */
+function ik2(df: number, dv: number, L1: number, L2: number): void {
+  const d = THREE.MathUtils.clamp(Math.hypot(df, dv), Math.abs(L1 - L2) + 1e-4, (L1 + L2) * 0.999);
+  const aT = Math.atan2(-df, -dv);
+  const alpha = Math.acos(THREE.MathUtils.clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  const a1 = aT + alpha;
+  _ik.a1 = a1;
+  _ik.a2 = Math.atan2(-(df + L1 * Math.sin(a1)), -(dv + L1 * Math.cos(a1)));
 }
 
 const _m = new THREE.Matrix4(), _b = new THREE.Matrix4(), _n = new THREE.Matrix4(), _t = new THREE.Matrix4();
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
 const _wm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()];
-const _fp = pose(), _wp = pose();
+const _fp = pose(), _wp = pose(), _sp = pose();
+const _sc = new THREE.Matrix4();
+const _legA = [0, 0];
 const WHITE = new THREE.Color(1, 1, 1);
 
 function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
@@ -128,14 +198,18 @@ export class WaterBirds {
     this.meshes.add('pNeck0', pelicanNeck(0), P);
     this.meshes.add('pNeck1', pelicanNeck(1), P);
     this.meshes.add('pHead', pelicanHead(), P);
+    this.meshes.add('pJaw', pelicanJaw(), P);
     this.meshes.add('pLeg', pelicanLeg(), P * 2);
+    this.meshes.add('pFoot', pelicanFoot(), P * 2);
     wingParts(PELICAN_WING).forEach((g, k) => this.meshes.add(`pW${k}`, g, P));
     this.meshes.add('hBody', heronBody(), H);
     this.meshes.add('hNeck0', heronNeck(0), H);
     this.meshes.add('hNeck1', heronNeck(1), H);
+    this.meshes.add('hNeck2', heronNeck(2), H);
     this.meshes.add('hHead', heronHead(), H);
     this.meshes.add('hLegU', heronLegUpper(), H * 2);
     this.meshes.add('hLegL', heronLegLower(), H * 2);
+    this.meshes.add('hFoot', heronFoot(), H * 2);
     wingParts(HERON_WING).forEach((g, k) => this.meshes.add(`hW${k}`, g, H));
     this.meshes.add('fish', heldFish(), P + H);
   }
@@ -199,6 +273,7 @@ export class WaterBirds {
       timer: r.range(3, 20), tx: x, tz: z, next: 'rest', spot, hunger: r.range(0.4, 1), group, scale: kind === 'pelican' ? r.range(0.95, 1.12) : r.range(0.95, 1.08),
       school: -1, reef: null, preyX: 0, preyZ: 0, caught: false, hold: 0,
       fold: 1, flap: r.range(0, 6), amp: 0, n1: 0, n2: 1, hp: 0, hy: 0, legPh: 0, oneLeg: 0, sit: 0, pitch: 0, phase: r.range(0, 10), react: r.next(), vy: 0,
+      n3: 0, jaw: 0, pouch: 0, flare: 0, dv: 0, stretchE: 0, gnd: 1, feet: [foot(), foot()], feetOk: false,
     };
     this.list.push(b);
   }
@@ -541,7 +616,10 @@ export class WaterBirds {
           break;
         }
         b.heading = turn(b.heading, Math.atan2(dx, dz), dt * 2);
-        const step = Math.max(0, Math.sin(b.legPh * Math.PI * 2)) * 2;
+        // One step per half cycle, each leg in turn (same average speed as before): herons ease
+        // into and out of every deliberate step; pelicans waddle.
+        const sw = Math.sin(b.legPh * Math.PI * 2);
+        const step = b.kind === 'heron' ? sw * sw * (4 / Math.PI) : Math.abs(sw);
         b.legPh += dt * (b.kind === 'heron' ? 0.7 : 1.4);
         b.x += Math.sin(b.heading) * sp * step * dt;
         b.z += Math.cos(b.heading) * sp * step * dt;
@@ -747,148 +825,300 @@ export class WaterBirds {
     const m = this.meshes;
     m.begin();
     const k = Math.min(1, dt * 5);
+    const sea = this.hooks?.seaLevel ?? 0;
     for (const b of this.list) {
-      if (!View.sees(b.x, b.y + 0.15, b.z, 0.5)) continue;
+      if (!View.sees(b.x, b.y + 0.15, b.z, 0.5)) {
+        // Off screen: the feet are re-planted under the body when it comes back into view.
+        b.feetOk = false;
+        continue;
+      }
       const air = b.state === 'fly' || b.state === 'takeoff' || b.state === 'circle' || b.state === 'dive' || b.state === 'land';
       const t = b.phase;
+      const pel = b.kind === 'pelican';
       // ---- Wings ----
       let foldT = air ? 0 : 1, ampT = 0;
       if (b.state === 'takeoff') ampT = 1;
-      else if (b.state === 'fly') ampT = Math.sin(t * 0.45 + b.id) > 0.25 ? 0.06 : b.kind === 'heron' ? 0.55 : 0.5;
+      else if (b.state === 'fly') ampT = Math.sin(t * 0.45 + b.id) > 0.25 ? 0.06 : pel ? 0.5 : 0.55;
       else if (b.state === 'circle') ampT = Math.sin(t * 0.6 + b.id) > 0.6 ? 0.4 : 0.05;
-      else if (b.state === 'land') ampT = 0.7;
-      else if (b.state === 'stretch') {
-        foldT = 0.15;
-        ampT = 0.25;
-      } else if (b.state === 'dive') foldT = 0.75;
+      else if (b.state === 'land') ampT = 0.5;
+      else if (b.state === 'dive') foldT = 0;
       b.fold += (foldT - b.fold) * Math.min(1, dt * (foldT > b.fold ? 5 : 9));
       b.amp += (ampT - b.amp) * k;
-      b.flap += dt * (b.kind === 'heron' ? 5.2 : 6) * (b.state === 'takeoff' ? 1.6 : 1);
-      // ---- Neck and head (body frame): n1 base tilt, n2 bend, hp head pitch ----
-      let n1 = 0, n2 = 0, hp = 0, hy = 0, pitch = 0, sit = 0, one = 0;
-      if (b.kind === 'pelican') {
+      b.flap += dt * (pel ? 6 : 5.2) * (b.state === 'takeoff' ? 1.6 : b.state === 'land' ? 1.4 : 1);
+      b.flare += ((b.state === 'land' ? 1 : 0) - b.flare) * Math.min(1, dt * 7);
+      b.dv += ((b.state === 'dive' ? 1 : 0) - b.dv) * Math.min(1, dt * 6);
+      b.stretchE += ((b.state === 'stretch' ? Math.sin(Math.PI * THREE.MathUtils.clamp(1 - b.timer / 1.8, 0, 1)) : 0) - b.stretchE) * Math.min(1, dt * 8);
+      // ---- Neck and head (body frame): n1 base tilt, n2 / n3 bends, hp head pitch, hy head yaw ----
+      let n1 = 0, n2 = 0, n3 = 0, hp = 0, hy = 0, pitch = 0, sit = 0, one = 0, jaw = 0, pouch = 0;
+      if (pel) {
         // Pelicans fly with the head drawn back onto the shoulders; dive with the neck stretched out.
-        if (air) [n1, n2, hp] = b.state === 'dive' ? [1.5, 0, 0] : [0.35, -0.95, 0.1];
-        else if (b.state === 'swallow') [n1, n2, hp] = [-0.2, 0.2, -1.1 + Math.sin(t * 9) * 0.15];
-        else if (b.state === 'preen') [n1, n2, hp, hy] = [-0.1, 1.8, 1.2, Math.sin(t * 1.3) * 1.2];
-        else if (b.state === 'alert') [n1, n2, hp] = [-0.15, 0.1, 0.05];
-        else [n1, n2, hp] = [-0.1, 0.45, 0.65 + Math.sin(t * 0.3) * 0.08];
+        if (b.state === 'dive') (n1 = 1.5), (n2 = 0), (hp = 0), (jaw = b.y - sea < 0.35 ? 0.35 : 0);
+        else if (air) (n1 = 0.35), (n2 = -0.95), (hp = 0.1);
+        else if (b.state === 'under') (n1 = 1.2), (n2 = 0.1), (hp = 0.7), (jaw = 0.55), (pouch = 1);
+        else if (b.state === 'swallow') {
+          // Head up, the pouch draining, then gulps.
+          n1 = -0.2;
+          n2 = 0.2;
+          hp = -1.1 + Math.sin(t * 9) * 0.15;
+          const f = THREE.MathUtils.clamp(b.timer / 1.8, 0, 1);
+          pouch = f * f;
+          jaw = 0.12 * f;
+        } else if (b.state === 'preen') (n1 = -0.1), (n2 = 1.8), (hp = 1.2), (hy = Math.sin(t * 1.3) * 1.2);
+        else if (b.state === 'stretch') (n1 = -0.35), (n2 = 0.1), (hp = -1.0 * b.stretchE), (jaw = 0.8 * b.stretchE), (pouch = 0.4 * b.stretchE);
+        else if (b.state === 'alert') (n1 = -0.15), (n2 = 0.1), (hp = 0.05);
+        else (n1 = -0.1), (n2 = 0.45), (hp = 0.65 + Math.sin(t * 0.3) * 0.08);
         if (b.state === 'rest') sit = 1;
         if (b.state === 'dive') pitch = 1.25;
-        else if (air) pitch = -0.05;
+        else if (b.state === 'under') pitch = 0.45;
+        else if (air) pitch = -0.05 - b.flare * 0.35;
         else pitch = this.onWater(b) || b.state === 'swim' ? 0.05 : -0.18;
       } else {
-        // Herons fly and rest with the neck folded into an S; hunt with it stretched out, bill down.
-        if (air) [n1, n2, hp] = [0.95, -2.1, 0];
-        else if (b.state === 'watch') [n1, n2, hp] = [0.95, -0.15, 0.95];
-        else if (b.state === 'strike') [n1, n2, hp] = [1.4, 0.35, 0.95];
-        else if (b.state === 'recover') [n1, n2, hp] = [0.7, -0.2, 0.5];
-        else if (b.state === 'swallow') [n1, n2, hp] = [0.1, -0.1, -0.9 + Math.sin(t * 8) * 0.12];
-        else if (b.state === 'preen') [n1, n2, hp, hy] = [0.3, 1.6, 1.1, Math.sin(t * 1.2) * 1.2];
-        else if (b.state === 'alert') [n1, n2, hp] = [0.1, -0.1, 0.0];
-        else [n1, n2, hp] = [0.5, -1.05, 0.05];
+        // Herons fly and rest with the neck folded into an S; hunt with it coiled over the water,
+        // bill down, then shoot it straight out to strike.
+        if (air) (n1 = 1.2), (n2 = -2.2), (n3 = 1.3), (hp = 0.05);
+        else if (b.state === 'watch') (n1 = 1.0), (n2 = -1.5), (n3 = 1.2), (hp = 1.1);
+        else if (b.state === 'strike') {
+          // A split-second cock of the coil, then the explosive thrust.
+          const sp = 1 - THREE.MathUtils.clamp(b.timer / 0.2, 0, 1);
+          if (sp < 0.3) (n1 = 0.8), (n2 = -1.9), (n3 = 1.5), (hp = 1.05);
+          else (n1 = 1.5), (n2 = 0.1), (n3 = 0.1), (hp = 1.15);
+        } else if (b.state === 'recover') (n1 = 1.1), (n2 = -0.9), (n3 = 0.7), (hp = 0.6);
+        else if (b.state === 'swallow') (n1 = 0.2), (n2 = -0.3), (n3 = 0.3), (hp = -0.9 + Math.sin(t * 8) * 0.12);
+        else if (b.state === 'preen') (n1 = 0.3), (n2 = 1.4), (n3 = 0.6), (hp = 1.1), (hy = Math.sin(t * 1.2) * 1.2);
+        else if (b.state === 'alert') (n1 = 0.15), (n2 = -0.05), (n3 = 0), (hp = 0);
+        else if (b.state === 'oneleg' || b.state === 'rest') (n1 = 0.3), (n2 = -1.8), (n3 = 1.5), (hp = 0.1);
+        else if (b.state === 'walk') {
+          // Stalking: neck forward, the head held still then thrust forward with each step.
+          const f = (b.legPh * 2) % 1;
+          const bob = f < 0.6 ? -f / 0.6 : -1 + (f - 0.6) / 0.4;
+          n1 = 0.9 + (bob + 0.5) * HERON_NECK_BOB;
+          n2 = -1.0;
+          n3 = 0.6 - (bob + 0.5) * HERON_NECK_BOB * 0.8;
+          hp = b.next === 'hunt' ? 0.8 : 0.3;
+        } else (n1 = 0.5), (n2 = -1.05), (n3 = 0.55), (hp = 0.05);
         if (b.state === 'oneleg') one = 1;
-        pitch = air ? 0.1 : b.state === 'watch' || b.state === 'strike' ? 0.25 : -0.3;
+        pitch = air ? 0.1 - b.flare * 0.35 : b.state === 'watch' || b.state === 'strike' ? 0.25 : b.state === 'walk' && b.next === 'hunt' ? 0.15 : -0.3;
       }
-      const nk = b.state === 'strike' ? Math.min(1, dt * 28) : k;
+      const nk = b.state === 'strike' ? Math.min(1, dt * 40) : b.state === 'recover' ? Math.min(1, dt * 8) : k;
       b.n1 += (n1 - b.n1) * nk;
       b.n2 += (n2 - b.n2) * nk;
+      b.n3 += (n3 - b.n3) * nk;
       b.hp += (hp - b.hp) * nk;
       b.hy += (hy - b.hy) * k;
+      b.jaw += (jaw - b.jaw) * Math.min(1, dt * (jaw > b.jaw ? 14 : 6));
+      b.pouch += (pouch - b.pouch) * Math.min(1, dt * (pouch > b.pouch ? 10 : 3));
       b.pitch += (pitch - b.pitch) * Math.min(1, dt * 4);
       b.sit += (sit - b.sit) * Math.min(1, dt * 2.5);
       b.oneLeg += (one - b.oneLeg) * Math.min(1, dt * 2);
-      if (b.kind === 'pelican') this.drawPelican(b, air);
-      else this.drawHeron(b, air);
+      b.gnd += ((air ? 0 : 1) - b.gnd) * Math.min(1, dt * 6);
+      if (pel) this.drawPelican(b, air, sea, dt);
+      else this.drawHeron(b, air, sea, dt);
     }
     m.end();
   }
 
-  private wings(prefix: string, root: [number, number, number], spec: typeof PELICAN_WING, b: Bird): void {
+  private wings(prefix: string, root: [number, number, number], spec: typeof PELICAN_WING, b: Bird, sea: number): void {
     flapPose(b.flap, b.amp, _fp, b.kind === 'pelican' ? 0.05 : 0.15, 0.22);
-    if (b.state === 'land') _fp.f1 += 0.5;
+    // Landing: braking beats around raised, cupped wings.
+    if (b.flare > 0.001) mixPose(_fp, FLARE, b.flare * 0.7, _fp);
     mixPose(_fp, FOLDED, b.fold, _wp);
-    for (const side of [1, -1] as const) {
-      wingMatrices(_b, side, root, spec, _wp, _wm);
-      for (let k = 0; k < 3; k++) this.meshes.put(`${prefix}${side === 1 ? k : k + 3}`, _wm[k], WHITE);
+    if (b.dv > 0.001) {
+      // Plunge: swept back into an arrowhead, then folded tight just before hitting the water.
+      mixPose(DIVE, FOLDED, THREE.MathUtils.smoothstep(PELICAN_TUCK_HEIGHT - (b.y - sea), 0, 0.8), _fp);
+      mixPose(_wp, _fp, b.dv, _wp);
+    }
+    if (b.stretchE > 0.001) mixPose(_wp, FLARE, b.stretchE * 0.9, _wp);
+    const glide = (1 - b.fold) * (1 - b.dv) * THREE.MathUtils.clamp(1 - b.amp * 2.5, 0, 1);
+    for (let s = 0; s < 2; s++) {
+      const side = s === 0 ? 1 : -1;
+      trimPose(_wp, side, 0, b.phase + b.id, glide, _sp);
+      wingMatrices(_b, side, root, spec, _sp, _wm);
+      const ks = keys(prefix);
+      for (let q = 0; q < 3; q++) this.meshes.put(ks[s === 0 ? q : q + 3], _wm[q], WHITE);
     }
   }
 
-  private neckHead(prefix: string, base: [number, number, number], lens: [number, number], b: Bird): void {
+  /** Neck chain and head from the body matrix in _b; the head's pitch is relative to the body. */
+  private neckHead(prefix: string, base: [number, number, number], lens: readonly number[], b: Bird): void {
     _n.multiplyMatrices(_b, compose(_t, base[0], base[1], base[2], b.n1, 0, 0));
-    this.meshes.put(`${prefix}Neck0`, _n, WHITE);
+    const ks = keys(prefix);
+    this.meshes.put(ks[6], _n, WHITE);
     _n.multiply(compose(_t, 0, lens[0], 0, b.n2, 0, 0));
-    this.meshes.put(`${prefix}Neck1`, _n, WHITE);
-    // Head: bill along +z; its pitch is relative to the body, so undo the neck's bend.
-    _n.multiply(compose(_t, 0, lens[1], 0, b.hp - b.n1 - b.n2, b.hy, 0));
-    this.meshes.put(`${prefix}Head`, _n, WHITE);
+    this.meshes.put(ks[7], _n, WHITE);
+    let bend = b.n1 + b.n2, top = lens[1];
+    if (lens.length > 2) {
+      _n.multiply(compose(_t, 0, lens[1], 0, b.n3, 0, 0));
+      this.meshes.put(ks[8], _n, WHITE);
+      bend += b.n3;
+      top = lens[2];
+    }
+    // Head: bill along +z; undo the neck's bend so its pitch is relative to the body.
+    _n.multiply(compose(_t, 0, top, 0, b.hp - bend, b.hy, 0));
+    this.meshes.put(ks[9], _n, WHITE);
+    if (b.kind === 'pelican') {
+      // Lower jaw and pouch: hinged at the gape, the pouch bulging when full.
+      _m.multiplyMatrices(_n, compose(_t, PEL.gape[0], PEL.gape[1], PEL.gape[2], b.jaw * 0.6, 0, 0));
+      _m.multiply(_sc.makeScale(1, 1 + b.pouch * 0.9, 1 + b.pouch * 0.08));
+      this.meshes.put('pJaw', _m, WHITE);
+    }
     if (b.hold > 0) {
       _m.multiplyMatrices(_n, compose(_t, 0, -0.01, b.kind === 'pelican' ? 0.12 : 0.1, 0, Math.PI / 2, 0));
       this.meshes.put('fish', _m, WHITE);
     }
   }
 
-  private drawPelican(b: Bird, air: boolean): void {
+  private drawPelican(b: Bird, air: boolean, sea: number, dt: number): void {
     const s = b.scale;
-    const legH = PEL.leg - PEL.hip[1];
-    const swim = b.state === 'swim' || b.state === 'swallow' || b.state === 'preen' && this.onWater(b) || b.state === 'under';
-    const yOff = air ? 0 : swim ? 0.035 : legH * (1 - b.sit * 0.7);
-    const bob = swim ? Math.sin(b.phase * 1.6 + b.id) * 0.008 : 0;
-    compose(_b, b.x, b.y + (yOff + bob) * s, b.z, b.pitch, b.heading, 0, s);
+    const swim = b.state === 'swim' || b.state === 'swallow' || (b.state === 'preen' && this.onWater(b)) || b.state === 'under';
+    // Leg angles (from straight down, + back, in the world's vertical plane): trailing in flight,
+    // reaching forward to land, waddling on land, folded when sitting, paddling when afloat.
+    const walk = b.state === 'walk' ? Math.sin(b.legPh * Math.PI * 2) : 0;
+    const patter = b.state === 'takeoff' && b.timer > 0.4;
+    for (let q = 0; q < 2; q++) {
+      const side = q === 0 ? 1 : -1;
+      let a: number;
+      if (swim) a = 0.55 + Math.sin(b.phase * 2.4 + q * Math.PI) * 0.45;
+      else if (patter) a = Math.sin(b.phase * 22 + q * Math.PI) * 0.6;
+      else if (air) a = lerp(1.35, -0.45, b.flare);
+      else a = lerp(walk * side * 0.45, 1.25, b.sit);
+      _legA[q] = a;
+    }
+    // Standing height: the more upright leg reaches the ground (the body rises and falls as it waddles).
+    const hy = PEL.hip[1] * Math.cos(b.pitch) - PEL.hip[2] * Math.sin(b.pitch);
+    const reach = Math.max(PEL.leg * Math.cos(_legA[0]), PEL.leg * Math.cos(_legA[1]));
+    const standOff = (reach - hy) * s;
+    let y: number;
+    const bob = swim ? Math.sin(b.phase * 1.6 + b.id) * 0.008 * s : 0;
+    if (swim) y = b.y + 0.035 * s + bob;
+    else if (air) {
+      // Taking off and landing: never below the reach of the legs.
+      const ground = b.state === 'land' ? this.spotY(b.spot, b.x, b.z) : b.state === 'takeoff' ? Math.max(this.world.heightAt(b.x, b.z), sea) : -Infinity;
+      y = Math.max(b.y, ground + (this.world.heightAt(b.x, b.z) < sea - 0.02 ? 0.035 * s : standOff));
+    } else y = b.y + lerp(standOff, (PEL.leg * 0.3 - PEL.hip[1]) * s, b.sit);
+    // A side-to-side roll with each waddling step.
+    const roll = b.state === 'walk' ? walk * PELICAN_WADDLE : 0;
+    compose(_b, b.x, y, b.z, b.pitch, b.heading, roll, s);
     this.meshes.put('pBody', _b, WHITE);
     this.neckHead('p', PEL.neckBase, PEL.neck, b);
-    this.wings('pW', PEL.wingRoot, PELICAN_WING, b);
-    // Legs: down to stand and waddle, folded back in flight, tucked while floating or sitting.
-    if (!swim) {
-      const walk = b.state === 'walk' ? Math.sin(b.legPh * Math.PI * 2) * 0.45 : 0;
-      for (const side of [1, -1]) {
-        const a = air ? 1.35 : b.sit > 0.5 ? 1.2 : walk * side;
-        _m.multiplyMatrices(_b, compose(_t, side * 0.025, PEL.hip[1], PEL.hip[2], a, 0, 0));
-        this.meshes.put('pLeg', _m, WHITE);
-      }
+    this.wings('pW', PEL.wingRoot, PELICAN_WING, b, sea);
+    void dt;
+    for (let q = 0; q < 2; q++) {
+      const side = q === 0 ? 1 : -1;
+      const a = _legA[q];
+      _m.multiplyMatrices(_b, compose(_t, side * 0.025, PEL.hip[1], PEL.hip[2], a - b.pitch, 0, -roll * 0.8));
+      this.meshes.put('pLeg', _m, WHITE);
+      // Foot: flat on the ground; feathering on the paddle's return stroke; toes trailing in flight.
+      let f = -a;
+      if (swim) f = -a + (Math.cos(b.phase * 2.4 + q * Math.PI) > 0 ? 1.2 : 0.1);
+      else if (air && !patter) f = lerp(0.9, -a, b.flare);
+      _m.multiply(compose(_t, 0, -PEL.leg, 0, f, 0, 0));
+      this.meshes.put('pFoot', _m, WHITE);
     }
   }
 
-  private drawHeron(b: Bird, air: boolean): void {
+  private drawHeron(b: Bird, air: boolean, sea: number, dt: number): void {
     const s = b.scale;
-    // Legs straight down when standing (a step swings one forward), trailing straight back in flight.
-    const legs: [number, number][] = [];
-    for (const side of [1, -1]) {
-      let u = 0.2, l = -0.4;
-      if (air) {
-        // Legs trailing straight out behind (positive swings a leg back).
-        u = 1.45;
-        l = 0.05;
-        if (b.state === 'land') {
-          u = -0.3;
-          l = 0.2;
-        }
-      } else if (b.state === 'walk') {
-        const ph = b.legPh * Math.PI * 2 + (side > 0 ? 0 : Math.PI);
-        const sw = Math.sin(ph);
-        u = 0.2 + sw * 0.35;
-        l = -0.4 - Math.max(0, Math.cos(ph)) * 0.9;
+    const w = this.world;
+    const L1 = HER.legU * s, L2 = HER.legL * s;
+    const cp = Math.cos(b.pitch), sp = Math.sin(b.pitch);
+    const hyW = (HER.hip[1] * cp - HER.hip[2] * sp) * s, hzW = (HER.hip[1] * sp + HER.hip[2] * cp) * s;
+    const ch = Math.cos(b.heading), sh = Math.sin(b.heading);
+    // ---- Legs in the air: trailing straight out behind, swinging down and forward to land ----
+    let uA = lerp(1.45, -0.35, b.flare), lA = lerp(0.05, 0.25, b.flare);
+    if (b.state === 'takeoff' && b.timer > 0.35) (uA = 0.2), (lA = -0.4);
+    const airDrop = HER.legU * Math.cos(uA) + HER.legL * Math.cos(uA + lA);
+    // ---- Legs on the ground: feet planted in the world, stepping in turn, solved with 2-bone IK ----
+    const walking = b.state === 'walk';
+    const ph = b.legPh % 1;
+    let groundY = 0;
+    for (let q = 0; q < 2; q++) {
+      const side = q === 0 ? 1 : -1;
+      const f = b.feet[q];
+      // Neutral spot for this foot: under the hip, a touch forward and wider.
+      const lat = side * (HER.hip[0] + 0.006) * s, fwd = hzW + HERON_FOOT_FWD * s;
+      const nx = b.x + ch * lat + sh * fwd, nz = b.z - sh * lat + ch * fwd;
+      const reach = walking ? HERON_REACH : 0;
+      const tx = nx + sh * reach, tz = nz + ch * reach;
+      if (!b.feetOk || air || Math.hypot(f.x - nx, f.z - nz) > 0.35 * s) {
+        f.x = nx;
+        f.z = nz;
+        f.y = w.heightAt(nx, nz);
+        f.p = -1;
       }
-      if (side > 0 && b.oneLeg > 0) {
-        // Resting on one leg: the other drawn up under the belly, folded back at the ankle.
-        u = u + (-0.55 - u) * b.oneLeg;
-        l = l + (2.5 - l) * b.oneLeg;
-      }
-      legs.push([u, l]);
+      const other = b.feet[1 - q];
+      const oneUp = side > 0 && b.oneLeg > 0.5;
+      if (walking && !oneUp) {
+        const local = (ph + q * 0.5) % 1;
+        if (local < 0.5) {
+          if (f.p < 0) this.lift(f, local / 0.5);
+          f.p = Math.max(f.p, local / 0.5);
+        } else if (f.p >= 0) f.p = 1;
+      } else if (f.p >= 0) f.p += dt / 0.35;
+      else if (!air && !oneUp && other.p < 0 && Math.hypot(f.x - tx, f.z - tz) > HERON_SETTLE * s) this.lift(f, 0);
+      if (f.p >= 0) {
+        const e = THREE.MathUtils.smoothstep((f.p - f.p0) / Math.max(0.001, 1 - f.p0), 0, 1);
+        const ty = w.heightAt(tx, tz);
+        f.x = lerp(f.sx, tx, e);
+        f.z = lerp(f.sz, tz, e);
+        f.y = lerp(f.sy, ty, e);
+        f.lift = Math.sin(Math.PI * Math.min(1, f.p)) * HERON_LIFT * s;
+        if (f.p >= 1) (f.p = -1), (f.lift = 0);
+      } else f.lift = 0;
+      groundY += f.y * 0.5;
     }
-    const [u0, l0] = legs[1];
-    const stand = HER.legU * Math.cos(u0) + HER.legL * Math.cos(u0 + l0) - HER.hip[1];
-    compose(_b, b.x, b.y + (air ? 0 : stand) * s, b.z, b.pitch, b.heading, 0, s);
+    b.feetOk = !air;
+    // Body height: legs a little flexed over the feet, crouching a touch to watch.
+    const crouch = b.state === 'watch' ? 0.012 : b.state === 'strike' ? 0.02 : 0;
+    let standY = groundY + (HERON_STAND - crouch) * s - hyW;
+    // Wading deep: the body stays clear of the water (herons never wade above the belly); the
+    // legs then simply reach down into it.
+    if (!air) {
+      const ci = w.cellIndexAt(b.x, b.z);
+      const ry = ci >= 0 ? w.riverY[ci] : NaN;
+      const wl = Number.isNaN(ry) ? SEA_SURFACE : ry;
+      if (groundY < wl) standY = Math.max(standY, wl + 0.055 * s);
+    }
+    const airY = b.state === 'land' || b.state === 'takeoff' ? Math.max(b.y, (b.state === 'land' ? this.spotY(b.spot, b.x, b.z) : groundY) + airDrop * s - hyW) : b.y;
+    const y = lerp(airY, standY, b.gnd);
+    compose(_b, b.x, y, b.z, b.pitch, b.heading, 0, s);
     this.meshes.put('hBody', _b, WHITE);
     this.neckHead('h', HER.neckBase, HER.neck, b);
-    this.wings('hW', HER.wingRoot, HERON_WING, b);
-    legs.forEach(([u, l], i) => {
-      const side = i === 0 ? 1 : -1;
-      _m.multiplyMatrices(_b, compose(_t, side * HER.hip[0], HER.hip[1], HER.hip[2], u - b.pitch * (air ? 0 : 1), 0, 0));
+    this.wings('hW', HER.wingRoot, HERON_WING, b, sea);
+    const hipY = y + hyW;
+    for (let q = 0; q < 2; q++) {
+      const side = q === 0 ? 1 : -1;
+      const f = b.feet[q];
+      // Solve the planted / stepping foot, then blend with the in-air pose.
+      const hipX = b.x + ch * side * HER.hip[0] * s + sh * hzW, hipZ = b.z - sh * side * HER.hip[0] * s + ch * hzW;
+      const df = (f.x - hipX) * sh + (f.z - hipZ) * ch;
+      ik2(df, f.y + f.lift - hipY, L1, L2);
+      let a1 = lerp(uA, _ik.a1, b.gnd), a2 = lerp(uA + lA, _ik.a2, b.gnd);
+      if (side > 0 && b.oneLeg > 0) {
+        // Resting on one leg: the other drawn up under the belly, folded back at the ankle.
+        a1 = lerp(a1, -0.55, b.oneLeg);
+        a2 = lerp(a2, 1.95, b.oneLeg);
+      }
+      _m.multiplyMatrices(_b, compose(_t, side * HER.hip[0], HER.hip[1], HER.hip[2], a1 - b.pitch, 0, 0));
       this.meshes.put('hLegU', _m, WHITE);
-      _m.multiply(compose(_t, 0, -HER.legU, 0, l, 0, 0));
+      _m.multiply(compose(_t, 0, -HER.legU, 0, a2 - a1, 0, 0));
       this.meshes.put('hLegL', _m, WHITE);
-    });
+      // Toes flat when planted; hanging and trailing while lifted and in flight.
+      const lifted = f.p >= 0 ? Math.sin(Math.PI * Math.min(1, f.p)) : 0;
+      let toe = -a2 + lifted * 1.1;
+      toe = lerp(1.2, toe, b.gnd);
+      if (side > 0) toe = lerp(toe, 1.4, b.oneLeg);
+      _m.multiply(compose(_t, 0, -HER.legL, 0, toe, 0, 0));
+      this.meshes.put('hFoot', _m, WHITE);
+    }
+  }
+
+  /** Start a foot's swing from where it stands now (p0: how far through the stride it starts). */
+  private lift(f: Foot, p0: number): void {
+    f.sx = f.x;
+    f.sz = f.z;
+    f.sy = f.y;
+    f.p = p0;
+    f.p0 = p0;
   }
 
   /** Grounded birds near a point (for dogs to chase). */

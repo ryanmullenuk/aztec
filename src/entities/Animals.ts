@@ -59,6 +59,39 @@ export interface Animal {
   tick: number;
   /** Individual timing so the herd never moves in lockstep. */
   tempo: number;
+  /** Smoothed drawing state (never saved; rebuilt when the animal comes back on screen). */
+  anim: AnimState;
+}
+
+/** Per-animal pose state smoothed across frames so gaits, heads and lying down blend rather than snap. */
+interface AnimState {
+  /** Draw frame this was last posed on, and the position then (speed is measured from real movement). */
+  frame: number;
+  px: number;
+  pz: number;
+  /** Ground speed actually moved (smoothed), walking weight 0…1 and walk → trot weight 0…1. */
+  v: number;
+  move: number;
+  run: number;
+  /** Body pitch following the ground slope. */
+  slope: number;
+  /** Head-down weight (grazing, pecking), alertness, smoothed head yaw and roll. */
+  graze: number;
+  alert: number;
+  hy: number;
+  hr: number;
+  /** Lying on the side weight (pigs, tapirs). */
+  side: number;
+  /** How far the fore / rear end sinks so stretched planted legs still reach the ground. */
+  vF: number;
+  vR: number;
+  /** Instanced keys of this animal's front / rear body halves (quadrupeds). */
+  kF: string;
+  kR: string;
+  /** Head joint in world space (the leash ties on here). */
+  nx: number;
+  ny: number;
+  nz: number;
 }
 
 interface Group {
@@ -88,57 +121,109 @@ const VARIANTS: Record<SpeciesKey, { body: string; head: string; colors: number[
   tapir: [{ body: 'plain', head: 'tapir', colors: [0x4a3e38, 0x3e3430, 0x564842], weight: 1, scale: [0.9, 1.1] }],
 };
 
-/** Per-species skeleton for drawing: leg joints, leg length, head joint. */
-const RIG: Record<SpeciesKey, { legs: [number, number, number][]; legLen: number; head: [number, number, number]; wings: boolean }> = {
-  chicken: { legs: [[-0.025, 0.055, 0], [0.025, 0.055, 0]], legLen: 0.055, head: [0, 0.14, 0.08], wings: true },
-  pig: { legs: [[-0.06, 0.1, 0.12], [0.06, 0.1, 0.12], [-0.06, 0.1, -0.12], [0.06, 0.1, -0.12]], legLen: 0.1, head: [0, 0.2, 0.22], wings: false },
-  goat: { legs: [[-0.05, 0.18, 0.12], [0.05, 0.18, 0.12], [-0.05, 0.18, -0.12], [0.05, 0.18, -0.12]], legLen: 0.18, head: [0, 0.3, 0.2], wings: false },
-  tapir: { legs: [[-0.11, 0.2, 0.24], [0.11, 0.2, 0.24], [-0.11, 0.2, -0.24], [0.11, 0.2, -0.24]], legLen: 0.2, head: [0, 0.4, 0.42], wings: false },
-};
-
 /**
- * Jointed quadruped skeletons: a spine joint mid-body (front and rear halves bend when turning
- * and flex at speed), and legs of three segments: hip/shoulder → knee/elbow → ankle/wrist → foot.
+ * Jointed quadruped skeletons: a spine joint mid-body (front and rear halves bend into turns, roll
+ * with each footfall and flex at speed), a head (goats: on a two-joint neck), ears and tail, and
+ * legs of three segments: hip/shoulder → knee/elbow → hock/wrist → foot, placed by two-bone IK so
+ * planted hooves stay put on the ground while the body moves over them.
  */
 type Quad = 'pig' | 'goat' | 'tapir';
 interface QuadRig {
   spineY: number;
-  /** Shoulder / hip joint height above the ground (front legs stand straight). */
+  /** Shoulder height above the ground (front leg length). */
   hipY: number;
   x: number;
   zF: number;
   zR: number;
-  /** Head joint in the front half's frame. */
+  /** Head joint in the front half's frame (goats: the neck base). */
   head: [number, number, number];
-  /** Segment length ratios (upper, lower, foot) and radii. */
+  /** Goats: neck length and its pitch standing / grazing (the head hangs from its end). */
+  neck: [number, number, number] | null;
+  /** Head pitch relative to its parent, standing / grazing. */
+  headPitch: [number, number];
+  /** Forequarters dip this much while grazing. */
+  frontGraze: number;
+  /** Segment length ratios (upper, lower, foot) and radius. */
   seg: [number, number, number];
   r: number;
-  /** Distance covered per gait cycle. */
-  stride: number;
   hoof: number;
   foot: 'split' | 'toes';
+  /** Distance covered per gait cycle walking / trotting (world units at scale 1). */
+  stride: [number, number];
+  /** Fraction of the cycle each foot is on the ground, walking / trotting. */
+  duty: [number, number];
+  /** Foot clearance in swing (fraction of leg length), walking / trotting. */
+  lift: [number, number];
+  /** Speeds over which the walk turns into a trot. */
+  trot: [number, number];
+  /** Body bob walking / trotting, roll with each step, head nod. */
+  bob: [number, number];
+  roll: number;
+  nod: number;
+  /** Spine height lying on the chest / sprawled on the side (0: never lies on its side). */
+  restY: number;
+  sideY: number;
+  /** Ear root on the head (x mirrored), tail root on the rear half. */
+  ear: [number, number, number];
+  tail: [number, number, number] | null;
 }
 const QUAD: Record<Quad, QuadRig> = {
-  pig: { spineY: 0.17, hipY: 0.12, x: 0.066, zF: 0.12, zR: -0.13, head: [0, 0.03, 0.22], seg: [0.42, 0.36, 0.22], r: 0.03, stride: 0.26, hoof: 0x3a2a22, foot: 'split' },
-  goat: { spineY: 0.26, hipY: 0.21, x: 0.05, zF: 0.13, zR: -0.13, head: [0, 0.04, 0.2], seg: [0.38, 0.38, 0.24], r: 0.021, stride: 0.34, hoof: 0x2a2018, foot: 'split' },
-  tapir: { spineY: 0.35, hipY: 0.25, x: 0.11, zF: 0.24, zR: -0.24, head: [0, 0.05, 0.42], seg: [0.4, 0.37, 0.23], r: 0.052, stride: 0.5, hoof: 0x1e1814, foot: 'toes' },
+  pig: {
+    spineY: 0.17, hipY: 0.12, x: 0.066, zF: 0.12, zR: -0.12, head: [0, 0.012, 0.2], neck: null, headPitch: [0.12, 1.15], frontGraze: 0.12,
+    seg: [0.44, 0.34, 0.22], r: 0.03, hoof: 0x3a2a22, foot: 'split', stride: [0.17, 0.28], duty: [0.62, 0.45], lift: [0.2, 0.3], trot: [0.7, 1.25],
+    bob: [0.004, 0.012], roll: 0.05, nod: 0.05, restY: 0.1, sideY: 0.125, ear: [0.046, 0.058, 0.02], tail: [0, 0.045, -0.21],
+  },
+  goat: {
+    spineY: 0.26, hipY: 0.21, x: 0.048, zF: 0.12, zR: -0.13, head: [0, 0.035, 0.15], neck: [0.15, -0.6, 1.05], headPitch: [1.05, 0.6], frontGraze: 0.12,
+    seg: [0.36, 0.3, 0.34], r: 0.02, hoof: 0x2a2018, foot: 'split', stride: [0.26, 0.45], duty: [0.64, 0.42], lift: [0.16, 0.3], trot: [0.7, 1.2],
+    bob: [0.004, 0.014], roll: 0.04, nod: 0.07, restY: 0.115, sideY: 0, ear: [0.026, 0.024, 0.02], tail: [0, 0.05, -0.19],
+  },
+  tapir: {
+    spineY: 0.35, hipY: 0.25, x: 0.11, zF: 0.24, zR: -0.24, head: [0, -0.01, 0.44], neck: null, headPitch: [0.3, 1.25], frontGraze: 0.1,
+    seg: [0.4, 0.37, 0.23], r: 0.05, hoof: 0x1e1814, foot: 'toes', stride: [0.36, 0.6], duty: [0.65, 0.45], lift: [0.13, 0.25], trot: [0.8, 1.4],
+    bob: [0.006, 0.016], roll: 0.035, nod: 0.05, restY: 0.2, sideY: 0.19, ear: [0.048, 0.078, 0.005], tail: null,
+  },
 };
+/** Tapir proboscis root on the head. */
+const TRUNK: [number, number, number] = [0, -0.02, 0.238];
 /** Hind legs stand with the thigh forward, shin back and cannon upright; their hip sits a little lower. */
 const HIND0 = [-0.32, 0.64, -0.32];
 const hindHipY = (q: QuadRig) => q.hipY * (q.seg[0] * Math.cos(HIND0[0]) + q.seg[1] * Math.cos(HIND0[0] + HIND0[1]) + q.seg[2]);
-/** Gait phase offsets per leg (LF, RF, LH, RH): lateral-sequence walk and diagonal trot. */
+/** Front legs stand very slightly flexed (a dead-straight leg has no give for the IK to work with). */
+const FRONT_H = 0.993;
+/** How much a planted cannon leans with the leg (fore, hind): forelegs swing almost as straight struts. */
+const STRUT_F = 0.85, STRUT_H = 0.5;
+/**
+ * Gait phase offsets per leg (LF, RF, LH, RH): lateral-sequence walk and diagonal trot. The trot is
+ * written so each leg's offset moves at most a quarter cycle from the walk, and the two blend smoothly.
+ */
 const WALK = [0.25, 0.75, 0, 0.5];
-const TROT = [0, 0.5, 0.5, 0];
+const TROT = [0.25, 0.75, -0.25, 0.25];
+/** Leg joint angles when lying on the chest (legs tucked under) and sprawled on the side. */
+const LIE_F = [0.9, -2.47, 2.95], LIE_H = [-1.5, 2.7, 0.4];
+const SIDE_F = [-0.3, -0.25, 0.2], SIDE_H = [0.1, 0.35, -0.1];
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 // Scratch matrices for posing (reused every frame rather than allocated per animal).
 const _front = new THREE.Matrix4(), _rear = new THREE.Matrix4(), _tmp = new THREE.Matrix4();
-const _J = new THREE.Matrix4(), _T = new THREE.Matrix4();
+const _J = new THREE.Matrix4(), _T = new THREE.Matrix4(), _N = new THREE.Matrix4(), _H = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
+const _offs = [0, 0, 0, 0];
+const _B = new THREE.Matrix4();
+/** Instanced part keys per quadruped (built once so posing never concatenates strings). */
+const QKEYS: Record<Quad, { legU: string; legL: string; legP: string; ear: string; tail: string; neck: string }> = {
+  pig: { legU: 'legU_pig', legL: 'legL_pig', legP: 'legP_pig', ear: 'ear_pig', tail: 'tail_pig', neck: 'neck_pig' },
+  goat: { legU: 'legU_goat', legL: 'legL_goat', legP: 'legP_goat', ear: 'ear_goat', tail: 'tail_goat', neck: 'neck_goat' },
+  tapir: { legU: 'legU_tapir', legL: 'legL_tapir', legP: 'legP_tapir', ear: 'ear_tapir', tail: 'tail_tapir', neck: 'neck_tapir' },
+};
+/** Chicken gait cycle distance walking / running (world units at scale 1). */
+const CHICK_STRIDE: [number, number] = [0.13, 0.24];
+const WING_ROOT: [number, number, number] = [0.066, 0.118, 0.035];
+const WING_KEYS = [0, 1, 2, 3, 4, 5].map((k) => `wing_chicken${k}`);
 
 function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, s = 1): THREE.Matrix4 {
   _e.set(rx, ry, rz, 'YXZ');
@@ -146,6 +231,81 @@ function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number
   _p.set(x, y, z);
   _s.set(s, s, s);
   return out.compose(_p, _q, _s);
+}
+
+/** Rotation (pitch, roll) about a pivot at height py, e.g. a chicken tipping forward over its hips. */
+function pivot(out: THREE.Matrix4, py: number, rx: number, rz: number): THREE.Matrix4 {
+  _e.set(rx, 0, rz, 'YXZ');
+  _q.setFromEuler(_e);
+  _p.set(0, py, 0).applyQuaternion(_q);
+  _p.set(-_p.x, py - _p.y, -_p.z);
+  _s.set(1, 1, 1);
+  return out.compose(_p, _q, _s);
+}
+
+// ---------------- Small animation helpers (allocation free) ----------------
+
+const TAU = Math.PI * 2;
+const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+const sat = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = sat((x - e0) / (e1 - e0));
+  return t * t * (3 - 2 * t);
+};
+const frac = (x: number) => x - Math.floor(x);
+const hash = (n: number) => frac(Math.sin(n * 127.1 + 311.7) * 43758.5453);
+const approach = (cur: number, target: number, step: number) => (cur < target ? Math.min(target, cur + step) : Math.max(target, cur - step));
+/** Smooth value noise in [-1, 1]. */
+function noise(t: number, seed: number): number {
+  const n = Math.floor(t), f = t - n;
+  return mix(hash(n + seed * 17.3), hash(n + 1 + seed * 17.3), f * f * (3 - 2 * f)) * 2 - 1;
+}
+/** A random value in [-1, 1] held for `period` seconds, then jumping to another (jerky bird glances). */
+const held = (t: number, period: number, seed: number) => hash(Math.floor(t / period + hash(seed)) + seed * 13.7) * 2 - 1;
+/** 0 → 1 → 0 pulse lasting `len` of each `period`, firing on a random `chance` of periods (ear flicks, tail swishes). */
+function blip(t: number, period: number, len: number, chance: number, seed: number): number {
+  const u = t / period + hash(seed), n = Math.floor(u), f = u - n;
+  if (f > len || hash(n * 1.37 + seed * 7.1) > chance) return 0;
+  return Math.sin((f / len) * Math.PI);
+}
+
+/** Per-frame smoothing: frame-rate independent, and snaps straight to the target on an animal's first posed frame. */
+let _dt = 0, _snap = false;
+const sm = (cur: number, target: number, rate: number) => (_snap ? target : cur + (target - cur) * (1 - Math.exp(-rate * _dt)));
+
+/**
+ * Foot travel through a gait cycle at phase p: in stance (p < duty) the foot slides back from +S/2 to
+ * −S/2 at exactly the body's speed (S = duty × cycle distance), so it stays planted; in swing it lifts
+ * and swings forward. Writes _fz (along the body), _fy (lift) and _sw (swing progress 0…1, −1 in stance).
+ */
+let _fz = 0, _fy = 0, _sw = -1;
+function footPath(p: number, duty: number, stride: number, lift: number): void {
+  if (p < duty) {
+    _fz = stride * (0.5 - p / duty);
+    _fy = 0;
+    _sw = -1;
+  } else {
+    const u = (p - duty) / (1 - duty);
+    _fz = stride * (u * u * (3 - 2 * u) - 0.5);
+    _fy = lift * Math.sin(Math.PI * Math.min(1, u * 1.1));
+    _sw = u;
+  }
+}
+
+/**
+ * Two-bone IK in a leg's sagittal plane: target (tz, ty) relative to the upper joint; angles are
+ * about x (0 = hanging straight down, + = swung back). bend +1 puts the middle joint forward (hind
+ * stifle), −1 backward (fore elbow, a bird's hock). Writes the upper angle to _a1 and the relative
+ * middle-joint angle to _a2.
+ */
+let _a1 = 0, _a2 = 0;
+function ik2(tz: number, ty: number, l1: number, l2: number, bend: number): void {
+  const d = Math.min((l1 + l2) * 0.999, Math.max(Math.abs(l1 - l2) + 1e-4, Math.hypot(tz, ty)));
+  const phi = Math.atan2(-tz, -ty);
+  const alpha = Math.acos(THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const beta = Math.acos(THREE.MathUtils.clamp((l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2), -1, 1));
+  _a1 = phi - bend * alpha;
+  _a2 = bend * (Math.PI - beta);
 }
 
 /**
@@ -162,6 +322,8 @@ export class Animals {
   private pens = new Map<number, { x: number; z: number; r: number }>();
   private leash: THREE.LineSegments;
   private time = 0;
+  /** Counts draw calls so each animal can tell whether it was posed last frame. */
+  private drawFrame = 0;
   /** Settlement points (buildings) that chickens and goats hang around. */
   settlement: () => { x: number; z: number }[] = () => [];
 
@@ -200,7 +362,12 @@ export class Animals {
     add('head_rooster', models.chickenHead(true), cap);
     // Jointed wings (arm, forearm, hand; right then left), tinted with the coat colour.
     wingParts(CHICKEN_WING, 2).forEach((g, k) => add(`wing_chicken${k}`, g, cap));
-    add('leg_chicken', models.legGeometry(0.055, 0.008, 0xe8b030, 0xe8b030), cap * 2);
+    add('neck_chicken', models.chickenNeck(), cap);
+    // Three-piece legs: feathered drumstick, scaly shank, toes.
+    const [cu, cl, cf] = models.chickenLegParts();
+    add('legU_chicken', cu, cap * 2);
+    add('legL_chicken', cl, cap * 2);
+    add('foot_chicken', cf, cap * 2);
     // Quadrupeds: front / rear body halves (split at the spine joint) and three-segment legs.
     const halves = (key: string, h: [THREE.BufferGeometry, THREE.BufferGeometry], n: number) => {
       add(`${key}_F`, h[0], n);
@@ -209,17 +376,24 @@ export class Animals {
     halves('pig_plain', models.pigBodyHalves(false, QUAD.pig.spineY), cap);
     halves('pig_spotted', models.pigBodyHalves(true, QUAD.pig.spineY), cap);
     add('head_pig', models.pigHead(), cap);
+    add('ear_pig', models.pigEar(), cap * 2);
+    add('tail_pig', models.pigTail(), cap);
     halves('goat_plain', models.goatBodyHalves(false, QUAD.goat.spineY), cap);
     halves('goat_patched', models.goatBodyHalves(true, QUAD.goat.spineY), cap);
     add('head_straight', models.goatHead(false), cap);
     add('head_curly', models.goatHead(true), cap);
+    add('neck_goat', models.goatNeck(), cap);
+    add('ear_goat', models.goatEar(), cap * 2);
+    add('tail_goat', models.goatTail(), cap);
     halves('tapir_plain', models.tapirBodyHalves(QUAD.tapir.spineY), 12);
     add('head_tapir', models.tapirHead(), 12);
+    add('ear_tapir', models.tapirEar(), 24);
+    add('trunk_tapir', models.tapirTrunk(), 12);
     for (const sp of ['pig', 'goat', 'tapir'] as Quad[]) {
       const q = QUAD[sp], L = q.hipY, n = sp === 'tapir' ? 48 : cap * 4;
-      add(`legU_${sp}`, models.legSegment(L * q.seg[0], q.r, q.r * 0.78), n);
-      add(`legL_${sp}`, models.legSegment(L * q.seg[1], q.r * 0.74, q.r * 0.6), n);
-      add(`legP_${sp}`, models.footSegment(L * q.seg[2], q.r * 0.62, q.hoof, q.foot), n);
+      add(`legU_${sp}`, models.limbUpper(L * q.seg[0], q.r, q.r * 0.78), n);
+      add(`legL_${sp}`, models.legSegment(L * q.seg[1], q.r * 0.72, q.r * 0.58), n);
+      add(`legP_${sp}`, models.footSegment(L * q.seg[2], q.r * 0.6, q.hoof, q.foot), n);
     }
   }
 
@@ -338,6 +512,7 @@ export class Animals {
       state: 'idle', feed: 'graze', timer: this.rng.range(0.5, 6), tx: x, tz: z, group, pen: -1, alive: true, respawn: 0,
       stamina: def.stamina, caught: 0, lookYaw: 0, phase: this.rng.range(0, 10), flap: 0, wingOpen: 0, gait: this.rng.next(), prevHeading: 0, turn: 0, lie: 0,
       chasedBy: null, heldBy: null, heldMode: null, tick: this.rng.next() * 0.3, tempo: this.rng.range(0.8, 1.25),
+      anim: { frame: -10, px: x, pz: z, v: 0, move: 0, run: 0, slope: 0, graze: 0, alert: 0, hy: 0, hr: 0, side: 0, vF: 0, vR: 0, kF: `${sp}_${v.body}_F`, kR: `${sp}_${v.body}_R`, nx: x, ny: 0, nz: z },
     };
   }
 
@@ -490,10 +665,11 @@ export class Animals {
   update(dt: number, camTarget: THREE.Vector3, cursor: THREE.Vector3 | null, people: SpatialHash<Islander>): void {
     this.time += dt;
     if (dt > 0) {
-      for (const g of this.groups) {
+      for (let gi = 0; gi < this.groups.length; gi++) {
+        const g = this.groups[gi];
         // Group centre follows its members.
         let sx = 0, sz = 0, n = 0;
-        for (const a of this.list) if (a.group === this.groups.indexOf(g) && a.alive && a.pen < 0 && !a.heldBy) {
+        for (const a of this.list) if (a.group === gi && a.alive && a.pen < 0 && !a.heldBy) {
           sx += a.x;
           sz += a.z;
           n++;
@@ -816,14 +992,17 @@ export class Animals {
 
   // ---------------- Drawing ----------------
 
-  /** Rope from the islander leading this animal to its neck. */
-  private leashLine(a: Animal, rig: (typeof RIG)[SpeciesKey], lineArr: Float32Array, lines: number): boolean {
+  /** Rope from the islander leading this animal to its head. */
+  private leashLine(a: Animal, arr: Float32Array, lines: number): boolean {
     if (a.heldMode !== 'lead' || !a.heldBy || lines >= 64) return false;
-    const l = a.heldBy;
-    const hx2 = l.x, hy2 = l.y + 0.25, hz2 = l.z;
-    const ax = a.x + Math.sin(a.heading) * 0.15 * a.scale, ay = a.y + rig.head[1] * a.scale, az = a.z + Math.cos(a.heading) * 0.15 * a.scale;
-    const mx = (hx2 + ax) / 2, my = (hy2 + ay) / 2 - 0.08, mz = (hz2 + az) / 2;
-    lineArr.set([hx2, hy2, hz2, mx, my, mz, mx, my, mz, ax, ay, az], lines * 12);
+    const l = a.heldBy, an = a.anim;
+    const hx = l.x, hy = l.y + 0.25, hz = l.z;
+    const mx = (hx + an.nx) / 2, my = (hy + an.ny) / 2 - 0.08, mz = (hz + an.nz) / 2;
+    const o = lines * 12;
+    arr[o] = hx; arr[o + 1] = hy; arr[o + 2] = hz;
+    arr[o + 3] = mx; arr[o + 4] = my; arr[o + 5] = mz;
+    arr[o + 6] = mx; arr[o + 7] = my; arr[o + 8] = mz;
+    arr[o + 9] = an.nx; arr[o + 10] = an.ny; arr[o + 11] = an.nz;
     return true;
   }
 
@@ -835,82 +1014,400 @@ export class Animals {
     e.n++;
   }
 
-  /** Pig, goat or tapir: spine bend, gait-driven jointed legs, head on the front half. */
-  private drawQuad(a: Animal, dt: number): void {
-    const q = QUAD[a.sp as Quad];
-    const moving = a.speed > 0.05;
-    const fast = a.state === 'flee' || a.speed > 1;
-    // Gait advances with distance travelled, so feet don't skate.
-    a.gait = (a.gait + (a.speed * dt) / q.stride / (fast ? 1.5 : 1)) % 1;
-    let dh = a.heading - a.prevHeading;
-    while (dh > Math.PI) dh -= Math.PI * 2;
-    while (dh < -Math.PI) dh += Math.PI * 2;
-    a.prevHeading = a.heading;
-    if (dt > 0) a.turn += (THREE.MathUtils.clamp(dh / dt, -4, 4) - a.turn) * Math.min(1, dt * 6);
-    a.lie += ((a.state === 'rest' ? 1 : 0) - a.lie) * Math.min(1, dt * 2.5);
-    const lie = a.lie;
-    const G = a.gait * Math.PI * 2;
-    // Spine: bends into turns, sways a little with each step, flexes and extends when running.
-    const bendYaw = THREE.MathUtils.clamp(a.turn * 0.11, -0.32, 0.32) + (moving && !fast ? Math.sin(G) * 0.05 : 0);
-    const flex = fast ? Math.sin(G * 2) * 0.09 : 0;
-    let headTilt = 0, frontPitch = 0;
-    if (a.state === 'feed') {
-      headTilt = a.feed === 'sniff' ? 0.6 + Math.sin(a.phase * 6) * 0.2 : 0.8 + Math.sin(a.phase * 1.7) * 0.1;
-      frontPitch = 0.1;
+  /** Put with an extra non-uniform scale in the part's own frame (breathing, fluffing up). */
+  private putScaled(key: string, m: THREE.Matrix4, col: THREE.Color, sx: number, sy: number, sz: number): void {
+    _B.copy(m).scale(_s.set(sx, sy, sz));
+    this.put(key, _B, col);
+  }
+
+  /**
+   * Measure how fast the animal really moves (so the legs match whatever moved it: wandering, fleeing,
+   * being led, shuffling round a pen) and advance its gait by the distance covered, so planted feet
+   * never skate. Also smooths the walk / trot weights and the turn rate. Returns the gait cycle
+   * length in the animal's local units.
+   */
+  private track(a: Animal, dt: number, walkD: number, runD: number, trot0: number, trot1: number): number {
+    const an = a.anim;
+    _snap = an.frame !== this.drawFrame - 1;
+    an.frame = this.drawFrame;
+    _dt = Math.min(dt, 0.1);
+    if (_snap) {
+      an.v = a.state === 'walk' || a.state === 'flee' || a.state === 'avoid' || a.heldMode === 'lead' ? a.speed : 0;
+      a.prevHeading = a.heading;
+      a.turn = 0;
+    } else if (dt > 0) {
+      const d = Math.hypot(a.x - an.px, a.z - an.pz);
+      if (d < 1) an.v = sm(an.v, Math.min(4, d / dt), 10);
     }
-    if (a.state === 'alert') headTilt = -0.25;
-    const bob = moving ? (fast ? Math.abs(Math.sin(G * 2)) * 0.022 : Math.abs(Math.sin(G * 2)) * 0.008) * a.scale : Math.sin(a.phase * 2) * 0.002;
-    const drop = lie * (q.spineY - q.hipY * 0.35);
-    compose(_m, a.x, a.y + (q.spineY - drop) * a.scale + bob, a.z, 0, a.heading, lie * 0.08, a.scale);
-    const front = _front.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, frontPitch + flex, bendYaw * 0.5, 0));
-    const rear = _rear.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, -flex, -bendYaw * 0.5, 0));
-    this.put(`${a.bodyKey}_F`, front, a.color);
-    this.put(`${a.bodyKey}_R`, rear, a.color);
-    const [hx, hy, hz] = q.head;
-    _m2.multiplyMatrices(front, compose(_tmp, hx, hy, hz, headTilt - frontPitch, a.lookYaw + bendYaw * 0.5, 0));
-    this.put(a.headKey, _m2, a.color);
-    // Legs.
-    const L = q.hipY, l1 = L * q.seg[0], l2 = L * q.seg[1];
-    const amp = moving ? (fast ? 0.62 : 0.34) * Math.min(1, a.speed * 2 + 0.3) : 0;
-    const offs = fast ? TROT : WALK;
-    const hindY = hindHipY(q);
-    const J = _J, T = _T;
-    for (let k = 0; k < 4; k++) {
-      const isFront = k < 2, side = k % 2 === 0 ? 1 : -1;
-      const ph = G + offs[k] * Math.PI * 2;
-      const sw = Math.sin(ph);
-      const lift = Math.max(0, -Math.cos(ph)) * (amp > 0 ? 1 : 0);
-      let a1: number, a2: number, a3: number;
-      if (isFront) {
-        // Shoulder swings; elbow and wrist fold the foot back and up as it swings forward.
-        a1 = amp * sw - (a.state === 'feed' ? 0.12 : 0);
-        a2 = lift * 0.75 * (amp / 0.34);
-        a3 = lift * 1.25 * (amp / 0.34) - a1 * 0.3;
-        // Lying down: forelegs folded under the chest.
-        a1 = a1 * (1 - lie) - 1.1 * lie;
-        a2 = a2 * (1 - lie) + 2.5 * lie;
-        a3 = a3 * (1 - lie) - 1.2 * lie;
-      } else {
-        // Hip swings; knee and hock flex through the swing.
-        a1 = HIND0[0] + amp * sw;
-        a2 = HIND0[1] + lift * 0.7 * (amp / 0.34);
-        a3 = HIND0[2] - lift * 0.8 * (amp / 0.34);
-        a1 = a1 * (1 - lie) - 1.5 * lie;
-        a2 = a2 * (1 - lie) + 2.7 * lie;
-        a3 = a3 * (1 - lie) - 0.9 * lie;
+    an.px = a.x;
+    an.pz = a.z;
+    an.move = sm(an.move, smooth(0.03, 0.14, an.v), 8);
+    an.run = sm(an.run, smooth(trot0, trot1, an.v), 5);
+    let dh = a.heading - a.prevHeading;
+    while (dh > Math.PI) dh -= TAU;
+    while (dh < -Math.PI) dh += TAU;
+    a.prevHeading = a.heading;
+    if (_dt > 0) a.turn = sm(a.turn, THREE.MathUtils.clamp(dh / _dt, -4, 4), 6);
+    // Longer strides at speed (and short shuffling ones when barely moving).
+    const D = mix(walkD, runD, an.run) * (0.65 + 0.35 * sat(an.v / (trot0 * 0.65)));
+    a.gait = frac(a.gait + (an.v * _dt) / (D * a.scale));
+    return D;
+  }
+
+  /**
+   * Pig, goat or tapir. The body rides on its legs: it bobs, rolls and sways with each footfall,
+   * bends into turns, flexes at the trot and pitches with the slope; hooves are placed by IK
+   * (planted in stance, lifted and folded in swing). Head, ears and tail add grazing, looking round,
+   * ear flicks and tail swishes; lying down kneels in front first, and pigs and tapirs sprawl on their side.
+   */
+  private drawQuad(a: Animal, dt: number): void {
+    const sp = a.sp as Quad, q = QUAD[sp], an = a.anim, s = a.scale, def = SPECIES[a.sp], K = QKEYS[sp];
+    const t = this.time * a.tempo + a.id * 3.7;
+    const D = this.track(a, dt, q.stride[0], q.stride[1], q.trot[0], q.trot[1]);
+    const move = an.move, run = an.run, g = a.gait;
+    const L = q.hipY, l1 = L * q.seg[0], l2 = L * q.seg[1], l3 = L * q.seg[2];
+
+    // --- Lying down: the forequarters kneel first and the rear follows; getting up, the rear rises first.
+    const resting = a.state === 'rest', still = an.v < 0.05;
+    const sprawler = q.sideY > 0 && a.id % 3 !== 0;
+    an.side = sm(an.side, resting && still && sprawler && a.lie > 0.97 ? 1 : 0, still ? 1.2 : 6);
+    const lieGoal = (resting || an.side > 0.08) && still ? 1 : 0;
+    a.lie = _snap ? lieGoal : approach(a.lie, lieGoal, _dt / (still ? 1.3 : 0.4));
+    const lieF = smooth(0, 0.62, a.lie), lieR = smooth(0.38, 1, a.lie), side = an.side;
+    const dF = lieF * (q.spineY - q.restY), dR = lieR * (q.spineY - q.restY);
+    const liePitch = Math.atan2(dF - dR, q.zF - q.zR);
+    const up = 1 - lieF;
+
+    // --- Ground slope under the fore and hind feet.
+    const sh = Math.sin(a.heading), ch = Math.cos(a.heading);
+    const gF = this.world.groundY(a.x + sh * q.zF * s, a.z + ch * q.zF * s);
+    const gR = this.world.groundY(a.x + sh * q.zR * s, a.z + ch * q.zR * s);
+    an.slope = sm(an.slope, THREE.MathUtils.clamp(Math.atan2(gR - gF, (q.zF - q.zR) * s), -0.45, 0.45), 8);
+
+    // --- Body motion tied to the footfalls (walk and trot phase offsets blend with the trot weight).
+    const duty = mix(q.duty[0], q.duty[1], run);
+    for (let k = 0; k < 4; k++) _offs[k] = mix(WALK[k], TROT[k], run);
+    const mLF = TAU * (g + _offs[0] - duty / 2), mLH = TAU * (g + _offs[2] - duty / 2);
+    // Walking vaults over each stance leg (highest mid-stance); trotting compresses into it.
+    const bob = move * mix(q.bob[0] * Math.cos(2 * mLH), -q.bob[1] * Math.cos(2 * mLF), run);
+    const stepRoll = move * q.roll * (1 - 0.6 * run);
+    let rollR = stepRoll * Math.cos(mLH);
+    const rollF = 0.6 * stepRoll * Math.cos(mLF);
+    const sway = move * q.roll * 0.7 * (1 - 0.5 * run) * Math.sin(mLH);
+    const flex = move * run * 0.06 * Math.sin(2 * mLF);
+    const nod = move * q.nod * (1 - 0.4 * run) * Math.cos(2 * mLF + 1.2);
+    const bend = THREE.MathUtils.clamp(a.turn * 0.11, -0.32, 0.32) * up;
+
+    // --- Attention: grazing with the head down (looking up now and then), looking round, watching a threat.
+    const feeding = a.state === 'feed';
+    an.alert = sm(an.alert, a.state === 'alert' || a.state === 'avoid' ? 1 : 0, 5);
+    const alert = an.alert;
+    const lookUp = feeding ? blip(t, 6.5, 0.3, 0.55, a.id) : 0;
+    an.graze = sm(an.graze, (feeding ? (a.feed === 'sniff' ? 0.72 : 1) * (1 - 0.85 * lookUp) : 0) * up, 3);
+    const gz = an.graze;
+    const idle = (1 - move) * (1 - gz) * (1 - alert);
+    an.hy = sm(an.hy, (a.lookYaw + idle * noise(t * 0.3, a.id) * 0.75) * (1 - side), 3.5);
+    const bite = feeding && a.feed !== 'sniff' ? blip(t, 1.7, 0.28, 0.7, a.id + 2) * gz : 0;
+    const chew = Math.sin(t * 8.5) * (feeding ? gz : 0);
+    // Goats chew the cud: side-to-side grinding with the head up, standing or lying.
+    const ruminate = sp === 'goat' ? Math.max(feeding ? 1 - gz : 0, resting ? lieF * blip(t, 9, 0.6, 0.8, a.id + 4) : 0) : 0;
+
+    // --- Idle goats and tapirs now and then rest a hind leg: hoof tipped, that hip dropped.
+    let cock = -1, cw = 0;
+    if (sp !== 'pig') {
+      const u = t / 9 + hash(a.id + 1), n = Math.floor(u), f = u - n;
+      if (hash(n + a.id * 3.3) < 0.6) {
+        cw = smooth(0.1, 0.25, f) * (1 - smooth(0.75, 0.9, f)) * idle * up;
+        cock = hash(n * 2.1 + a.id) > 0.5 ? 2 : 3;
+        rollR += cw * (cock === 2 ? -0.05 : 0.05);
       }
-      const half = isFront ? front : rear;
-      const hipYo = (isFront ? L : hindY) - q.spineY;
-      J.multiplyMatrices(half, compose(T, side * q.x, hipYo, isFront ? q.zF : q.zR, a1, 0, side * 0.03));
-      this.put(`legU_${a.sp}`, J, a.color);
-      J.multiply(compose(T, 0, -l1, 0, a2, 0, 0));
-      this.put(`legL_${a.sp}`, J, a.color);
-      J.multiply(compose(T, 0, -l2, 0, a3, 0, 0));
-      this.put(`legP_${a.sp}`, J, a.color);
+    }
+
+    // --- Vaulting: wherever a planted leg is stretched fore or aft the body sinks a little over it (twice
+    // per stride, like a real walk), so hooves never hover at the ends of their stance.
+    const frontPitch = q.frontGraze * gz + bite * 0.03;
+    const fP = frontPitch + flex, rP = -flex;
+    const strideL = duty * D, liftL = L * mix(q.lift[0], q.lift[1], run);
+    const hindY = hindHipY(q), neutralH = (l1 - l2) * Math.sin(-HIND0[0]);
+    let y0 = a.y + (q.spineY - (dF + dR) / 2 + side * (q.sideY - q.restY) + bob) * s;
+    let vF = 0, vR = 0;
+    if (move > 0.01 && up > 0.01) {
+      const reach2 = (l1 + l2) * 0.985;
+      for (let k = 0; k < 4; k++) {
+        const ph = frac(g + _offs[k]);
+        if (ph >= duty) continue;
+        const isF = k < 2;
+        footPath(ph, duty, strideL, liftL);
+        const P = an.slope + liePitch + (isF ? fP : rP);
+        const hipYo = (isF ? L * FRONT_H : hindY) - q.spineY, hipZ = isF ? q.zF : q.zR;
+        const cP = Math.cos(P), sP = Math.sin(P);
+        const above = hipYo * cP - hipZ * sP - ((isF ? gF : gR) - y0) / s;
+        const dz = hipZ - (hipYo * sP + hipZ * cP) + (isF ? 0 : neutralH) + _fz * move;
+        const th3 = Math.atan2(-dz, above) * (isF ? STRUT_F : STRUT_H);
+        const wz = dz + l3 * Math.sin(th3);
+        const reach = l3 * Math.cos(th3) + (Math.abs(wz) < reach2 ? Math.sqrt(reach2 * reach2 - wz * wz) : 0);
+        const u = ph / duty, w = smooth(0, 0.12, u) * smooth(0, 0.12, 1 - u);
+        const d = Math.max(0, above - reach) * w * up;
+        if (isF) vF = Math.max(vF, d);
+        else vR = Math.max(vR, d);
+      }
+    }
+    an.vF = sm(an.vF, vF, 30);
+    an.vR = sm(an.vR, vR, 30);
+    y0 -= ((an.vF + an.vR) / 2) * s;
+
+    // --- Body halves.
+    const bodyPitch = an.slope + liePitch + Math.atan2(an.vF - an.vR, q.zF - q.zR);
+    const pant = 1 - a.stamina / def.stamina;
+    const breath = Math.sin(t * mix(2.2, 7, pant) * (resting ? 0.7 : 1)) * mix(0.012, 0.025, pant) * (1 - move * 0.6);
+    const sideDir = a.id % 2 ? 1 : -1;
+    compose(_m, a.x, y0, a.z, bodyPitch, a.heading, side * sideDir * 1.35, s);
+    _front.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, fP, bend * 0.5 + sway * 0.3, rollF));
+    _rear.multiplyMatrices(_m, compose(_tmp, 0, 0, 0, rP, -bend * 0.5 - sway, rollR));
+    this.putScaled(an.kF, _front, a.color, 1 + breath, 1 + breath, 1 + breath * 0.3);
+    this.put(an.kR, _rear, a.color);
+
+    // --- Neck and head (partly cancelling the body's pitch, so the head stays level on slopes).
+    const parentPitch = bodyPitch + fP;
+    const [hx, hy, hz] = q.head;
+    let yaw = an.hy + bend * 0.5;
+    if (feeding && a.feed === 'sniff') yaw += Math.sin(t * 4.3) * 0.2 * gz;
+    const headRoll = ruminate * Math.sin(t * 5.5) * 0.06;
+    if (q.neck) {
+      const [nl, n0, n1] = q.neck;
+      let np = mix(n0, n1, gz) + nod * 0.8 - alert * 0.25 + run * move * 0.28 - parentPitch * 0.7;
+      np = mix(np, -0.45 - parentPitch, lieF);
+      _N.multiplyMatrices(_front, compose(_tmp, hx, hy, hz, np, yaw * 0.5, 0));
+      this.put(K.neck, _N, a.color);
+      let hp = mix(q.headPitch[0], q.headPitch[1], gz) + nod * 0.4 - alert * 0.15 - bite * 0.3 + chew * 0.025 - run * move * 0.2;
+      hp = mix(hp, 0.95, lieF);
+      _H.multiplyMatrices(_N, compose(_tmp, 0, 0, nl, hp, yaw * 0.5, headRoll));
+    } else {
+      let hp = mix(q.headPitch[0], q.headPitch[1], gz) + nod - alert * 0.35 - run * move * 0.15 - bite * 0.2 + chew * 0.02 - parentPitch * 0.8;
+      if (feeding && a.feed === 'sniff') hp += Math.sin(t * 11) * 0.06 * gz;
+      if (feeding && a.feed === 'drink') hp += (0.1 + Math.sin(t * 6) * 0.04) * gz;
+      // Resting: chin down near the ground (sprawled on the side the head just lies flat with the body).
+      hp = mix(hp, 0.35 - parentPitch, lieF * (1 - side));
+      _H.multiplyMatrices(_front, compose(_tmp, hx, hy, hz, hp, yaw, headRoll));
+    }
+    this.put(a.headKey, _H, a.color);
+    an.nx = _H.elements[12];
+    an.ny = _H.elements[13];
+    an.nz = _H.elements[14];
+
+    // --- Ears: flop with each step (lagging the head), flick at flies, prick up when alert, lie back at a run.
+    const [ex, ey, ez] = q.ear;
+    const fast = run * move;
+    for (let e = 0; e < 2; e++) {
+      const sd = e === 0 ? 1 : -1;
+      const shake = blip(t, 3.2, 0.09, 0.35, a.id * 1.3 + e * 0.47) * Math.sin(t * 38);
+      let rx: number, ry: number, rz: number;
+      if (sp === 'pig') {
+        rx = 0.9 - alert * 0.45 + fast * 0.25 + move * 0.2 * Math.cos(2 * mLF + 0.1) + gz * 0.2;
+        ry = sd * 0.35;
+        rz = -sd * (0.55 + shake * 0.35 + fast * 0.2);
+      } else if (sp === 'goat') {
+        rx = 0.25;
+        ry = sd * (0.15 - alert * 0.3 + fast * 0.6);
+        rz = -sd * (1.4 - alert * 0.35 + shake * 0.4 + move * 0.08 * Math.cos(2 * mLF));
+      } else {
+        rx = -0.1 + fast * 0.4;
+        ry = sd * (0.35 + noise(t * 0.45, a.id + e * 5) * 0.6 * (1 - alert));
+        rz = -sd * (0.35 + shake * 0.25);
+      }
+      _J.multiplyMatrices(_H, compose(_tmp, sd * ex, ey, ez, rx, ry, rz));
+      this.put(K.ear, _J, a.color);
+    }
+    if (sp === 'tapir') {
+      // The proboscis never stops: sniffing, curling down to the forage, lifting to test the air.
+      const tp = 0.2 + gz * 0.55 + Math.sin(t * 3.1) * 0.1 + noise(t * 0.8, a.id + 2) * 0.15 + lieF * 0.3 - alert * 0.3 + (feeding && a.feed === 'drink' ? 0.2 : 0);
+      _J.multiplyMatrices(_H, compose(_tmp, TRUNK[0], TRUNK[1], TRUNK[2], tp, noise(t * 0.6, a.id + 6) * 0.25, 0));
+      this.put('trunk_tapir', _J, a.color);
+    }
+
+    // --- Tail: swishes with the gait and at flies; raised when alarmed or running.
+    if (q.tail) {
+      const tf = blip(t, 4.5, 0.12, 0.45, a.id + 3);
+      let tp: number, ty: number;
+      if (sp === 'pig') {
+        ty = move * 0.4 * Math.sin(2 * mLH) + idle * noise(t * 1.3, a.id + 8) * 0.5 + tf * Math.sin(t * 30) * 0.45;
+        tp = -fast * 0.5 + lieF * 0.3;
+      } else {
+        tp = -0.25 * alert - fast * 0.35 + tf * Math.sin(t * 32) * 0.45 + lieF * 0.4;
+        ty = tf * Math.sin(t * 27) * 0.35 + move * 0.12 * Math.sin(2 * mLH);
+      }
+      _J.multiplyMatrices(_rear, compose(_tmp, q.tail[0], q.tail[1], q.tail[2], tp, ty, 0));
+      this.put(K.tail, _J, a.color);
+    }
+
+    // --- Legs (two-bone IK to the hoof; the cannon is angled separately and folds in swing).
+    const foldK = move * (0.75 + 0.25 * run);
+    for (let k = 0; k < 4; k++) {
+      const isF = k < 2, sd = k % 2 === 0 ? 1 : -1;
+      const P = bodyPitch + (isF ? fP : rP), cP = Math.cos(P), sP = Math.sin(P);
+      const hipYo = (isF ? L * FRONT_H : hindY) - q.spineY, hipZ = isF ? q.zF : q.zR;
+      // Foot target relative to the hip in the unpitched body frame: on the ground however the body bobs,
+      // and anchored to the body (not the pitching hip) so spine flex and vaulting don't drag planted feet.
+      footPath(frac(g + _offs[k]), duty, strideL, liftL);
+      const ground = ((isF ? gF : gR) - y0) / s;
+      let dz = hipZ - (hipYo * sP + hipZ * cP) + (isF ? 0 : neutralH) + _fz * move;
+      let dy = ground + _fy * move - (hipYo * cP - hipZ * sP);
+      let th3 = Math.atan2(-dz, -dy) * (isF ? STRUT_F : STRUT_H);
+      if (_sw >= 0) th3 += (isF ? 1.35 * Math.sin(Math.PI * sat(_sw * 1.15)) : 0.7 * Math.sin(Math.PI * _sw)) * foldK;
+      if (k === cock) {
+        dy += 0.07 * L * cw;
+        dz += 0.04 * L * cw;
+        th3 += 0.6 * cw;
+      }
+      // Into the half's own pitched frame, then solve for the wrist / hock above the hoof.
+      const tz = -dy * sP + dz * cP, ty = dy * cP + dz * sP, t3 = th3 - P;
+      ik2(tz + l3 * Math.sin(t3), ty + l3 * Math.cos(t3), l1, l2, isF ? -1 : 1);
+      let a1 = _a1, a2 = _a2, a3 = t3 - _a1 - _a2;
+      const lw = isF ? lieF : lieR, lp = isF ? LIE_F : LIE_H, spp = isF ? SIDE_F : SIDE_H;
+      if (lw > 0) {
+        a1 = mix(a1, lp[0], lw);
+        a2 = mix(a2, lp[1], lw);
+        a3 = mix(a3, lp[2], lw);
+      }
+      if (side > 0) {
+        a1 = mix(a1, spp[0], side);
+        a2 = mix(a2, spp[1], side);
+        a3 = mix(a3, spp[2], side);
+      }
+      _J.multiplyMatrices(isF ? _front : _rear, compose(_T, sd * q.x, hipYo, hipZ, a1, 0, sd * 0.03));
+      this.put(K.legU, _J, a.color);
+      _J.multiply(compose(_T, 0, -l1, 0, a2, 0, 0));
+      this.put(K.legL, _J, a.color);
+      _J.multiply(compose(_T, 0, -l2, 0, a3, 0, 0));
+      this.put(K.legP, _J, a.color);
+    }
+  }
+
+  /**
+   * Chicken: waddles over its stance foot with the head held still in space and then thrust forward
+   * each step; pecks in quick bursts, rakes the ground with alternate feet, glances about in jerky
+   * saccades cocking its head, sits fluffed up to rest, flaps when hurrying (and the rooster crows).
+   */
+  private drawChicken(a: Animal, dt: number): void {
+    const an = a.anim, s = a.scale, CH = models.CHICKEN;
+    const t = this.time * a.tempo + a.id * 3.7;
+    const D = this.track(a, dt, CHICK_STRIDE[0], CHICK_STRIDE[1], 0.75, 1.35);
+    const move = an.move, run = an.run, g = a.gait;
+    const duty = mix(0.6, 0.42, run);
+    const resting = a.state === 'rest', still = an.v < 0.05;
+    a.lie = _snap ? (resting && still ? 1 : 0) : approach(a.lie, resting && still ? 1 : 0, _dt / (still ? 0.6 : 0.2));
+    const lie = smooth(0, 1, a.lie);
+    const feeding = a.state === 'feed', scratching = feeding && a.feed === 'scratch';
+    an.alert = sm(an.alert, a.state === 'alert' || a.state === 'avoid' ? 1 : 0, 6);
+    const alert = an.alert;
+
+    // Pecking: bursts of quick jabs at the ground, then the head comes up for a look round.
+    let down = 0, strike = 0, rake = -1, rw = 0;
+    if (scratching) {
+      // Rake back with one foot, then the other, then look down and peck at what turned up.
+      const u = frac(t / 1.4 + hash(a.id));
+      if (u < 0.5) {
+        rake = u < 0.25 ? 0 : 1;
+        rw = frac(u * 4);
+        down = 0.55;
+      } else {
+        down = 0.95;
+        const pu = (u - 0.5) / 0.5;
+        strike = pu > 0.35 && pu < 0.6 ? Math.sin(((pu - 0.35) / 0.25) * Math.PI) : 0;
+      }
+    } else if (feeding) {
+      const u = frac(t / 1.8 + hash(a.id));
+      if (u < 0.6) {
+        down = 1;
+        const pu = frac((u / 0.6) * 3);
+        strike = pu < 0.38 ? Math.sin((pu / 0.38) * Math.PI) : 0;
+      } else down = 0.2;
+    }
+    an.graze = sm(an.graze, down * (1 - lie), 9);
+    const dw = an.graze;
+    strike *= dw;
+    const idle = (1 - move) * (1 - dw);
+    const crow = a.headKey === 'head_rooster' ? blip(t, 23, 0.08, 0.5, a.id + 21) * idle * (1 - lie) : 0;
+
+    // Body: waddles over the stance foot, bobs each step, tips forward over the hips to peck or run.
+    const mid = TAU * (g - duty / 2);
+    const bob = move * mix(0.004 * Math.cos(2 * mid), -0.006 * Math.cos(2 * mid), run) + (1 - move) * Math.sin(t * 2.3) * 0.0012 * (1 - lie);
+    const pitch = mix(-0.04, 0.45, dw) + move * 0.08 + run * move * 0.2 - alert * 0.08 + lie * 0.05 + (scratching ? 0.1 : 0) - crow * 0.2;
+    const roll = -move * 0.075 * (1 - 0.5 * run) * Math.cos(mid) + (rake < 0 ? 0 : rake === 0 ? 0.06 : -0.06);
+    const drop = lie * 0.034 + dw * 0.006 - alert * 0.004;
+    compose(_m, a.x, a.y + (bob - drop) * s, a.z, 0, a.heading, 0, s);
+    _front.multiplyMatrices(_m, pivot(_tmp, CH.hipY, pitch, roll));
+    const fluff = 1 + Math.sin(t * 2.3) * 0.012 * (1 - move) + lie * 0.05;
+    this.putScaled(a.bodyKey, _front, a.color, fluff, fluff, 1 + lie * 0.03);
+
+    // Neck and head: the head stays put in the world while the body walks under it, then darts forward.
+    const stepU = frac(2 * g + 0.15), hold = 0.72;
+    const hs = stepU < hold ? 0.5 - stepU / hold : smooth(hold, 1, stepU) - 0.5;
+    const stab = (hs * Math.min(0.028, hold * D * 0.5) * move * (1 - run) * (1 - dw)) / CH.neck;
+    const neckP = mix(0.12, 1.25, dw) + strike * 0.6 + run * move * 0.55 + stab - alert * 0.2 - lie * 0.3 - crow * 0.35 - pitch * (1 - dw) * 0.8;
+    const headW = mix(0, 1.75, dw) + strike * 0.15 - crow * 0.7 + lie * 0.15;
+    const glance = held(t, 0.55 + hash(a.id) * 0.5, a.id) * 0.9 * idle * (1 - lie * 0.5);
+    an.hy = sm(an.hy, a.lookYaw + glance, 16);
+    an.hr = sm(an.hr, held(t, 0.9, a.id + 5) * 0.35 * idle, 12);
+    _N.multiplyMatrices(_front, compose(_tmp, 0, CH.neckY, CH.neckZ, neckP, an.hy * 0.8, 0));
+    this.put('neck_chicken', _N, a.color);
+    _H.multiplyMatrices(_N, compose(_tmp, 0, CH.neck, 0, headW - pitch - neckP, an.hy * 0.2, an.hr));
+    this.put(a.headKey, _H, a.color);
+    an.nx = _H.elements[12];
+    an.ny = _H.elements[13];
+    an.nz = _H.elements[14];
+
+    // Legs: hip → hock (bending backward) → ankle by IK; toes flat on the ground, curled in swing.
+    const strideL = duty * D, liftL = mix(0.012, 0.02, run);
+    const cP = Math.cos(pitch), sP = Math.sin(pitch);
+    const hipH = CH.hipY + bob - drop;
+    for (let k = 0; k < 2; k++) {
+      footPath(frac(g + k * 0.5), duty, strideL, liftL);
+      let dz = _fz * move, lift = _fy * move, curl = _sw >= 0 ? Math.sin(Math.PI * _sw) * move : 0;
+      if (k === rake) {
+        if (rw < 0.3) {
+          const f = rw / 0.3;
+          dz = 0.016 * f;
+          lift = 0.012 * Math.sin(f * Math.PI * 0.5);
+          curl = f;
+        } else if (rw < 0.75) {
+          const f = (rw - 0.3) / 0.45;
+          dz = mix(0.016, -0.035, f);
+          lift = 0.012 * (1 - sat(f * 3));
+          curl = 1 - sat(f * 3);
+        } else {
+          const f = (rw - 0.75) / 0.25;
+          dz = mix(-0.035, 0, f);
+          lift = 0.008 * Math.sin(f * Math.PI);
+          curl = Math.sin(f * Math.PI);
+        }
+      }
+      const dy = CH.ankle + lift - hipH;
+      ik2(-dy * sP + dz * cP, dy * cP + dz * sP, CH.thigh, CH.shank, -1);
+      _J.multiplyMatrices(_front, compose(_T, (k === 0 ? 1 : -1) * CH.hipX, CH.hipY, 0, _a1, 0, 0));
+      this.put('legU_chicken', _J, a.color);
+      _J.multiply(compose(_T, 0, -CH.thigh, 0, _a2, 0, 0));
+      this.put('legL_chicken', _J, a.color);
+      _J.multiply(compose(_T, 0, -CH.shank, 0, 0.9 * curl - pitch - _a1 - _a2, 0, 0));
+      this.put('foot_chicken', _J, a.color);
+    }
+
+    // Wings: folded against the sides; beating when it runs off or flaps up, half out when hurrying,
+    // and a quick stretch-and-flap now and then while standing about.
+    const idleFlap = blip(t, 17, 0.05, 0.35, a.id + 11) * idle * (1 - lie);
+    const open = a.flap > 0 || a.state === 'flee' ? 1 : Math.max(run * move * 0.35, idleFlap > 0.05 ? 0.9 : 0, crow * 0.5);
+    a.wingOpen = sm(a.wingOpen, open, 10);
+    flapPose(t * 38, 0.85, _fp, 0, 0.15);
+    _fp.f1 += 0.25;
+    mixPose(FOLDED, _fp, a.wingOpen, _wp);
+    for (let e = 0; e < 2; e++) {
+      wingMatrices(_front, e === 0 ? 1 : -1, WING_ROOT, CHICKEN_WING, _wp, _wm);
+      for (let k = 0; k < 3; k++) this.put(WING_KEYS[e * 3 + k], _wm[k], a.color);
     }
   }
 
   private draw(dt = 0.016): void {
+    this.drawFrame++;
     for (const e of this.meshes.values()) e.n = 0;
     const lineArr = (this.leash.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
     let lines = 0;
@@ -919,51 +1416,9 @@ export class Animals {
       if (a.heldMode === 'carry') continue; // drawn in the islander's arms
       // Off screen: no limbs to pose (it keeps living; the pose picks up again when seen).
       if (!View.sees(a.x, a.y + 0.2 * a.scale, a.z, 0.5 * a.scale + 0.2)) continue;
-      const rig = RIG[a.sp];
-      if (a.sp !== 'chicken') {
-        this.drawQuad(a, dt);
-        this.leashLine(a, rig, lineArr, lines) && lines++;
-        continue;
-      }
-      const moving = a.speed > 0.05;
-      const fast = a.state === 'flee' || a.speed > 1;
-      const ph = a.phase * (fast ? 16 : 8);
-      let tilt = 0, drop = 0, headTilt = 0;
-      const resting = a.state === 'rest';
-      if (a.state === 'feed') {
-        if (a.feed === 'peck') headTilt = Math.sin(a.phase * 14) > 0.2 ? 1.1 : 0.2;
-        else if (a.feed === 'scratch') tilt = Math.sin(a.phase * 10) * 0.08;
-        else if (a.feed === 'sniff') headTilt = 0.6 + Math.sin(a.phase * 6) * 0.2;
-        else headTilt = 0.75 + Math.sin(a.phase * 1.7) * 0.1;
-      }
-      if (resting) drop = rig.legLen * 0.85;
-      const bob = moving ? Math.abs(Math.sin(ph)) * 0.02 * a.scale : Math.sin(a.phase * 2) * 0.002;
-      compose(_m, a.x, a.y + bob - drop * a.scale, a.z, tilt, a.heading, 0, a.scale);
-      this.put(a.bodyKey, _m, a.color);
-      // Head: pecks, grazes, turns to look.
-      const [hx, hy, hz] = rig.head;
-      _m2.multiplyMatrices(_m, compose(_tmp, hx, hy, hz, headTilt, a.lookYaw, 0));
-      this.put(a.headKey, _m2, a.color);
-      // Legs.
-      rig.legs.forEach(([lx, ly, lz], k) => {
-        const sw = moving ? Math.sin(ph + (k % 2 ? Math.PI : 0) + (k > 1 ? Math.PI : 0)) * (fast ? 0.8 : 0.5) : 0;
-        const fold = resting ? (a.sp === 'chicken' ? 1.4 : k < 2 ? -1.4 : 1.4) : 0;
-        _m2.multiplyMatrices(_m, compose(_tmp, lx, ly, lz, sw + fold, 0, 0));
-        this.put(`leg_${a.sp}`, _m2, a.color);
-      });
-      if (rig.wings) {
-        // Folded against the sides; spread and beating when running off or flapping up.
-        const open = a.flap > 0 || a.state === 'flee' ? 1 : 0;
-        a.wingOpen += (open - a.wingOpen) * 0.18;
-        flapPose(a.phase * 38, 0.85, _fp, 0, 0.15);
-        _fp.f1 += 0.25;
-        mixPose(FOLDED, _fp, a.wingOpen, _wp);
-        for (const side of [1, -1] as const) {
-          wingMatrices(_m, side, [0.066, 0.118, 0.035], CHICKEN_WING, _wp, _wm);
-          for (let k = 0; k < 3; k++) this.put(`wing_chicken${side === 1 ? k : k + 3}`, _wm[k], a.color);
-        }
-      }
-      if (this.leashLine(a, rig, lineArr, lines)) lines++;
+      if (a.sp === 'chicken') this.drawChicken(a, dt);
+      else this.drawQuad(a, dt);
+      if (this.leashLine(a, lineArr, lines)) lines++;
     }
     this.leash.geometry.setDrawRange(0, lines * 4);
     (this.leash.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;

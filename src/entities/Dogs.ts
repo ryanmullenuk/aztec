@@ -7,7 +7,9 @@ import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { Islander } from './Islander';
 import type { Jaguar, Jaguars } from './Jaguars';
-import { DOG_DIMS, QuadMeshes, blankPose, dogBodyHalves, dogHead, drawQuad, legParts, stepGait, tailPiece } from './quadRig';
+import {
+  DOG_DIMS, DOG_EARS, QuadKeys, QuadMeshes, blankPose, dogBodyHalves, dogEar, dogHead, dogJaw, dogNeck, drawQuad, envelope, idleHash, legParts, smooth, stepGait, tailPiece,
+} from './quadRig';
 import { steer, turnTo, walkable } from './steer';
 
 export const DOG_BASE = 2_000_000;
@@ -61,6 +63,8 @@ export interface Dog {
   lunge: number;
   headYaw: number;
   phase: number;
+  /** Panting after a run (drawing only, 0..1). */
+  pant: number;
   /** Waypoints for a long walk home, and where along them it is. */
   route: { x: number; z: number }[] | null;
   routeIdx: number;
@@ -116,17 +120,20 @@ export class Dogs {
   constructor(private world: World, private bld: BuildingSystem, private eco: Economy) {
     this.rng = new RNG(world.seed * 97 + 13);
     const n = DOGS.maxTotal + 4;
-    for (const tri of [false, true]) {
-      const [F, R] = dogBodyHalves(tri);
-      this.meshes.add(`dog_F_${tri ? 'tri' : 'plain'}`, F, n);
-      this.meshes.add(`dog_R_${tri ? 'tri' : 'plain'}`, R, n);
-      for (const ears of ['prick', 'floppy'] as const) this.meshes.add(`dog_head_${ears}_${tri ? 'tri' : 'plain'}`, dogHead(ears, tri), n);
-    }
-    this.meshes.add('dog_tail', tailPiece(DOG_DIMS.tailLen[0], 0.016, 0.011), n);
-    const [lu, ll, pw] = legParts(DOG_DIMS, 0x2a2220);
-    this.meshes.add('dog_legU', lu, n * 4);
-    this.meshes.add('dog_legL', ll, n * 4);
-    this.meshes.add('dog_paw', pw, n * 4);
+    // One set of meshes for every coat: markings (tricolour bib, socks, muzzle) take a second
+    // per-dog colour, which for plain dogs is just the coat colour.
+    const [F, R] = dogBodyHalves();
+    this.meshes.add('dog_F', F, n, true);
+    this.meshes.add('dog_R', R, n, true);
+    this.meshes.add('dog_neck', dogNeck(), n, true);
+    this.meshes.add('dog_head', dogHead(), n, true);
+    this.meshes.add('dog_jaw', dogJaw(), n, true);
+    this.meshes.add('dog_ear_prick', dogEar('prick'), n * 2);
+    this.meshes.add('dog_ear_floppy', dogEar('floppy'), n * 2);
+    this.meshes.add('dog_tail0', tailPiece(DOG_DIMS.tailLen[0], 0.016, 0.012), n);
+    this.meshes.add('dog_tail1', tailPiece(DOG_DIMS.tailLen[1], 0.012, 0.005), n);
+    const legs = legParts(DOG_DIMS, 0x2a2220, false);
+    ['dog_legUF', 'dog_legLF', 'dog_pawF', 'dog_legUH', 'dog_legLH', 'dog_pawH'].forEach((k, i) => this.meshes.add(k, legs[i], n * 2, true));
   }
 
   // ---------------- Population ----------------
@@ -228,7 +235,7 @@ export class Dogs {
       id: this.nextId++, name, x: k.x + Math.cos(a) * 0.9, z: k.z + Math.sin(a) * 0.9 + 0.8, y: k.y, heading: r.range(0, 6.28), speed: 0,
       state: 'sit', timer: r.range(3, 8), tx: k.x, tz: k.z, coat, color: col, tri: coat !== 4 && r.chance(0.4), ears: r.chance(0.6) ? 'prick' : 'floppy',
       scale: r.range(0.88, 1.12), puppy, age: 0, kennel: k.id, owner: -1, hunger: 1, injured: 0, follow: -1, buddy: -1, sniffX: 0, sniffZ: 0,
-      jaguar: -1, bark: 0, barkCool: 0, raised: false, calm: 0, gait: r.next(), prevHeading: 0, turn: 0, sit: 1, lie: 0, crouch: 0, lunge: 0, headYaw: 0, phase: r.range(0, 10), route: null, routeIdx: 0,
+      jaguar: -1, bark: 0, barkCool: 0, raised: false, calm: 0, gait: r.next(), prevHeading: 0, turn: 0, sit: 1, lie: 0, crouch: 0, lunge: 0, headYaw: 0, phase: r.range(0, 10), pant: 0, route: null, routeIdx: 0,
     };
     if (!puppy) this.maybeAttach(d);
     this.list.push(d);
@@ -829,10 +836,10 @@ export class Dogs {
       const [x, z, puppy, age, coat, tri, prick, scale, kennel, owner, hunger, injured, ni] = r;
       const k = this.bld.byId(idMap.get(kennel) ?? -1);
       const d: Dog = {
-        id: this.nextId++, name: NAMES[ni] ?? NAMES[this.nextId % NAMES.length], x, z, y: 0, heading: 0, speed: 0, state: 'sit', timer: this.rng.range(2, 8), tx: x, tz: z,
+        id: this.nextId++, name: NAMES[ni] ?? NAMES[this.nextId % NAMES.length], x, z, y: Math.max(-0.1, this.world.heightAt(x, z)), heading: 0, speed: 0, state: 'sit', timer: this.rng.range(2, 8), tx: x, tz: z,
         coat, color: new THREE.Color(COATS[coat] ?? COATS[0]), tri: !!tri, ears: prick ? 'prick' : 'floppy', scale, puppy: !!puppy, age, kennel: k ? k.id : -1,
         owner, hunger, injured, follow: -1, buddy: -1, sniffX: 0, sniffZ: 0, jaguar: -1, bark: 0, barkCool: 0, raised: false, calm: 0,
-        gait: 0, prevHeading: 0, turn: 0, sit: 1, lie: 0, crouch: 0, lunge: 0, headYaw: 0, phase: this.rng.range(0, 10), route: null, routeIdx: 0,
+        gait: 0, prevHeading: 0, turn: 0, sit: 1, lie: 0, crouch: 0, lunge: 0, headYaw: 0, phase: this.rng.range(0, 10), pant: 0, route: null, routeIdx: 0,
       };
       this.list.push(d);
     }
@@ -841,6 +848,10 @@ export class Dogs {
   // ---------------- Drawing ----------------
 
   private pose = blankPose();
+  private keys: Record<'prick' | 'floppy', QuadKeys> = {
+    prick: DOG_KEYS('prick'),
+    floppy: DOG_KEYS('floppy'),
+  };
 
   private draw(dt: number): void {
     const m = this.meshes;
@@ -848,47 +859,198 @@ export class Dogs {
     const p = this.pose;
     for (const d of this.list) {
       if (!View.sees(d.x, d.y + 0.15, d.z, 0.4)) continue;
-      const fast = d.speed > 1.6;
-      d.gait = stepGait(d.gait, d.speed, dt, DOG_DIMS, fast);
+      const dead = d.state === 'dead';
+      const spd = dead ? 0 : d.speed;
+      const s = d.scale * (d.puppy ? 0.5 + 0.3 * Math.min(1, d.age / DOGS.puppyGrow) : 1);
+      d.gait = stepGait(d.gait, spd, dt, DOG_DIMS, s);
       let dh = d.heading - d.prevHeading;
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
       d.prevHeading = d.heading;
-      if (dt > 0) d.turn += (THREE.MathUtils.clamp(dh / dt, -5, 5) - d.turn) * Math.min(1, dt * 6);
+      if (dt > 0) {
+        d.turn += (THREE.MathUtils.clamp(dh / dt, -5, 5) - d.turn) * Math.min(1, dt * 6);
+        d.pant = spd > 1.6 ? Math.min(1, d.pant + dt * 0.4) : Math.max(0, d.pant - dt * DOG_PANT_DECAY);
+      }
       const t = d.phase;
-      const s = d.scale * (d.puppy ? 0.5 + 0.3 * Math.min(1, d.age / DOGS.puppyGrow) : 1);
+      const G = d.gait * Math.PI * 2;
+      const run = smooth(1.4, 2.4, spd);
+      const alertish = d.state === 'alert' || d.state === 'chase' || d.state === 'intercept' || d.state === 'fight';
+      const scared = !dead && (d.state === 'yelp' || d.state === 'hide' || d.injured > 0);
+      const happy = d.state === 'social' || d.state === 'follow' || d.state === 'zoom';
+      const sleep = d.state === 'sleep';
       p.x = d.x;
       p.y = d.y;
       p.z = d.z;
       p.heading = d.heading;
       p.scale = s;
       p.gait = d.gait;
-      p.gallop = fast;
-      p.amp = d.speed > 0.05 ? (fast ? 0.7 : 0.36) * Math.min(1, d.speed + 0.3) : 0;
+      p.speed = spd;
       p.bend = THREE.MathUtils.clamp(d.turn * 0.1, -0.35, 0.35);
       p.sit = d.sit;
-      p.lie = d.lie;
-      p.crouch = d.crouch;
+      p.lie = dead ? 1 : d.lie;
+      p.curl = sleep ? d.lie : 0;
+      p.flat = dead ? 1 : 0;
+      p.crouch = d.crouch + (scared && spd < 0.3 ? 0.25 : 0);
       p.lunge = d.lunge;
-      p.limp = d.injured > 0 && d.state !== 'dead' ? 1 : 0;
-      const alertish = d.state === 'alert' || d.state === 'chase' || d.state === 'intercept' || d.state === 'fight';
-      // Bark: a quick upward snap of the head. Sleeping: head down on the paws. Sniffing: nose to the ground.
-      p.headPitch = (d.state === 'sleep' ? 0.5 : d.state === 'lie' ? 0.15 : 0) + (d.state === 'sniff' && d.speed < 0.1 ? 0.75 + Math.sin(t * 7) * 0.12 : 0) - (d.bark > 0 ? Math.sin((d.bark / 0.22) * Math.PI) * 0.45 : 0) + (alertish ? -0.1 : 0);
-      p.headYaw = d.headYaw;
-      // Tail: wagging when happy (hard when greeting), up and stiff when alert, tucked when hurt or scared.
-      const scared = d.state === 'yelp' || d.state === 'hide' || d.injured > 0;
-      const wagRate = d.state === 'social' || d.state === 'follow' || d.state === 'zoom' ? 14 : 6;
-      p.tailPitch = scared ? -0.9 : alertish ? 1.0 : d.lie > 0.5 ? -0.4 : 0.55;
-      p.tailYaw = scared ? 0 : alertish ? Math.sin(t * 3) * 0.1 : Math.sin(t * wagRate + d.id) * (d.state === 'sleep' ? 0.05 : d.state === 'social' ? 0.7 : 0.35);
-      p.tailCurl = 0;
-      p.bob = d.speed > 0.05 ? Math.abs(Math.sin(d.gait * Math.PI * 4)) * (fast ? 0.02 : 0.006) * s : (d.state === 'sleep' ? Math.sin(t * 1.4) * 0.003 : 0);
-      const body = d.tri ? 'tri' : 'plain';
-      if (d.state === 'dead') {
-        p.amp = 0;
-        p.tailYaw = 0;
+      p.limp = d.injured > 0 && !dead ? 1 : 0;
+      p.spine = 0;
+      p.bob = 0;
+      p.ovLeg = -1;
+      p.ovW = 0;
+
+      // ---- Head, neck and jaw ----
+      let neck = (scared ? 0.3 : 0) + (alertish ? -0.15 : 0) + (sleep ? 0.35 : 0) + (d.state === 'lie' ? 0.1 : 0);
+      let hp = (sleep ? 0.35 : d.state === 'lie' ? 0.08 : 0) + (alertish ? -0.12 : 0) + (scared ? 0.2 : 0) + run * 0.1;
+      let hy = d.headYaw, hr = 0, jaw = 0;
+      let earL = 0, earR = 0, earYaw = 0;
+      if (d.state === 'sniff' && spd < 0.1) {
+        // Nose down, snuffling along the ground.
+        neck += 0.85;
+        hp += 0.3 + Math.sin(t * 7) * 0.08;
+        hy += Math.sin(t * 1.3) * 0.25;
       }
-      drawQuad(m, { F: `dog_F_${body}`, R: `dog_R_${body}`, head: `dog_head_${d.ears}_${body}`, tail0: 'dog_tail', legU: 'dog_legU', legL: 'dog_legL', paw: 'dog_paw' }, DOG_DIMS, p, d.color, d.puppy ? 1.25 : 1);
+      if (d.bark > 0) {
+        const b = Math.sin((d.bark / 0.22) * Math.PI);
+        hp -= b * 0.35;
+        neck -= b * 0.1;
+        jaw += b * 0.5;
+      }
+      if (d.state === 'yelp') jaw += 0.3 + Math.sin(t * 20) * 0.08;
+      // Panting after a run: mouth open, quick shallow breaths.
+      const pant = sleep || dead || spd > 1.2 ? 0 : d.pant;
+      jaw += pant * (0.22 + Math.sin(t * 16) * 0.06);
+      p.breath = dead ? 0 : sleep ? Math.sin(t * 1.5) * 0.028 : pant > 0.05 ? Math.sin(t * 16) * 0.02 * pant : Math.sin(t * 2.4) * 0.012;
+
+      // ---- Idle fidgets while standing, sitting or lying about ----
+      const still = spd < 0.05 && !alertish && !scared && !dead && d.bark <= 0;
+      if (still) {
+        const wt = t + d.id * 2.3, wk = Math.floor(wt / DOG_IDLE_WINDOW), u = wt - wk * DOG_IDLE_WINDOW;
+        const h = idleHash(wk, d.id), side = idleHash(wk, d.id + 50) < 0.5 ? 1 : -1;
+        if (d.sit > 0.8 && h < 0.2) {
+          // Scratching behind the ear with a hind leg, head tipped toward it.
+          const e = envelope(u, 0.4, 3.2);
+          p.ovLeg = 2;
+          p.ovW = e * d.sit;
+          p.ov[0] = -1.6 + Math.sin(t * 30) * 0.22;
+          p.ov[1] = 0.9 + Math.sin(t * 30 + 1) * 0.15;
+          p.ov[2] = -0.3;
+          hy += 0.7 * e;
+          hr += 0.45 * e;
+          neck += 0.25 * e;
+          hp += 0.2 * e;
+          earL += Math.sin(t * 30) * 0.2 * e;
+        } else if (h < 0.45 && d.lie < 0.5) {
+          // Head tilt, ears pricked, as if listening.
+          const e = envelope(u, 0.3, 2.6);
+          hr += side * 0.38 * e;
+          hy += side * 0.2 * e;
+          earL += 0.2 * e;
+          earR += 0.2 * e;
+          earYaw -= 0.12 * e;
+        } else if (h < 0.58 && !sleep) {
+          // A big yawn.
+          const e = envelope(u, 0.5, 2.2, 0.5);
+          jaw += 0.75 * e;
+          hp -= 0.35 * e;
+          neck -= 0.1 * e;
+          earL -= 0.4 * e;
+          earR -= 0.4 * e;
+        } else if (h < 0.75 && d.sit < 0.3 && d.lie < 0.3) {
+          // A sniff at the ground.
+          const e = envelope(u, 0.3, 2.8);
+          neck += 0.8 * e;
+          hp += (0.3 + Math.sin(t * 8) * 0.06) * e;
+        } else if (h < 0.88 && d.lie > 0.5 && !sleep) {
+          // Head up from the paws to look around.
+          const e = envelope(u, 0.4, 3.6);
+          neck -= 0.3 * e;
+          hp -= 0.15 * e;
+          hy += Math.sin(t * 0.8) * 0.6 * e;
+        }
+      }
+      p.neck = neck;
+      p.headPitch = hp;
+      p.headYaw = hy;
+      p.headRoll = hr;
+      p.jaw = dead ? 0.15 : Math.min(0.85, jaw);
+
+      // ---- Ears: pricked when alert, pinned back when scared or running, with little flicks ----
+      if (d.ears === 'prick') {
+        const base = alertish ? 0.25 : scared ? -0.9 : sleep ? -0.35 : d.lie > 0.5 ? -0.15 : 0;
+        const wind = -0.45 * run;
+        earL += base + wind + this.flick(t, d.id, 0) * -0.5;
+        earR += base + wind + this.flick(t, d.id, 1) * -0.5;
+        earYaw += scared ? 0.3 : 0;
+      } else {
+        // Drop ears swing back in the wind and bounce with each stride.
+        const base = scared ? 0.5 : alertish ? -0.12 : 0;
+        const bounce = smooth(0.1, 0.6, spd) * Math.sin(G * 2 - 1) * (0.18 + 0.2 * run);
+        earL += base + 0.7 * run + bounce + this.flick(t, d.id, 0) * 0.25 + p.bend * 0.8;
+        earR += base + 0.7 * run + bounce * 0.9 + this.flick(t, d.id, 1) * 0.25 - p.bend * 0.8;
+      }
+      p.earL = earL;
+      p.earR = earR;
+      p.earYaw = earYaw;
+
+      // ---- Tail: carriage and wag follow the dog's mood ----
+      // Carriage (base pitch, tip pitch), wag amplitude and rate (rad/s) per mood.
+      let tp0 = -0.35, tp1 = 0.38, amp = 0.22, rate = 9;
+      if (scared) {
+        tp0 = -1.25;
+        tp1 = -0.35;
+        amp = 0.03;
+        rate = 20;
+      } else if (alertish) {
+        tp0 = 1.0;
+        tp1 = 0.25;
+        amp = 0.08;
+        rate = 22;
+      } else if (happy) {
+        tp0 = 0.55;
+        amp = d.state === 'social' ? 0.75 : 0.55;
+        rate = d.state === 'social' ? 30 : 26;
+      }
+      // Sitting: the tail lies on the ground behind, sweeping; lying: flat out, a thump now and then.
+      tp0 = THREE.MathUtils.lerp(tp0, -0.2, d.sit * (scared ? 0 : 1));
+      if (d.lie > 0.01) {
+        const thump = Math.max(0, Math.sin(t * 0.9 + d.id)) ** 12;
+        tp0 = THREE.MathUtils.lerp(tp0, -0.4 + thump * 0.3, d.lie);
+        tp1 = THREE.MathUtils.lerp(tp1, 0.1, d.lie);
+        amp = THREE.MathUtils.lerp(amp, sleep ? 0.02 : 0.12, d.lie);
+        rate = THREE.MathUtils.lerp(rate, 5, d.lie);
+      }
+      // Running: out behind, streaming with the stride.
+      tp0 = THREE.MathUtils.lerp(tp0, 0.25, run * (scared ? 0.3 : 1));
+      tp1 += run * 0.2 * Math.sin(G - 1);
+      const w = t * rate + d.id;
+      p.tailP[0] = dead ? -0.5 : tp0;
+      p.tailP[1] = dead ? 0 : tp1;
+      p.tailY[0] = dead ? 0.2 : amp * Math.sin(w) + smooth(0.1, 1, spd) * (1 - run) * 0.12 * Math.sin(G) + (sleep ? 0.9 * d.lie : 0);
+      p.tailY[1] = dead ? 0 : amp * 0.85 * Math.sin(w - 1.0) + (sleep ? 0.6 * d.lie : 0);
+      // A hard greeting wag wiggles the whole back end.
+      p.wiggle = d.state === 'social' && spd < 0.2 ? 0.08 * Math.sin(w + Math.PI) * (1 - d.sit) : 0;
+      const mark = d.tri ? DOG_MARKS[d.coat] ?? DOG_MARKS[0] : d.color;
+      drawQuad(m, this.keys[d.ears], DOG_DIMS, p, d.color, d.puppy ? 1.25 : 1, mark);
     }
     m.end();
   }
+
+  /** A quick ear flick now and then (0..1 pulse), different for each ear. */
+  private flick(t: number, id: number, ear: number): number {
+    const x = t * 0.37 + id * 1.7 + ear * 0.9, k = Math.floor(x);
+    return idleHash(k, id * 2 + ear) < 0.3 ? envelope((x - k) * 2.7, 0.2, 0.62, 0.18) : 0;
+  }
+}
+
+/** Marking colours for tricolour dogs by coat: white on tan, cream on browns, tan points on black. */
+const DOG_MARKS = [new THREE.Color(0xf2eadc), new THREE.Color(0xeee0c4), new THREE.Color(0xc0864c), new THREE.Color(0xb87a44), new THREE.Color(0xf2eadc)];
+/** Seconds between idle fidget choices, and how fast panting fades after a run. */
+const DOG_IDLE_WINDOW = 5;
+const DOG_PANT_DECAY = 0.06;
+
+function DOG_KEYS(ears: 'prick' | 'floppy'): QuadKeys {
+  return {
+    F: 'dog_F', R: 'dog_R', neck: 'dog_neck', head: 'dog_head', jaw: 'dog_jaw', ear: `dog_ear_${ears}`, earPos: DOG_EARS[ears].pos, earRest: DOG_EARS[ears].rest,
+    tail: ['dog_tail0', 'dog_tail1'], legUF: 'dog_legUF', legLF: 'dog_legLF', pawF: 'dog_pawF', legUH: 'dog_legUH', legLH: 'dog_legLH', pawH: 'dog_pawH',
+  };
 }
