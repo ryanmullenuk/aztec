@@ -385,6 +385,13 @@ export class AudioEngine {
         break;
       }
       case 'thunder': burst('lowpass', 300, 0.7, 3.2, 0.9, 60); tone('sine', 55, 30, 2.5, 0.5); break;
+      // A near strike: a tearing crack, then the long rolling rumble.
+      case 'thunderclap':
+        burst('highpass', 1600, 0.7, 0.22, 0.45);
+        burst('bandpass', 700, 0.9, 0.7, 0.55, 180, 0.03);
+        burst('lowpass', 420, 0.7, 3.6, 1.0, 55, 0.12);
+        tone('sine', 62, 28, 2.8, 0.55);
+        break;
       // A dog's short "ruff": a rasping bandpassed burst over a quick falling tone.
       case 'bark': tone('square', 480 + Math.random() * 120, 260, 0.09, 0.08); burst('bandpass', 950, 2.5, 0.09, 0.3); break;
       // Jaguar: a low rasping rumble.
