@@ -14,7 +14,7 @@ export interface ToolDef {
   cost?: number;
 }
 
-/** The 9 toolbar slots (number keys 1–9). */
+/** Every tool (the sculpt tools sit together under the Terrain slot). */
 export const TOOLS: ToolDef[] = [
   { id: 'select', name: 'Select', icon: 'select', hint: 'Select islanders and buildings. With an islander selected, click a building or resource to assign them.' },
   { id: 'build', name: 'Build', icon: 'build', hint: 'Open the building menu, then place on flat land.' },
@@ -28,3 +28,16 @@ export const TOOLS: ToolDef[] = [
 ];
 
 export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'chinampa', 'woodstore', 'grainstore', 'smokehouse', 'firepit', 'well', 'bonfire', 'torch', 'temple', 'greathall', 'butcher', 'kennel', 'jetty', 'tradedock', 'warroom'];
+
+/** The land-shaping tools, offered together in the Terrain slot's popup. */
+export const TERRAIN_TOOLS: ToolId[] = ['raise', 'lower', 'flatten'];
+
+/** A toolbar slot: a tool, or the Terrain slot that opens Raise / Lower / Flatten. */
+export type SlotId = ToolId | 'terrain';
+
+/** The toolbar (number keys 1–7). */
+export const TOOLBAR: { id: SlotId; name: string; icon: string; hint: string; cost?: number }[] = [
+  ...TOOLS.filter((t) => t.id === 'select' || t.id === 'build'),
+  { id: 'terrain', name: 'Terrain', icon: 'terrain', hint: 'Shape the land: raise, lower or flatten it. Hold and drag to sculpt.', cost: POWERS.sculptCostPerCell },
+  ...TOOLS.filter((t) => !['select', 'build', 'raise', 'lower', 'flatten'].includes(t.id)),
+];

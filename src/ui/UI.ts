@@ -10,7 +10,7 @@ import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
 import type { Where } from './where';
-import { BUILD_MENU, PAINT_TOOLS, TOOLS, ToolId } from './tools';
+import { BUILD_MENU, PAINT_TOOLS, TERRAIN_TOOLS, TOOLBAR, TOOLS, ToolId } from './tools';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -72,7 +72,7 @@ export class UI {
     { title: 'Zoom in', text: 'Scroll (or pinch) to zoom in close to your islanders, and out to see the whole island.', done: (g) => Math.abs(g.rig.cur.dist - this.tutStart.dist) > 15 },
     { title: 'Meet your villagers', text: 'Tap an islander near the campfire to see their name, job and needs. More settlers arrive by canoe when you have spare beds and food.', done: (g) => g.selectedIslander >= 0 },
     { title: 'Build a Hut', text: 'Press Build (2), choose a Hut and place it on flat land. Your builders will do the rest.', done: (g) => g.buildings.list.some((b) => b.key === 'hut' || b.key === 'home') },
-    { title: 'Shape the land', text: 'Use Raise (3) or Lower (4): hold and drag to sculpt terraces flat for bigger buildings. Sculpting costs Belief.', done: (g) => g.stats.sculpted > 0 },
+    { title: 'Shape the land', text: 'Open Terrain (3) and pick Raise or Lower: hold and drag to sculpt terraces flat for bigger buildings. Sculpting costs Belief.', done: (g) => g.stats.sculpted > 0 },
   ];
 
   constructor(private game: Game) {
@@ -139,19 +139,26 @@ export class UI {
     this.pauseBtn.title = 'Pause (Space)';
     this.pauseBtn.onclick = () => this.game.togglePause();
     tr.appendChild(this.pauseBtn);
+    // Fast forward: opens the 1× / 2× / 3× choice.
+    this.speedBtn = el('button', 'ib ff', `${ICONS.speed}<span class="ff-x"></span>`);
+    this.speedBtn.title = 'Game speed';
+    this.speedPop = el('div', 'panel popup speed-pop hidden');
     for (const s of [1, 2, 3]) {
       const b = el('button', 'ib sp', `${s}×`);
       b.title = `Speed ${s}×`;
-      b.onclick = () => this.game.setSpeed(s);
+      b.onclick = () => {
+        this.game.setSpeed(s);
+        this.closePopups();
+      };
       this.speedBtns.push(b);
-      tr.appendChild(b);
+      this.speedPop.appendChild(b);
     }
+    this.speedBtn.onclick = () => this.openPopup(this.speedPop, this.speedBtn, 'below');
+    tr.appendChild(this.speedBtn);
+    this.root.appendChild(this.speedPop);
     this.muteBtn = el('button', 'ib', ICONS.sound);
     this.muteBtn.title = 'Mute (M)';
     this.muteBtn.onclick = () => this.game.toggleMute();
-    const help = el('button', 'ib', ICONS.help);
-    help.title = 'Help (H)';
-    help.onclick = () => this.toggle(this.help);
     const gear = el('button', 'ib', ICONS.gear);
     gear.title = 'Settings';
     gear.onclick = () => this.toggle(this.settings);
@@ -161,7 +168,7 @@ export class UI {
     const eye = el('button', 'ib', ICONS.eye);
     eye.title = 'Hide the interface: just the island (V)';
     eye.onclick = () => this.toggleZen(true);
-    tr.append(over, this.muteBtn, help, gear, eye);
+    tr.append(over, this.muteBtn, gear, eye);
     this.root.appendChild(tr);
     // Shown on its own while the interface is hidden: brings everything back.
     this.zenBtn = el('button', 'ib zen-eye', ICONS.eye);
@@ -182,6 +189,53 @@ export class UI {
     this.game.audio?.sfx('click');
   }
 
+  private speedBtn!: HTMLButtonElement;
+  private speedPop!: HTMLDivElement;
+  private terrainSlot!: HTMLButtonElement;
+  private terrainPop!: HTMLDivElement;
+  private terrainItems: HTMLButtonElement[] = [];
+
+  /** Show a small popup menu next to the button that opened it (toggles if already open). */
+  private openPopup(pop: HTMLElement, from: HTMLElement, side: 'above' | 'below'): void {
+    const wasOpen = !pop.classList.contains('hidden');
+    this.closePopups();
+    if (wasOpen) return;
+    this.game.audio?.sfx('click');
+    pop.classList.remove('hidden');
+    const r = from.getBoundingClientRect();
+    pop.style.left = pop.style.right = pop.style.top = pop.style.bottom = '';
+    if (side === 'above') {
+      pop.style.left = `${r.left + r.width / 2}px`;
+      pop.style.bottom = `${innerHeight - r.top + 10}px`;
+      pop.style.transform = 'translateX(-50%)';
+    } else if (getComputedStyle(from.parentElement!).flexDirection === 'column') {
+      // Phones: the top-right buttons run down the edge, so open to their left.
+      pop.style.top = `${r.top}px`;
+      pop.style.right = `${innerWidth - r.left + 8}px`;
+      pop.style.transform = '';
+    } else {
+      pop.style.top = `${r.bottom + 8}px`;
+      pop.style.left = `${r.left + r.width / 2}px`;
+      pop.style.transform = 'translateX(-50%)';
+    }
+  }
+
+  closePopups(): boolean {
+    let closed = false;
+    for (const p of [this.speedPop, this.terrainPop]) {
+      if (p && !p.classList.contains('hidden')) {
+        p.classList.add('hidden');
+        closed = true;
+      }
+    }
+    return closed;
+  }
+
+  /** The Terrain slot's popup: Raise, Lower, Flatten (number key 3 too). */
+  toggleTerrain(): void {
+    this.openPopup(this.terrainPop, this.terrainSlot, 'above');
+  }
+
   private buildBottom(): void {
     const bottom = el('div', 'bottom');
     this.hint = el('div', 'hint hidden');
@@ -198,13 +252,41 @@ export class UI {
     this.beliefText = el('span', 'btext');
     bb.append(track, this.beliefText);
     this.toolbar = el('div', 'toolbar');
-    TOOLS.forEach((t, i) => {
+    TOOLBAR.forEach((t, i) => {
       const b = el('button', 'slot', `<span class="key">${i + 1}</span>${icon(t.icon)}<span class="nm">${t.name}</span>${t.cost ? `<span class="cost">${icon('belief')}${t.cost}</span>` : '<span class="cost"></span>'}`);
-      b.onclick = () => this.game.setTool(t.id);
-      this.addTip(b, `<b>${t.name}</b> <span class="kbd">${i + 1}</span><br>${t.hint}${t.cost ? `<br><span class="c">${icon('belief')} ${t.cost}${t.id === 'raise' || t.id === 'lower' || t.id === 'flatten' ? ' per cell' : ''}</span>` : ''}`);
+      const id = t.id;
+      if (id === 'terrain') {
+        this.terrainSlot = b;
+        b.onclick = () => this.toggleTerrain();
+      } else b.onclick = () => {
+        this.closePopups();
+        this.game.setTool(id);
+      };
+      this.addTip(b, `<b>${t.name}</b> <span class="kbd">${i + 1}</span><br>${t.hint}${t.cost ? `<br><span class="c">${icon('belief')} ${t.cost}${id === 'terrain' ? ' per cell' : ''}</span>` : ''}`);
       this.slots.push(b);
       this.toolbar.appendChild(b);
     });
+    // Terrain: a vertical popup of the three sculpt tools.
+    this.terrainPop = el('div', 'panel popup terrain-pop hidden');
+    for (const id of TERRAIN_TOOLS) {
+      const t = TOOLS.find((x) => x.id === id)!;
+      const b = el('button', 'tp-item', `${icon(t.icon)}<span class="nm">${t.name}</span><span class="cost">${icon('belief')}${t.cost ?? ''}</span>`) as HTMLButtonElement;
+      b.dataset.tool = id;
+      b.onclick = () => {
+        this.closePopups();
+        if (this.game.tool !== id) this.game.setTool(id);
+      };
+      this.addTip(b, `<b>${t.name}</b><br>${t.hint}<br><span class="c">${icon('belief')} ${t.cost} per cell</span>`);
+      this.terrainItems.push(b);
+      this.terrainPop.appendChild(b);
+    }
+    this.root.appendChild(this.terrainPop);
+    // Tapping anywhere else closes an open popup.
+    document.addEventListener('pointerdown', (e) => {
+      const t = e.target as Node;
+      if ([this.speedPop, this.terrainPop, this.speedBtn, this.terrainSlot].some((el2) => el2?.contains(t))) return;
+      this.closePopups();
+    }, true);
     bottom.append(this.hint, bb, this.toolbar);
     this.root.appendChild(bottom);
   }
@@ -360,6 +442,7 @@ export class UI {
         <button class="btn" data-a="new">${ICONS.island} Restart island</button>
         <button class="btn" data-a="save">Save now</button>
         <button class="btn" data-a="tutorial">Restart tutorial</button>
+        <button class="btn" data-a="help">${ICONS.help} How to play</button>
       </div>
       <p class="muted small">Progress autosaves every minute in this browser. Share the link to let friends play the same island.</p>`;
     const close = el('button', 'ib small close', ICONS.close);
@@ -416,6 +499,10 @@ export class UI {
         prompt('Copy this link:', url);
       }
     };
+    card.querySelector<HTMLButtonElement>('[data-a="help"]')!.onclick = () => {
+      this.toggle(this.settings, false);
+      this.toggle(this.help, true);
+    };
     card.querySelector<HTMLButtonElement>('[data-a="tutorial"]')!.onclick = () => {
       this.toggle(this.settings, false);
       this.startTutorial(true);
@@ -439,8 +526,8 @@ export class UI {
           <li><b>Scroll</b>: zoom · <b>Q / E</b>, <b>middle-drag</b> or <b>Alt/Shift + drag</b>: rotate</li>
           <li>Or drag the <b>compass</b> (bottom right), or hold its arrows</li>
           <li><b>Click</b>: select or place · <b>R</b>: rotate a building</li>
-          <li><b>Hold and drag</b> with Raise/Lower: sculpt</li>
-          <li><b>1–9</b>: toolbar · <b>Space</b>: pause · <b>Esc</b>: cancel</li>
+          <li><b>Hold and drag</b> with a Terrain tool: sculpt</li>
+          <li><b>1–7</b>: toolbar · <b>Space</b>: pause · <b>Esc</b>: cancel</li>
         </ul></div>
         <div><h4>Touch</h4><ul>
           <li><b>One finger</b>: pan (or sculpt with a sculpt tool)</li>
@@ -587,7 +674,7 @@ export class UI {
   }
 
   closeModals(): boolean {
-    let closed = false;
+    let closed = this.closePopups();
     for (const m of [this.settings, this.help, this.tradeModal].filter(Boolean) as HTMLElement[]) {
       if (!m.classList.contains('hidden')) {
         m.classList.add('hidden');
@@ -703,11 +790,23 @@ export class UI {
     this.beliefFill.style.width = `${Math.min(100, (e.res.belief / e.beliefCap) * 100)}%`;
     this.beliefText.textContent = `${Math.floor(e.res.belief)} / ${e.beliefCap}`;
     this.slots.forEach((b, i) => {
-      const tool = TOOLS[i];
-      b.classList.toggle('on', g.tool === tool.id || (tool.id === 'build' && PAINT_TOOLS.includes(g.tool)));
+      const tool = TOOLBAR[i];
+      const terrain = tool.id === 'terrain' && TERRAIN_TOOLS.includes(g.tool);
+      b.classList.toggle('on', g.tool === tool.id || terrain || (tool.id === 'build' && PAINT_TOOLS.includes(g.tool)));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
       if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
+      // The Terrain slot names the sculpt tool in use.
+      if (tool.id === 'terrain') {
+        const nm = b.querySelector('.nm')!;
+        const want = terrain ? TOOLS.find((x) => x.id === g.tool)!.name : 'Terrain';
+        if (nm.textContent !== want) nm.textContent = want;
+      }
     });
+    for (const b of this.terrainItems) b.classList.toggle('on', g.tool === b.dataset.tool);
+    const ffx = this.speedBtn.querySelector('.ff-x')!;
+    const sp = t.paused ? '' : `${t.speed}×`;
+    if (ffx.textContent !== sp) ffx.textContent = sp;
+    this.speedBtn.classList.toggle('on', !t.paused && t.speed > 1);
     this.pauseBtn.innerHTML = t.paused ? ICONS.play : ICONS.pause;
     this.pauseBtn.classList.toggle('on', t.paused);
     this.speedBtns.forEach((b, i) => b.classList.toggle('on', !t.paused && t.speed === i + 1));

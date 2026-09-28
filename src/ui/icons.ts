@@ -2,7 +2,38 @@
 const svg = (body: string, vb = '0 0 24 24') =>
   `<svg viewBox="${vb}" width="1em" height="1em" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
+/** A cog outline: eight rounded teeth round a ring. */
+function gearPath(): string {
+  const pts: string[] = [];
+  const n = 8;
+  for (let k = 0; k < n * 4; k++) {
+    const a = (k / (n * 4)) * Math.PI * 2 - Math.PI / 2;
+    const r = k % 4 === 1 || k % 4 === 2 ? 9.6 : 7.2;
+    pts.push(`${(12 + Math.cos(a) * r).toFixed(2)} ${(12 + Math.sin(a) * r).toFixed(2)}`);
+  }
+  return `M${pts.join(" L")} Z`;
+}
+
 export const ICONS: Record<string, string> = {
+  // ---- Toolbar and top-right controls: coloured outline icons ----
+  pause: svg('<rect x="6" y="5" width="4" height="14" rx="1.6" stroke="currentColor" stroke-width="1.9"/><rect x="14" y="5" width="4" height="14" rx="1.6" stroke="currentColor" stroke-width="1.9"/>'),
+  play: svg('<path d="M8 5.5v13l10.5-6.5z" stroke="currentColor" stroke-width="1.9"/>'),
+  speed: svg('<path d="M3.5 6.5v11l8-5.5zM12.5 6.5v11l8-5.5z" stroke="#ffd257" stroke-width="1.8"/>'),
+  gear: svg(`<path d="${gearPath()}" stroke="#e7ecf1" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="#ffd257" stroke-width="1.7"/>`),
+  eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" stroke="#e7ecf1" stroke-width="1.8"/><circle cx="12" cy="12" r="3.2" stroke="#5fd4f2" stroke-width="1.8"/>'),
+  sound: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" stroke="#e7ecf1" stroke-width="1.8"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke="#5fd4f2" stroke-width="1.8"/>'),
+  mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" stroke="#e7ecf1" stroke-width="1.8"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="#ff7a6b" stroke-width="1.8"/>'),
+  island: svg('<path d="M4 17.5c1.5-2.5 4.5-4 8-4s6.5 1.5 8 4" stroke="#8fd14f" stroke-width="1.7"/><path d="M2 20.5c1.7 0 1.7-1 3.3-1s1.7 1 3.4 1 1.7-1 3.3-1 1.7 1 3.3 1 1.7-1 3.4-1 1.6 1 3.3 1" stroke="#5fd4f2" stroke-width="1.6"/><path d="M12 13.5c.3-3 1-5.5 2.5-8" stroke="#e8b877" stroke-width="1.7"/><path d="M14.5 5.5c-1.5-1.8-4-2-6-.8M14.5 5.5c.5-2 2.6-3 4.6-2.4M14.5 5.5c2 .2 3.5 1.8 3.6 3.8M14.5 5.5c-2.2.4-3.6 2-3.7 4" stroke="#8fd14f" stroke-width="1.6"/>'),
+  select: svg('<path d="M9 11.5V6a1.5 1.5 0 0 1 3 0v4.5M12 9.8a1.5 1.5 0 0 1 3 0v1.2M15 10.8a1.5 1.5 0 0 1 3 0v3c0 3.8-2.5 6.7-6.3 6.7h-.5c-2 0-3.4-.9-4.5-2.4l-2.3-3.3a1.5 1.5 0 0 1 2.3-1.9L9 14.5" stroke="#ffd257" stroke-width="1.7"/><path d="M10.5 1.6v1.5M6.2 3.3l1 1M14.8 3.3l-1 1" stroke="#ffd257" stroke-width="1.6"/>'),
+  build: svg('<path d="M12.6 11.4 4.4 19.6a1.5 1.5 0 0 1-2.1-2.1l8.2-8.2" stroke="#e8b877" stroke-width="1.8"/><path d="M10 7.4 14.4 3l7.4 7.4-4.4 4.4z" stroke="#e7ecf1" stroke-width="1.8"/>'),
+  terrain: svg('<path d="M2.5 18.5c2.5-4 4.5-6 7-6 1.4 0 2.6.8 3.6 2 1-1.2 2.2-2 3.4-2 2 0 3.6 1.8 5 6" stroke="#8fd14f" stroke-width="1.7"/><path d="M3 21.3h1.4M6.9 21.3h1.4M10.8 21.3h1.4M14.7 21.3h1.4M18.6 21.3h1.4" stroke="#e8b877" stroke-width="1.6"/><path d="M8 9V2.8M5.9 4.9 8 2.8l2.1 2.1M16 3v6.2M13.9 7.1 16 9.2l2.1-2.1" stroke="#f4f1ea" stroke-width="1.7"/>'),
+  raise: svg('<path d="M3 19c2.5-4.5 5.5-7 9-7s6.5 2.5 9 7" stroke="#8fd14f" stroke-width="1.7"/><path d="M3 21.5h18" stroke="#e8b877" stroke-width="1.6" stroke-dasharray="1.6 2.4"/><path d="M12 9.5V2.8M9.6 5.2 12 2.8l2.4 2.4" stroke="#f4f1ea" stroke-width="1.8"/>'),
+  lower: svg('<path d="M2.5 13.5c2.5 0 3.5 5 9.5 5s7-5 9.5-5" stroke="#8fd14f" stroke-width="1.7"/><path d="M3 21.5h18" stroke="#e8b877" stroke-width="1.6" stroke-dasharray="1.6 2.4"/><path d="M12 2.8v7.4M9.6 7.8 12 10.2l2.4-2.4" stroke="#f4f1ea" stroke-width="1.8"/>'),
+  flatten: svg('<path d="M3 16h18" stroke="#8fd14f" stroke-width="1.8"/><path d="M3 20h18" stroke="#e8b877" stroke-width="1.6" stroke-dasharray="1.6 2.4"/><path d="M7 3.5v7.5M4.8 8.8 7 11l2.2-2.2M17 3.5v7.5M14.8 8.8 17 11l2.2-2.2" stroke="#f4f1ea" stroke-width="1.7"/>'),
+  harvest: svg('<path d="M12 19v-7" stroke="#8fd14f" stroke-width="1.8"/><path d="M12 12c0-3.6 2.5-6.6 7-7 .3 4.5-2.6 7.2-7 7z" stroke="#8fd14f" stroke-width="1.7"/><path d="M12 13.6c-.4-3-2.6-5.1-6.2-5.3-.2 3.5 2.2 5.5 6.2 5.3z" stroke="#8fd14f" stroke-width="1.7"/><path d="M4 21.2c.8-1.7 2.2-2.6 4-2.6h8c1.8 0 3.2.9 4 2.6z" stroke="#e8b877" stroke-width="1.7"/>'),
+  bless: svg('<path d="M12 3.2c.6 4.4 2.4 6.2 6.8 6.8-4.4.6-6.2 2.4-6.8 6.8-.6-4.4-2.4-6.2-6.8-6.8 4.4-.6 6.2-2.4 6.8-6.8z" stroke="#ffd257" stroke-width="1.7"/><path d="M19.3 2.6v2.8M17.9 4h2.8M4.6 16.4v2.8M3.2 17.8H6M19 17.4v2.4M17.8 18.6h2.4" stroke="#ffd257" stroke-width="1.5"/><circle cx="5" cy="5.5" r=".6" fill="#ffd257"/>'),
+  rain: svg('<path d="M7 15a4 4 0 0 1-.5-8 5.6 5.6 0 0 1 10.8 1.3A3.4 3.4 0 0 1 17 15z" stroke="#e7ecf1" stroke-width="1.7"/><path d="M8 17.8c0 1-.6 1.9-1.2 2.7-.6-.8-1.2-1.7-1.2-2.7a1.2 1.2 0 0 1 2.4 0zM13.2 17.8c0 1-.6 1.9-1.2 2.7-.6-.8-1.2-1.7-1.2-2.7a1.2 1.2 0 0 1 2.4 0zM18.4 17.8c0 1-.6 1.9-1.2 2.7-.6-.8-1.2-1.7-1.2-2.7a1.2 1.2 0 0 1 2.4 0z" stroke="#4fb2ff" stroke-width="1.5"/>'),
+  calm: svg('<path d="M3 9h10.5a2.6 2.6 0 1 0-2.6-2.6M2 12.6h16.5a3 3 0 1 1-3 3M5 16.2h5.5" stroke="#5fd4f2" stroke-width="1.8"/>'),
   wood: svg('<rect x="3" y="9" width="15" height="7" rx="3.5" fill="#a8744a"/><ellipse cx="18" cy="12.5" rx="3" ry="3.5" fill="#e3c08e"/><ellipse cx="18" cy="12.5" rx="1.3" ry="1.6" fill="#b88a58"/><path d="M6 9.5v6M10 9.5v6" stroke="#7a5234" stroke-width="1"/>'),
   stone: svg('<path d="M4 17c-1-4 2-8 6-9 3-1 7 0 9 3s1 7-3 8H7c-2 0-3-1-3-2z" fill="#a89a90"/><path d="M8 11c2-1 5-1 7 1" stroke="#d6cac0" stroke-width="1.5"/>'),
   grain: svg('<path d="M12 21V8" stroke="#8a6a2a" stroke-width="1.6"/><ellipse cx="12" cy="7" rx="3" ry="5" fill="#f2c94c"/><path d="M12 14c-3-1-5-3-5-6M12 14c3-1 5-3 5-6" stroke="#6fae3a" stroke-width="1.6"/>'),
@@ -14,23 +45,8 @@ export const ICONS: Record<string, string> = {
   sun: svg('<circle cx="12" cy="12" r="4.5" fill="#ffc86a"/><g stroke="#ffc86a" stroke-width="2"><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2 7 7M17 17l1.8 1.8M5.2 18.8 7 17M17 7l1.8-1.8"/></g>'),
   sunset: svg('<path d="M4 17h16" stroke="#ffb35a" stroke-width="2"/><path d="M7 17a5 5 0 0 1 10 0z" fill="#ff9a4a"/><g stroke="#ffb35a" stroke-width="2"><path d="M12 6v2.5M5.5 9.5l1.6 1.6M18.5 9.5l-1.6 1.6"/></g><path d="M6 20.5h12" stroke="#ffb35a" stroke-width="1.5" opacity=".6"/>'),
   moon: svg('<path d="M15.5 3.5a8.5 8.5 0 1 0 5 13.5A7 7 0 0 1 15.5 3.5z" fill="#cfe0ff"/><circle cx="10" cy="11" r="1.2" fill="#a8bce6"/><circle cx="13" cy="16" r="0.9" fill="#a8bce6"/>'),
-  pause: svg('<rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor"/>'),
-  play: svg('<path d="M8 5l11 7-11 7z" fill="currentColor"/>'),
-  gear: svg('<circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="2"/>'),
-  eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/>'),
   help: svg('<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7v.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="17.2" r="1.1" fill="currentColor"/>'),
-  sound: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke="currentColor" stroke-width="2"/>'),
-  mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="currentColor" stroke-width="2"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4"/>'),
-  select: svg('<path d="M6 3l12 8-5.5 1.3 3.2 6.2-2.4 1.2-3.2-6.2L6 17.5z" fill="#fbf3e4"/>'),
-  build: svg('<path d="M3 20h18l-3-4H6zM6.5 15.5h11L15 12H9zM9.5 11.5h5L13 9h-2z" fill="#e8b84a"/><rect x="10.5" y="5" width="3" height="3.5" fill="#b8452f"/>'),
-  raise: svg('<path d="M3 19h18M5 19v-4h5v-4h4v4h5v4" fill="#9cc23a" stroke="#6e9a2e" stroke-width="1.2"/><path d="M12 9V3M9 6l3-3 3 3" stroke="#fbf3e4" stroke-width="2"/>'),
-  lower: svg('<path d="M3 13h5v4h8v-4h5v6H3z" fill="#9cc23a" stroke="#6e9a2e" stroke-width="1.2"/><path d="M12 3v7M9 7l3 3 3-3" stroke="#fbf3e4" stroke-width="2"/>'),
-  flatten: svg('<path d="M3 17h18v3H3z" fill="#9cc23a"/><path d="M5 13h14" stroke="#fbf3e4" stroke-width="2"/><path d="M8 9l4-4 4 4" stroke="#fbf3e4" stroke-width="2" opacity=".5"/>'),
-  harvest: svg('<path d="M6 20L16 8" stroke="#a8744a" stroke-width="2.4"/><path d="M13.5 4.5c3-1 6 1 6.5 4l-4.5 1.5z" fill="#c9ccd4"/><path d="M4 7c1-2 3-3 5-3" stroke="#6fae3a" stroke-width="1.6"/>'),
-  bless: svg('<path d="M12 2l1.8 5.5L19.5 9l-5.7 1.6L12 16l-1.8-5.4L4.5 9l5.7-1.5z" fill="#ffe08a"/><path d="M18 15l.8 2.2 2.2.8-2.2.8L18 21l-.8-2.2-2.2-.8 2.2-.8zM6 15l.6 1.6 1.6.6-1.6.6L6 19.4l-.6-1.6-1.6-.6 1.6-.6z" fill="#fff4c8"/>'),
-  rain: svg('<path d="M6.5 14a4.5 4.5 0 0 1 .8-8.9A5.5 5.5 0 0 1 17.8 7 3.6 3.6 0 0 1 17.5 14z" fill="#cfe4f5"/><path d="M8 17l-1 3M12 17l-1 3M16 17l-1 3" stroke="#5fb3d9" stroke-width="2"/>'),
-  calm: svg('<path d="M4 9h11a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M5 17h6" stroke="#bfe6f5" stroke-width="2"/>'),
   rotL: svg('<path d="M5 12a7 7 0 1 0 2.1-5" stroke="currentColor" stroke-width="2.2"/><path d="M3.5 3.5v5h5" stroke="currentColor" stroke-width="2.2"/>'),
   rotR: svg('<path d="M19 12a7 7 0 1 1-2.1-5" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 3.5v5h-5" stroke="currentColor" stroke-width="2.2"/>'),
   compass: svg('<circle cx="12" cy="12" r="9.5" stroke="rgba(255,255,255,0.35)" stroke-width="1.5"/><path d="M12 3.5l3 8.5h-6z" fill="#e4572e"/><path d="M12 20.5l-3-8.5h6z" fill="#fbf3e4"/>'),
@@ -41,7 +57,6 @@ export const ICONS: Record<string, string> = {
   warrior: svg('<path d="M12 3c4 0 6 3 6 6 0 2-1 3-2 4v3H8v-3c-1-1-2-2-2-4 0-3 2-6 6-6z" fill="#e0a82e"/><circle cx="9.5" cy="9.5" r="1" fill="#3a2616"/><circle cx="14.5" cy="9.5" r="1" fill="#3a2616"/><path d="M8 18h8v3H8z" fill="#b8452f"/>'),
   eagle: svg('<path d="M12 4c3.5 0 6 2.5 6 6 0 2-1 3.5-2 4.5V17H8v-2.5c-1-1-2-2.5-2-4.5 0-3.5 2.5-6 6-6z" fill="#f4eee0"/><path d="M11 11l5 1-5 2z" fill="#f2c230"/><circle cx="10" cy="9" r="1" fill="#3a2616"/><path d="M8 18h8v3H8z" fill="#7a4a2a"/>'),
   seed: svg('<path d="M12 21c-5-3-7-7-7-11a7 7 0 0 1 14 0c0 4-2 8-7 11z" fill="#6fae3a"/><path d="M12 20V9" stroke="#2f6a2a" stroke-width="1.5"/>'),
-  island: svg('<path d="M2 17c3-1 5 1 10 1s7-2 10-1v3H2z" fill="#3fd6e0"/><path d="M5 17c1-3 4-5 7-5s6 2 7 5z" fill="#9cc23a"/><path d="M13 12V5M13 5c-2 0-4 1-5 3M13 5c2 0 4 1 5 3" stroke="#2f7a32" stroke-width="1.6"/>'),
   link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" stroke-width="2"/>'),
   // Building icons.
   b_maize: svg('<path d="M3 20h18" stroke="#7a4f30" stroke-width="2"/><g stroke="#5e9a30" stroke-width="1.6"><path d="M6 19V6M12 19V4M18 19V6"/></g><g fill="#f2c94c"><ellipse cx="7.6" cy="11" rx="1.5" ry="3"/><ellipse cx="13.6" cy="9" rx="1.5" ry="3"/><ellipse cx="19.4" cy="11.5" rx="1.3" ry="2.6"/></g><g stroke="#6fae3a" stroke-width="1.4" fill="none"><path d="M6 12c-2-1-3-3-3-5M12 11c-2-1-3-3-3-5M18 12c-2-1-3-3-3-5"/></g>'),
