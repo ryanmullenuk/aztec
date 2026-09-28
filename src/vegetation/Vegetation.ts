@@ -119,6 +119,20 @@ export class Vegetation {
   /** Build the meshes once every plant exists (after growIslets). */
   build(): void {
     this.buildMeshes();
+    this.syncRockBlock();
+  }
+
+  /**
+   * Boulders are solid: mark the cells under every standing rock (redone when one is mined out,
+   * cleared for a building, drowned by sculpting, or a save is loaded).
+   */
+  syncRockBlock(): void {
+    const w = this.world;
+    w.blockRock.fill(0);
+    for (const p of this.plants) {
+      if (p.kind !== 'rock' || p.state === PlantState.Gone) continue;
+      w.blockCircle(p.x, p.z, (0.45 + p.variant * 0.2) * p.scale, w.blockRock);
+    }
   }
 
   private makeDefs(): void {
@@ -735,6 +749,7 @@ export class Vegetation {
     if (p.amount <= 0) {
       p.state = PlantState.Gone;
       p.marked = false;
+      if (p.kind === 'rock') this.syncRockBlock();
     }
     this.touch(p);
     return n;
@@ -760,6 +775,7 @@ export class Vegetation {
         }
       }
     }
+    this.syncRockBlock();
     return wood;
   }
 
@@ -780,6 +796,7 @@ export class Vegetation {
         }
       }
     }
+    this.syncRockBlock();
   }
 
   /** Tree tops that parrots can perch on. */
