@@ -25,7 +25,7 @@ addEventListener('resize', () => appViewport());
 async function boot(): Promise<void> {
   // Relative URL so the splash works when hosted under a sub-path (GitHub Pages).
   const bg = document.querySelector<HTMLElement>('.splash-bg');
-  if (bg) bg.style.backgroundImage = "url('./splash.webp?v=2')";
+  if (bg) bg.style.backgroundImage = "url('./splash.webp?v=3')";
   text('Shaping the island…');
   // Let the text paint before the (synchronous) world generation.
   await new Promise((r) => setTimeout(r, 30));
