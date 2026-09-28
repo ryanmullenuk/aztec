@@ -20,6 +20,8 @@ export interface SaveData {
   buildings: {
     id: number; key: BuildingKey; cx: number; cz: number; rot: number; complete: boolean; progress: number; tier: number;
     upgrading: boolean; growth: number; stock: number; boats: number; bless: number;
+    /** Kennel: litter timer, breeding rest, dog role (1 = guard). */
+    breed?: number; cool?: number; guard?: number;
   }[];
   islanders: Partial<Islander>[];
   schools: number[];
@@ -27,6 +29,9 @@ export interface SaveData {
   name?: string;
   /** Land animals: [alive, x, z, pen building id, respawn]. */
   animals?: number[][];
+  /** Village dogs, and whether the first kennel's strays have arrived. */
+  dogs?: number[][];
+  dogsFounded?: boolean;
 }
 
 // ---------- base64 helpers ----------
@@ -101,6 +106,7 @@ export function serialize(g: Game): SaveData {
     buildings: g.buildings.list.map((b) => ({
       id: b.id, key: b.key, cx: b.cx, cz: b.cz, rot: b.rot, complete: b.complete, progress: b.progress, tier: b.tier,
       upgrading: b.upgrading, growth: b.growth, stock: b.stock, boats: b.key === 'tradedock' ? b.tradeBoats : b.boats.length, bless: b.blessTimer,
+      ...(b.key === 'kennel' ? { breed: b.breedT, cool: b.breedCool, guard: b.dogRole === 'guard' ? 1 : 0 } : {}),
     })),
     islanders: g.colony.list.map((i) => ({
       id: i.id, name: i.name, gender: i.gender, child: i.child, age: i.age, x: i.x, z: i.z, hunger: i.hunger, rest: i.rest, happy: i.happy,
@@ -109,6 +115,8 @@ export function serialize(g: Game): SaveData {
     })),
     schools: g.wildlife?.schools.map((s) => Math.round(s.stock * 10) / 10) ?? [],
     animals: g.wildlife?.animals.serialize() ?? [],
+    dogs: g.dogs?.serialize() ?? [],
+    dogsFounded: g.dogs?.founded ?? false,
     name: g.islandName,
   };
 }
@@ -166,6 +174,11 @@ export function applyRest(g: Game, d: SaveData): void {
     if (b.key === 'jetty' && b.boats > 0) g.boats?.restore(nb, b.boats);
     if (b.key === 'tradedock') for (let k = 0; k < (b.boats ?? 0); k++) g.trade?.launch(nb);
     if (b.key === 'farm' || b.key === 'butcher') g.wildlife?.registerPen(nb);
+    if (b.key === 'kennel') {
+      nb.breedT = b.breed ?? 0;
+      nb.breedCool = b.cool ?? 0;
+      nb.dogRole = b.guard ? 'guard' : 'roam';
+    }
   }
   for (const data of d.islanders) {
     const i = g.colony.restore(data as Islander);
@@ -183,6 +196,7 @@ export function applyRest(g: Game, d: SaveData): void {
   Object.assign(g.stats, d.stats);
   g.rig.jumpTo(d.camera.x, d.camera.z, d.camera.dist, d.camera.yaw);
   if (g.wildlife && d.animals) g.wildlife.animals.restore(d.animals, idMap);
+  if (g.dogs) g.dogs.restore(d.dogs ?? [], idMap, d.dogsFounded ?? (d.dogs?.length ?? 0) > 0);
   if (g.wildlife) d.schools.forEach((s, i) => g.wildlife!.schools[i] && (g.wildlife!.schools[i].stock = s));
   if (g.powers && d.weather.state === 'storm') g.powers.startStorm();
 }

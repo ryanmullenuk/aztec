@@ -20,6 +20,8 @@ export interface RiverData {
 export const BRIDGE_DECK_Y = 0.3;
 /** How deep a dug canal channel is cut below the surrounding ground. */
 export const CANAL_DEPTH = 0.5;
+/** Swamp water sits this far below the undug ground (so the shallow mud stays dry and only pools fill). */
+export const SWAMP_WATER_DROP = 0.11;
 
 export interface WaterfallData {
   x: number;
@@ -85,6 +87,12 @@ export class World {
   canal = new Uint8Array(this.N * this.N);
   /** Number of canal cells (0 skips the channel carve in height lookups). */
   canalCount = 0;
+  /** Swampland 0..1 per cell (wet ground → mud → pools), and how deep each cell is dug into pools. */
+  swamp = new Float32Array(this.N * this.N);
+  swampCarve = new Float32Array(this.N * this.N);
+  swampOn = false;
+  /** Swamps (centre and radius), for the animals and decorations that live there. */
+  swamps: { x: number; z: number; r: number }[] = [];
   /** Rope bridges built across shallow water (1 = deck). */
   bridge = new Uint8Array(this.N * this.N);
 
@@ -212,8 +220,22 @@ export class World {
 
   /** Terrain surface height at a world position (matches the rendered mesh). */
   heightAt(x: number, z: number): number {
+    let h = this.terrace(this.layerF(x, z));
+    if (this.canalCount) h -= this.canalCarve(x, z);
+    if (this.swampOn) h -= this.sampleField(this.swampCarve, x, z);
+    return h;
+  }
+
+  /** Ground height before the swamp pools were dug (their water surface follows this). */
+  heightNoSwamp(x: number, z: number): number {
     const h = this.terrace(this.layerF(x, z));
     return this.canalCount ? h - this.canalCarve(x, z) : h;
+  }
+
+  /** Surface of swamp water at a point (NaN outside the pools). */
+  swampWaterY(x: number, z: number): number {
+    if (!this.swampOn || this.sampleField(this.swampCarve, x, z) < 0.14) return NaN;
+    return this.heightNoSwamp(x, z) - SWAMP_WATER_DROP;
   }
 
   /**
