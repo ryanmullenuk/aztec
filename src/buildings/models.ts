@@ -164,6 +164,53 @@ export function wellModel(): BuildingModel {
   return { finished: b.build(), torches: [], height: 1.7 };
 }
 
+/**
+ * Kennel: a low flat-roofed adobe dog house with a round-topped doorway, a timber-railed run
+ * shaded by a small palm-thatch awning, a water bowl, a food trough and a gnawed bone.
+ * Faces +z (the run is in front).
+ */
+export function kennelModel(): BuildingModel {
+  const b = new GeoBuilder();
+  // Packed-earth yard.
+  b.add(P.box(1.9, 0.03, 1.9), { color: c(0xb99a72) }, M.t(0, 0.015, 0));
+  // Dog house at the back.
+  baseBand(b, 1.1, 0.75, 0, -0.5, 0.1);
+  adobeBlock(b, 1.1, 0.5, 0.75, 0, 0.08, -0.5);
+  // Vigas poking through below the parapet.
+  for (let k = 0; k < 4; k++) b.add(P.cyl(0.025, 0.025, 0.14, 5), { color: AD.post }, M.t(-0.38 + k * 0.25, 0.52, -0.08, Math.PI / 2, 0, 0));
+  // Round-topped doorway (dark opening under a light arch) and a red lintel band.
+  b.add(P.box(0.34, 0.26, 0.04), { color: AD.win }, M.t(0, 0.21, -0.11));
+  b.add(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 10, 1, false, 0, Math.PI), { color: AD.win }, M.t(0, 0.34, -0.11, Math.PI / 2, Math.PI / 2, 0));
+  b.add(P.box(1.12, 0.05, 0.02), { color: AD.red }, M.t(0, 0.47, -0.12));
+  // Run: rail fence of posts and two rails on three sides.
+  const posts: [number, number][] = [[-0.9, -0.12], [-0.9, 0.4], [-0.9, 0.88], [-0.3, 0.88], [0.3, 0.88], [0.9, 0.88], [0.9, 0.4], [0.9, -0.12]];
+  for (const [x, z] of posts) b.add(P.cyl(0.028, 0.034, 0.42, 5), { color: K.timberDark }, M.t(x, 0.21, z));
+  for (const y of [0.16, 0.34]) {
+    b.add(P.box(0.03, 0.03, 1.0), { color: K.timber }, M.t(-0.9, y, 0.38));
+    b.add(P.box(0.03, 0.03, 1.0), { color: K.timber }, M.t(0.9, y, 0.38));
+    // Front rails either side of the gap.
+    b.add(P.box(0.62, 0.03, 0.03), { color: K.timber }, M.t(-0.6, y, 0.88));
+    b.add(P.box(0.62, 0.03, 0.03), { color: K.timber }, M.t(0.6, y, 0.88));
+  }
+  // Shade awning of palm thatch on two poles.
+  for (const x of [-0.75, 0.75]) b.add(P.cyl(0.03, 0.035, 0.7, 5), { color: K.timberDark }, M.t(x, 0.35, 0.55));
+  // Palm-thatch shade: overlapping frond bundles laid on a pole frame, ragged along the front edge.
+  b.add(P.cyl(0.02, 0.02, 1.62, 5), { color: K.timberDark }, M.t(0, 0.7, 0.55, 0, 0, Math.PI / 2));
+  for (let k = 0; k < 9; k++) {
+    const x = -0.76 + k * 0.19;
+    b.add(P.box(0.2, 0.035, 0.72), { color: k % 2 ? K.thatch : K.thatchDark }, M.t(x, 0.73 + (k % 2) * 0.012, 0.3, -0.2, (k % 3 - 1) * 0.04, 0));
+    b.add(P.cone(0.06, 0.12, 4), { color: K.thatchDark }, M.t(x, 0.64, 0.68, -1.9, 0, 0));
+  }
+  // Water bowl, food trough, a bone.
+  b.add(P.cyl(0.1, 0.08, 0.06, 10), { color: K.terracotta }, M.t(0.55, 0.06, 0.25));
+  b.add(P.cyl(0.08, 0.08, 0.01, 10), { color: c(0x2f7fa0) }, M.t(0.55, 0.09, 0.25));
+  b.add(P.box(0.4, 0.08, 0.14), { color: K.timber }, M.t(-0.5, 0.06, 0.3));
+  b.add(P.cyl(0.018, 0.018, 0.16, 5), { color: c(0xefe6d4) }, M.t(0.15, 0.04, 0.55, 0, 0.6, Math.PI / 2));
+  for (const s2 of [-1, 1]) b.add(P.sphere(0.025, 0), { color: c(0xefe6d4) }, M.t(0.15 + Math.cos(0.6) * 0.08 * s2, 0.04, 0.55 - Math.sin(0.6) * 0.08 * s2));
+  const torch = torchPole(b, -0.85, -0.85, 0.7);
+  return { finished: b.build(), torches: [torch], height: 0.9 };
+}
+
 // ---------------- Adobe houses (levels 1–5) ----------------
 
 const AD = {

@@ -67,6 +67,10 @@ export class Building {
   boats: number[] = [];
   /** Trade boats moored at a Trade Dock. */
   tradeBoats = 0;
+  // Kennel: a litter on the way (seconds), rest before the next, and how its dogs behave.
+  breedT = 0;
+  breedCool = 0;
+  dogRole: 'roam' | 'guard' = 'roam';
   // War room: queued trainees
   training: { id: number; t: number; type: 'jaguar' | 'eagle' }[] = [];
   // Butcher
@@ -485,6 +489,7 @@ export class BuildingSystem {
       case 'torch': return models.torchModel();
       case 'bonfire': return models.bonfireModel();
       case 'firepit': return models.firepitModel();
+      case 'kennel': return models.kennelModel();
       case 'well': return models.wellModel();
       case 'butcher': return models.butcherModel(sw, sd);
       case 'woodstore': return models.woodstoreModel(sw, sd);
@@ -752,7 +757,10 @@ export class BuildingSystem {
       all.sort((a, b2) => a.pos.distanceToSquared(camTarget) - b2.pos.distanceToSquared(camTarget));
       this.lights.forEach((l, i) => {
         const t = all[i];
-        if (t) l.position.copy(t.pos).add(new THREE.Vector3(0, 0.25, 0));
+        if (t) {
+          l.position.copy(t.pos);
+          l.position.y += 0.25;
+        }
         l.userData.on = !!t;
       });
     }
