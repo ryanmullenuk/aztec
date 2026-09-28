@@ -283,6 +283,7 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
 
 /* ---------- Minimap ---------- */
 .minimap { position: absolute; left: 12px; bottom: calc(12px + var(--safe-b)); padding: 6px; }
+.map-toggle { display: block; width: 100%; min-width: 54px; min-height: 36px; padding: 8px; border: 0; border-radius: 9px; background: rgba(255,255,255,0.08); color: var(--gold); font-weight: 800; letter-spacing: 0.08em; }
 .minimap canvas { display: block; width: 150px; height: 150px; border-radius: 9px; cursor: crosshair; image-rendering: auto; }
 
 /* ---------- Toasts ---------- */

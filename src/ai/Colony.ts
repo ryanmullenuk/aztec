@@ -832,8 +832,25 @@ export class Colony {
     return best;
   }
 
+  /** A one-off round-up uses only unoccupied adults and reserves each animal once. */
+  roundUp(pen: Building, animals: { id: number; x: number; z: number }[]): number {
+    if (!pen.complete || !['pigpen', 'chickenpen'].includes(pen.key)) return 0;
+    const free = this.list.filter(i => !i.child && !i.sleeping && !i.hidden && !i.warrior &&
+      !i.carry && !i.manualRole && i.workplace < 0 && i.hunger > 0.25 && i.rest > 0.25 &&
+      (!i.task || i.task.kind === 'wander'));
+    let count = 0;
+    for (const animal of [...animals].sort((a, b) =>
+      Math.hypot(a.x - pen.x, a.z - pen.z) - Math.hypot(b.x - pen.x, b.z - pen.z))) {
+      if (!free.length) break;
+      if (!this.hooks.canCapture?.(animal.id)) continue;
+      free.sort((a, b) => Math.hypot(a.x - animal.x, a.z - animal.z) - Math.hypot(b.x - animal.x, b.z - animal.z));
+      if (this.orderCapture(free[0], animal.id, pen).ok) { free.shift(); count++; }
+    }
+    return count;
+  }
+
   /** Player order: this islander tracks down, catches and brings home a specific animal. */
-  orderCapture(isl: Islander | null, animalId: number): { ok: boolean; msg: string } {
+  orderCapture(isl: Islander | null, animalId: number, destination?: Building): { ok: boolean; msg: string } {
     const info = this.hooks.animalInfo?.(animalId);
     if (!info) return { ok: false, msg: 'That animal cannot be found.' };
     if (!info.food) return { ok: false, msg: `The ${info.name.toLowerCase()} is wild and not for eating.` };
@@ -846,6 +863,7 @@ export class Colony {
     if (who.child) return { ok: false, msg: `${who.name} is too young to hunt.` };
     this.setTask(who, 'capture', animalId, pos.x, pos.z);
     who.task!.phase = 0;
+    if (destination) who.task!.building = destination.id;
     this.hooks.beginChase?.(animalId, who);
     const verb = info.mode === 'hunt' ? 'hunt' : info.mode === 'carry' ? 'catch' : 'catch and pen';
     return { ok: true, msg: `${who.name} sets off to ${verb} the ${info.name.toLowerCase()}.` };
@@ -1137,6 +1155,8 @@ export class Colony {
         isl.tool = 'spear';
         const phase = t.phase ?? 0;
         if (phase === 0) {
+          // A round-up stays tied to the selected pen, even if another is closer.
+          if (t.building !== undefined && !this.bld.byId(t.building)?.complete) return this.releaseTask(isl);
           const pos = this.hooks.animalPos?.(t.target);
           if (!pos || !pos.free) return this.releaseTask(isl);
           const d = Math.hypot(pos.x - isl.x, pos.z - isl.z);
@@ -1158,7 +1178,7 @@ export class Colony {
               this.deliver(isl);
               return;
             }
-            const pen = this.penFor(mode, isl.x, isl.z);
+            const pen = t.building !== undefined ? this.bld.byId(t.building) : this.penFor(mode, isl.x, isl.z);
             if (!pen) {
               // No pen for a chicken: it goes straight to the food store.
               this.hooks.consumeAnimal?.(t.target);

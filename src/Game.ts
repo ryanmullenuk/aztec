@@ -1058,6 +1058,15 @@ export class Game {
   }
 
   /** Player order: capture / hunt an animal (optionally with a chosen islander). */
+  roundUpAnimals(pen: Building): void {
+    if (!pen.complete || (pen.key !== 'pigpen' && pen.key !== 'chickenpen')) return;
+    const species = pen.key === 'pigpen' ? 'pig' : 'chicken';
+    const animals = this.wildlife.animals.list.filter(a => a.sp === species && this.wildlife.animals.capturable(a));
+    const n = this.colony.roundUp(pen, animals);
+    this.ui.toast(n ? `${n} idle islander${n === 1 ? '' : 's'} rounding up ${species === 'pig' ? 'pigs' : 'chickens'} for this pen.` :
+      animals.length ? 'No idle adults are available to round up animals.' : `No wild ${species === 'pig' ? 'pigs' : 'chickens'} are available.`, n ? 'info' : 'warn');
+  }
+
   captureAnimal(id: number, who: Islander | null = null): boolean {
     const r = this.colony.orderCapture(who, id);
     this.ui.toast(r.msg, r.ok ? 'info' : 'warn');

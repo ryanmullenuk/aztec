@@ -61,6 +61,7 @@ export class UI {
   private help!: HTMLDivElement;
   private tutorial!: HTMLDivElement;
   private minimap!: HTMLCanvasElement;
+  private mapVisible = false;
   private miniBase: ImageData | null = null;
   private miniVersion = -1;
   private timer = 0;
@@ -336,7 +337,18 @@ export class UI {
 
   private buildMinimap(): void {
     const wrap = el('div', 'panel minimap');
-    this.minimap = el('canvas');
+    const toggle = el('button', 'map-toggle', 'MAP');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-controls', 'island-minimap');
+    wrap.appendChild(toggle);
+    this.minimap = el('canvas', 'hidden');
+    this.minimap.id = 'island-minimap';
+    toggle.onclick = () => {
+      this.mapVisible = !this.mapVisible;
+      this.minimap.classList.toggle('hidden', !this.mapVisible);
+      toggle.setAttribute('aria-expanded', String(this.mapVisible));
+      if (this.mapVisible) this.drawMinimap();
+    };
     this.minimap.width = this.minimap.height = 168;
     wrap.appendChild(this.minimap);
     const go = (e: PointerEvent) => {
@@ -451,8 +463,8 @@ export class UI {
         <button class="obtn green" data-a="tutorial">${ICONS.o_tutorial}<span>Tutorial</span></button>
         <button class="obtn cyan" data-a="help">${ICONS.o_help}<span>How to play</span></button>
         <button class="obtn wide" data-a="copy">${ICONS.o_link}<span>Copy Island</span></button>
+        <button class="obtn wide" data-a="load">${ICONS.o_save}<span>Load Island</span></button>
       </div>
-      <button class="obtn wide" data-a="load">${ICONS.o_save}<span>Load Island</span></button>
       <input type="file" data-a="island-file" accept=".json,application/json" class="hidden">
       <p class="muted small">Progress autosaves in this browser. Copy Island shares or downloads a saved copy of your build and progress. Use Load Island to open a shared save. Each copy progresses independently.</p>`;
     const close = el('button', 'ib small close', ICONS.close);
@@ -790,7 +802,7 @@ export class UI {
     this.miniTimer -= dt;
     if (this.miniTimer <= 0) {
       this.miniTimer = 0.5;
-      this.drawMinimap();
+      if (this.mapVisible) this.drawMinimap();
     }
     if (this.tutStep < this.tutSteps.length && !this.tutorial.classList.contains('hidden')) {
       if (this.tutSteps[this.tutStep].done(this.game)) {
@@ -994,7 +1006,9 @@ export class UI {
         <div class="kv"><span>Room for</span><b>${HALL.seats.length} seated, ${HALL.stands.length} standing</b></div>`;
     }
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
+    if (b.complete && (b.key === 'pigpen' || b.key === 'chickenpen')) body += `<div class="kv"><span>Animals in pen</span><b>${g.wildlife.penCount(b)}</b></div>`;
     let actions = '';
+    if (b.complete && (b.key === 'pigpen' || b.key === 'chickenpen')) actions += `<button class="btn small" data-a="roundup">${ICONS.people} ROUND UP</button><p class="muted small">Send idle adults to catch ${b.key === 'pigpen' ? 'pigs' : 'chickens'} and bring them to this pen.</p>`;
     if (b.key === 'greathall' && b.complete) actions += `<button class="btn small" data-a="bell">${ICONS.bell} Ring the bell (drill)</button>`;
     const up = g.buildings.canUpgrade(b);
     if (b.complete && !b.upgrading && (b.key === 'hut' || (b.key === 'home' && b.tier < (b.def.maxTier ?? 1)) || (b.key === 'temple' && b.tier < 3))) {
@@ -1049,6 +1063,7 @@ export class UI {
       }
     }
     if (b) {
+      if (a === 'roundup') g.roundUpAnimals(b);
       if (a === 'bell') g.ringHallBell(b);
       if (a === 'helpers') {
         const came = g.colony.callHelpers(b);
