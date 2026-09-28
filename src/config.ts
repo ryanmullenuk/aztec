@@ -308,6 +308,8 @@ export const PATHS = {
   bridgeWood: 2,
   /** Wood per cell of water canal (the channel is lined with posts and wattle). */
   canalWood: 1,
+  /** Restore grass: brush radius in cells (a little wider than a path). */
+  regrassRadius: 1.5,
 };
 
 /** Adobe homes grow in place: tier 1–4 are house levels 2–5. */

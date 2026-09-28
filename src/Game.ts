@@ -765,6 +765,7 @@ export class Game {
       path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
       dirtpath: 'Hold and drag to tread a <b>dirt path</b> · free · Esc to finish',
       unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
+      regrass: 'Hold and drag over bare earth to <b>restore the grass</b> · free · Esc to finish',
       canal: `Hold and drag outward from water to dig a <b>canal</b> into the village · ${PATHS.canalWood} wood per section · Esc to finish`,
       bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
     };
@@ -873,7 +874,7 @@ export class Game {
     const area = this.tool === 'harvest' || this.tool === 'bless' || PAINT_TOOLS.includes(this.tool);
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : PAINT_TOOLS.includes(this.tool) ? PATHS.radius + 0.4 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'regrass' ? PATHS.regrassRadius + 0.3 : PAINT_TOOLS.includes(this.tool) ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -963,6 +964,9 @@ export class Game {
       case 'dirtpath':
       case 'unpath':
         if (p) this.paintPath(p, this.tool !== 'unpath', this.tool === 'dirtpath');
+        return;
+      case 'regrass':
+        if (p) this.paintGrass(p);
         return;
       case 'bridge':
         if (p) this.paintBridge(p);
@@ -1113,6 +1117,42 @@ export class Game {
       this.audio?.sfx(add ? 'place' : 'click', p.x, p.z);
     }
   }
+  /**
+   * Restore grass under the brush: trodden wear, dirt tracks and any stray bare soil grow back to
+   * grass (the tufts and flowers return too). Stone paths are left alone.
+   */
+  private paintGrass(p: THREE.Vector3): void {
+    const w = this.world;
+    const R = PATHS.regrassRadius;
+    const ccx = Math.floor(p.x + w.half), ccz = Math.floor(p.z + w.half);
+    const n = Math.ceil(R);
+    let changed = 0;
+    for (let dz = -n; dz <= n; dz++) {
+      for (let dx = -n; dx <= n; dx++) {
+        const cx = ccx + dx, cz = ccz + dz;
+        if (!w.inBounds(cx, cz)) continue;
+        if (Math.hypot(w.centerX(cx) - p.x, w.centerZ(cz) - p.z) > R) continue;
+        const i = w.idx(cx, cz);
+        if (!w.isLandCell(i)) continue;
+        if (w.wear[i] > 0) {
+          w.wear[i] = 0;
+          changed++;
+        }
+        if (w.path[i] === 2) {
+          w.path[i] = 0;
+          changed++;
+        }
+        if (w.soil[i] > 0 && w.occ[i] === 0) {
+          w.soil[i] = 0;
+          changed++;
+        }
+      }
+    }
+    if (changed) {
+      this.pathDirty = true;
+      this.audio?.sfx('harvest', p.x, p.z);
+    }
+  }
   private pathDirty = false;
   private bridgeDirty = false;
   private canalDirty: [number, number, number, number] | null = null;
@@ -1224,6 +1264,7 @@ export class Game {
         _pathP.set(last ? last.x + (p.x - last.x) * t : p.x, p.y, last ? last.z + (p.z - last.z) * t : p.z);
         if (this.tool === 'bridge') this.paintBridge(_pathP);
         else if (this.tool === 'canal') this.paintCanal(_pathP);
+        else if (this.tool === 'regrass') this.paintGrass(_pathP);
         else this.paintPath(_pathP, this.tool !== 'unpath', this.tool === 'dirtpath');
       }
       this.pathLast = { x: p.x, z: p.z };
