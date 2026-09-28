@@ -233,21 +233,35 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
 
 /* ---------- Build menu ---------- */
 .buildmenu {
-  position: absolute; left: 50%; bottom: calc(150px + var(--safe-b)); transform: translateX(-50%); padding: 10px;
-  width: min(540px, calc(100vw - 16px));
+  position: absolute; left: 50%; bottom: calc(150px + var(--safe-b)); transform: translateX(-50%); padding: 8px;
+  width: min(500px, calc(100vw - 16px));
+  display: flex; flex-direction: column;
+  /* Never taller than the space above the toolbar: the grid scrolls inside. */
+  max-height: min(400px, calc(var(--app-h, 100vh) - 150px - var(--safe-b) - 70px - var(--safe-t)));
 }
-.bm-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin: 0 2px 8px; }
-.bm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.bm-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin: 0 2px 6px; flex: none; }
+.bm-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px;
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  padding-bottom: 2px;
+  /* Soft fade at the bottom edge hints there is more to scroll. */
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent);
+}
+.bm-grid.end { -webkit-mask-image: none; mask-image: none; }
+.bm-grid::-webkit-scrollbar { width: 4px; }
+.bm-grid::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 4px; }
 .bm-item {
-  border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.06); padding: 8px 4px 6px;
-  display: flex; flex-direction: column; align-items: center; gap: 4px; transition: background 0.15s;
+  border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.06); padding: 6px 2px 5px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; transition: background 0.15s; min-width: 0;
 }
 .bm-item:hover { background: rgba(255, 255, 255, 0.14); }
 .bm-item.dim { opacity: 0.45; }
-.bm-ic { width: 36px; height: 36px; }
-.bm-nm { font-size: 12px; font-weight: 700; }
-.bm-cost { display: flex; gap: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
-.bm-cost .ic { width: 13px; height: 13px; margin-right: 1px; }
+.bm-ic { width: 28px; height: 28px; }
+.bm-nm { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.bm-cost { display: flex; gap: 5px; font-size: 10px; font-weight: 700; color: var(--muted); min-height: 12px; }
+.bm-cost .ic { width: 11px; height: 11px; margin-right: 1px; }
 
 /* ---------- Info panel ---------- */
 .info {
@@ -338,7 +352,7 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   .minimap { bottom: calc(150px + var(--safe-b)); left: 8px; padding: 4px; }
   .info { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(150px + var(--safe-b)); max-height: 42vh; }
   .buildmenu { bottom: calc(146px + var(--safe-b)); }
-  .bm-grid { grid-template-columns: repeat(3, 1fr); }
+  .bm-grid { grid-template-columns: repeat(4, 1fr); }
   .tutorial { top: auto; bottom: calc(150px + var(--safe-b)); left: 112px; right: 8px; width: auto; }
   .has-hint .tutorial { bottom: calc(222px + var(--safe-b)); }
   .card .cols { grid-template-columns: 1fr; }
@@ -355,7 +369,12 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   .minimap { bottom: calc(118px + var(--safe-b)); }
   .tutorial { bottom: calc(118px + var(--safe-b)); left: 104px; }
   .info { bottom: calc(118px + var(--safe-b)); }
-  .buildmenu { bottom: calc(118px + var(--safe-b)); }
+  .buildmenu { bottom: calc(118px + var(--safe-b)); max-height: min(360px, calc(var(--app-h, 100vh) - 118px - var(--safe-b) - 70px - var(--safe-t))); }
+  .bm-item { padding: 5px 1px 4px; }
+  .bm-ic { width: 26px; height: 26px; }
+  .bm-nm { font-size: 10px; }
+  .bm-cost { gap: 3px; font-size: 9.5px; letter-spacing: -0.02em; }
+  .bm-cost .ic { width: 9px; height: 9px; margin-right: 0; }
 }
 /* Menus and info panels sit above the tutorial card and minimap. */
 .buildmenu, .info { z-index: 6; }

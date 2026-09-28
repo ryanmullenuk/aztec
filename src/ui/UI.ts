@@ -324,6 +324,10 @@ export class UI {
     pathItem('regrass', 'Restore grass', 'b_regrass', 'Free', '<b>Restore grass</b><br>Hold and drag over bare, trodden earth or old dirt tracks to grow the grass back. Stone paths stay (use Remove path for those).');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
+    // Drop the bottom fade once scrolled to the end (or when everything fits).
+    const edge = () => grid.classList.toggle('end', grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 4);
+    grid.addEventListener('scroll', edge, { passive: true });
+    new ResizeObserver(edge).observe(grid);
   }
 
   private buildMinimap(): void {
