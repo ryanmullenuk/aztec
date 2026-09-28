@@ -4,7 +4,7 @@ import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Colony } from '../ai/Colony';
 import { Economy } from '../economy/Economy';
 import { GeoBuilder, M, P } from '../render/GeoBuilder';
-import { patchStylised, stylisedMaterial } from '../render/materials';
+import { patchStylised } from '../render/materials';
 import { Vegetation } from '../vegetation/Vegetation';
 import { SEA_SURFACE, Water } from '../water/Water';
 import { Particles } from '../render/Particles';
@@ -30,7 +30,9 @@ interface Boat {
   school: School | null;
   mesh: THREE.Group;
   net: THREE.Mesh;
-  rower: THREE.Mesh;
+  /** Rower pivot (rocks with the paddle stroke), holding a seated male and female: the crew's shows. */
+  rower: THREE.Group;
+  seats: Record<'m' | 'f', CanoePassenger>;
   paddlePhase: number;
   sail: boolean;
   wakeTimer: number;
@@ -69,12 +71,9 @@ export function boatGeometry(sail: boolean): THREE.BufferGeometry {
   return b.build();
 }
 
-function rowerGeometry(): THREE.BufferGeometry {
+/** The rower's paddle (the rower is a seated character model). */
+function paddleGeometry(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.cyl(0.05, 0.07, 0.2, 7), { color: 0xf1e6cf }, M.t(0, 0.3, 0));
-  b.add(P.sphere(0.05, 1), { color: 0x9c6644 }, M.t(0, 0.46, 0));
-  b.add(P.sphere(0.052, 1), { color: 0x1c1410 }, M.t(0, 0.475, -0.01, 0, 0, 0, 1, 0.7, 1));
-  // Paddle.
   b.add(P.cyl(0.008, 0.008, 0.6, 4), { color: 0x8b5a34 }, M.t(0.12, 0.3, 0.05, 0.3, 0, -0.9));
   b.add(P.box(0.03, 0.14, 0.07), { color: 0x8b5a34 }, M.t(0.33, 0.08, 0.1, 0.3, 0, -0.9));
   return b.build();
@@ -127,7 +126,7 @@ export class Boats {
   private wake = new Particles(500, 0xf5fbff);
   private splash = new Particles(240, 0xe8fbff);
   private geos = [boatGeometry(false), boatGeometry(true)];
-  private rowerGeo = rowerGeometry();
+  private paddleGeo = paddleGeometry();
   /** Boats' own double-sided material (never modify the shared stylised one). */
   private hullMat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, side: THREE.DoubleSide }));
   private netMat = new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true });
@@ -167,8 +166,9 @@ export class Boats {
     const hullMat = this.hullMat;
     const hull = new THREE.Mesh(this.geos[sail ? 1 : 0], hullMat);
     hull.castShadow = true;
-    const rower = new THREE.Mesh(this.rowerGeo, stylisedMaterial());
-    rower.castShadow = true;
+    const rower = new THREE.Group();
+    const seats = { m: new CanoePassenger('m', 0.62 / 1.8 / BOAT_SCALE, this.paddleGeo), f: new CanoePassenger('f', 0.62 / 1.8 / BOAT_SCALE, this.paddleGeo) };
+    rower.add(seats.m, seats.f);
     rower.visible = false;
     const net = new THREE.Mesh(new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2), this.netMat);
     net.visible = false;
@@ -180,7 +180,7 @@ export class Boats {
     const slot = j.boats.length;
     const b: Boat = {
       id: this.nextId++, jetty: j.id, x: j.dockX + dz * (slot - 1) * 0.9, z: j.dockZ - dx * (slot - 1) * 0.9, heading: Math.atan2(dx, dz), speed: 0,
-      state: 'docked', crew: null, path: null, idx: 0, timer: 0, catch: 0, school: null, mesh, net, rower, paddlePhase: Math.random() * 6, sail, wakeTimer: 0, fishTime: 0, onTrip: false,
+      state: 'docked', crew: null, path: null, idx: 0, timer: 0, catch: 0, school: null, mesh, net, rower, seats, paddlePhase: Math.random() * 6, sail, wakeTimer: 0, fishTime: 0, onTrip: false,
     };
     j.boats.push(b.id);
     this.list.push(b);
@@ -203,6 +203,8 @@ export class Boats {
     b.idx = 0;
     b.state = 'out';
     b.rower.visible = true;
+    b.seats.m.visible = isl.gender === 'm';
+    b.seats.f.visible = isl.gender === 'f';
     this.sfx('splash', b.x, b.z);
     return true;
   }
@@ -316,7 +318,7 @@ export class Boats {
     mesh.add(hull);
     const rowers: CanoePassenger[] = [];
     genders.forEach((gender, k) => {
-      const r = new CanoePassenger(gender, (0.62 / 1.8) / (BOAT_SCALE * 1.1), this.rowerGeo);
+      const r = new CanoePassenger(gender, (0.62 / 1.8) / (BOAT_SCALE * 1.1), this.paddleGeo);
       r.castShadow = true;
       r.position.z = 0.35 - k * (0.7 / Math.max(1, genders.length - 1));
       mesh.add(r);

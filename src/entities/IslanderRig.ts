@@ -368,8 +368,8 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
 }
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
-const BODY: PartKey[] = ['pelvis', 'chest', 'head', 'uarm', 'farm', 'thigh', 'shin'].flatMap((b) => [`${b}_m`, `${b}_f`] as PartKey[]);
-const PAIRED = new Set(['uarm_m', 'uarm_f', 'farm_m', 'farm_f', 'thigh_m', 'thigh_f', 'shin_m', 'shin_f']);
+/** Built-in body parts, no longer drawn (the character models are the bodies). */
+const BODY = new Set<string>(['pelvis', 'chest', 'head', 'uarm', 'farm', 'thigh', 'shin'].flatMap((b) => [`${b}_m`, `${b}_f`]));
 const TOOLS = ['axe', 'pick', 'hoe', 'spear', 'hammer'] as const;
 const LOADS: Record<string, PartKey> = { log: 'log', stone: 'stone', fruit: 'basket', grain: 'sack', fish: 'fish', meat: 'meat', chicken: 'chicken' };
 /** Ankle height (metres) the planted foot keeps, and the knee's radius when kneeling. */
@@ -389,12 +389,10 @@ interface SkinSet {
 }
 
 /**
- * Articulated islanders. Once the rigged character models load, each islander is a smoothly
- * skinned body on a 19-bone skeleton (hips, spine, chest, neck, head, shoulders, elbows,
- * wrists, knees, ankles) posed every frame, with its feet kept on the ground; all islanders of
- * a model are one instanced draw. Until then (or if the models fail to load) the built-in
- * faceted bodies are used, one InstancedMesh per rigid part. Tools, headdresses and carried
- * loads ride on the posed hands, head and chest either way.
+ * Articulated islanders: the two character models (the main male and female), each a smoothly
+ * skinned body on a 19-bone skeleton (hips, spine, chest, neck, head, shoulders, elbows, wrists,
+ * knees, ankles) posed every frame, with its feet kept on the ground; all islanders of a model are
+ * one instanced draw. Tools, headdresses and carried loads ride on the posed hands, head and chest.
  */
 export class IslanderRig {
   readonly group = new THREE.Group();
@@ -426,18 +424,17 @@ export class IslanderRig {
   readonly ring: THREE.Mesh;
 
   constructor() {
+    // Props (tools, headdresses, carried loads); the bodies are the two character models.
     const parts = buildPeopleParts();
-    for (const [key, geo] of Object.entries(parts) as [PartKey, THREE.BufferGeometry][]) this.addMesh(key, geo, ISLANDER.max * (PAIRED.has(key) ? 2 : 1));
-    // The rigged character models replace the built-in bodies once they have loaded.
+    for (const [key, geo] of Object.entries(parts) as [PartKey, THREE.BufferGeometry][]) {
+      if (BODY.has(key)) geo.dispose();
+      else this.addMesh(key, geo, ISLANDER.max);
+    }
     loadGlbPeople()
       .then((glb) => {
         for (const g of ['m', 'f'] as const) this.skins[g] = this.makeSkin(glb[g]);
-        for (const k of BODY) {
-          const m = this.meshes.get(k);
-          if (m) m.visible = false;
-        }
       })
-      .catch((err) => console.warn('Islander models failed to load; keeping the built-in ones.', err));
+      .catch((err) => console.error('Islander models failed to load.', err));
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(0.22, 0.3, 24).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffe28a, transparent: true, opacity: 0.9, depthWrite: false })
@@ -469,7 +466,7 @@ export class IslanderRig {
     const data = new Float32Array(BONE_COUNT * 16 * rows);
     const tex = new THREE.DataTexture(data, BONE_COUNT * 4, rows, THREE.RGBAFormat, THREE.FloatType);
     tex.needsUpdate = true;
-    const { mat, depth } = peopleSkinnedMaterial(tex);
+    const { mat, depth } = peopleSkinnedMaterial(tex, model.map);
     const geo = model.geometry;
     const accent = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
     accent.setUsage(THREE.DynamicDrawUsage);
@@ -578,8 +575,8 @@ export class IslanderRig {
       const sc = S0 * (isl.child ? ISLANDER.childScale : 1) * (g === 'f' ? 0.98 : 1);
       this.rot(M.base, isl.x, isl.y, isl.z, 0, isl.heading, 0, 'XYZ', sc);
       const hs = isl.child ? 1.22 : 1;
+      // Nothing to draw until the character models have loaded.
       if (skinned) this.drawSkinned(isl, this.skins[g]!, p, hs);
-      else this.drawRigid(isl, g, sk, p, hs);
     }
     for (const [key, mesh] of this.meshes) {
       const n = this.count.get(key) ?? 0;
@@ -639,14 +636,16 @@ export class IslanderRig {
     // Headdress: warriors wear jaguar or eagle helms, priests the grand feather fan.
     const hd = isl.warrior ? isl.warrior : isl.role === 'priest' && !isl.child ? 'hd_fan' : null;
     if (hd) {
-      M.out.multiplyMatrices(M.base, W[BI.head]);
+      const fit = set.model.hat;
+      M.out.multiplyMatrices(M.base, W[BI.head]).multiply(this.rot(this.tmp, 0, fit.y, fit.z, 0, 0, 0, 'XYZ', fit.s));
       this.put(hd as PartKey, M.out);
     }
     // Tool in the right (+x) hand.
     const tool = isl.carry || isl.anim === 'sleep' || isl.anim === 'pray' || isl.anim === 'eat' ? 'none' : isl.tool;
     if (tool !== 'none') {
       M.out.multiplyMatrices(M.base, W[BI.handL]);
-      M.out.multiply(this.rot(this.tmp, 0, -0.04, 0.01, 0, 0, 0));
+      // Gripped in the palm, a little past the wrist.
+      M.out.multiply(this.rot(this.tmp, 0, -set.model.len.hand * 0.3, 0.01, 0, 0, 0));
       this.put(tool as PartKey, M.out);
     }
     // Carried load: on the head, across the shoulders (log) or under the arm (chicken).
@@ -657,50 +656,6 @@ export class IslanderRig {
       if (c === 'chicken') M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0.2, up - 0.3, 0.12, 0, 0.3, 0));
       else if (c === 'log') M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0, J.upper_armL.y - J.chest.y + 0.1, -0.12, 0, 0.25, 0));
       else M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0, up + 0.36, 0.02, 0, 0, 0));
-      this.put(LOADS[c], M.out);
-    }
-  }
-
-  /** Built-in faceted bodies: one rigid instance per body part. */
-  private drawRigid(isl: Islander, g: 'm' | 'f', sk: Skeleton, p: Pose, hs: number): void {
-    const M = this.m;
-    // Pelvis (root of the skeleton).
-    if (p.lying) {
-      M.pelvis.multiplyMatrices(M.base, this.rot(this.tmp, 0, 0.16 + p.bob, 0.35, -Math.PI / 2, 0, 0));
-    } else {
-      M.pelvis.multiplyMatrices(M.base, this.rot(this.tmp, 0, sk.hipY - p.drop + p.bob, 0, 0, p.twist * 0.4 + p.hipYaw, p.roll, 'YXZ'));
-    }
-    this.put(`pelvis_${g}`, M.pelvis);
-    for (const [side, th, sh] of [[-1, p.thL, p.shL], [1, p.thR, p.shR]] as [number, number, number][]) {
-      M.th.multiplyMatrices(M.pelvis, this.rot(this.tmp, side * sk.hipX, sk.hipDY ?? -0.03, 0, th, 0, side * 0.03));
-      this.put(`thigh_${g}`, M.th);
-      M.sh.multiplyMatrices(M.th, this.rot(this.tmp, 0, -sk.thigh, 0, sh, 0, 0));
-      this.put(`shin_${g}`, M.sh);
-    }
-    M.chest.multiplyMatrices(M.pelvis, this.rot(this.tmp, 0, sk.chestY, 0, p.lean, p.twist - p.hipYaw * 1.9, -p.roll * 1.3));
-    this.put(`chest_${g}`, M.chest);
-    M.head.multiplyMatrices(M.chest, this.rot(this.tmp, 0, sk.neckY, 0, p.headX, p.headY, 0, 'YXZ', hs));
-    this.put(`head_${g}`, M.head);
-    const hd = isl.warrior ? isl.warrior : isl.role === 'priest' && !isl.child ? 'hd_fan' : null;
-    if (hd) this.put(hd as PartKey, M.head);
-    for (const [side, uax, uaz, fa] of [[-1, p.uaLx, p.uaLz, p.faL], [1, p.uaRx, p.uaRz, p.faR]] as [number, number, number, number][]) {
-      M.ua.multiplyMatrices(M.chest, this.rot(this.tmp, side * sk.shoulderX, sk.shoulderY, 0, uax, 0, side * uaz));
-      this.put(`uarm_${g}`, M.ua);
-      M.fa.multiplyMatrices(M.ua, this.rot(this.tmp, 0, -sk.upper, 0, fa, 0, 0));
-      this.put(`farm_${g}`, M.fa);
-      if (side === 1) {
-        const tool = isl.carry || isl.anim === 'sleep' || isl.anim === 'pray' || isl.anim === 'eat' ? 'none' : isl.tool;
-        if (tool !== 'none') {
-          M.out.multiplyMatrices(M.fa, this.rot(this.tmp, 0, -sk.fore - 0.04, 0.01, 0, 0, 0));
-          this.put(tool as PartKey, M.out);
-        }
-      }
-    }
-    const c = isl.carry?.kind;
-    if (c && LOADS[c]) {
-      const log = c === 'log';
-      if (c === 'chicken') M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0.2, sk.neckY - 0.3, 0.12, 0, 0.3, 0));
-      else M.out.multiplyMatrices(M.chest, this.rot(this.tmp, 0, log ? sk.shoulderY + 0.15 : sk.neckY + 0.42, log ? -0.02 : 0.02, 0, log ? 0.25 : 0, 0));
       this.put(LOADS[c], M.out);
     }
   }

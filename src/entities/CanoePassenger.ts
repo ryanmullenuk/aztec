@@ -1,27 +1,28 @@
 import * as THREE from 'three';
 import { bakePose, loadGlbPeople, GlbPeople } from './glbPeople';
-import { stylisedMaterial } from '../render/materials';
+import { patchStylised, stylisedMaterial } from '../render/materials';
 
 /** A seated copy of the same character models used by the islanders ashore (a baked pose). */
 export class CanoePassenger extends THREE.Group {
   private disposed = false;
   private geometries: THREE.BufferGeometry[] = [];
-  private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+  private material = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }), 0.45);
 
-  constructor(readonly gender: 'm' | 'f', private bodyScale: number, fallback: THREE.BufferGeometry) {
+  /** @param prop something held (a paddle), shown from the start; the body appears once the models load */
+  constructor(readonly gender: 'm' | 'f', private bodyScale: number, prop?: THREE.BufferGeometry) {
     super();
     this.name = `Canoe passenger ${gender}`;
-    // Keep a passenger visible while the shared character models are loading.
-    const placeholder = new THREE.Mesh(fallback, stylisedMaterial());
-    placeholder.castShadow = true;
-    this.add(placeholder);
+    if (prop) {
+      const held = new THREE.Mesh(prop, stylisedMaterial());
+      held.castShadow = true;
+      this.add(held);
+    }
     loadGlbPeople().then((models) => {
       if (!this.disposed) this.seat(models);
-    }).catch((err) => console.warn('Canoe character failed to load; keeping the rower.', err));
+    }).catch((err) => console.error('Canoe character failed to load.', err));
   }
 
   private seat(models: GlbPeople): void {
-    this.clear();
     const g = this.gender;
     const body = new THREE.Group();
     body.scale.setScalar(this.bodyScale * (g === 'f' ? 0.98 : 1));
@@ -36,13 +37,8 @@ export class CanoePassenger extends THREE.Group {
       upper_armL: [-0.35, 0, 0.08], upper_armR: [-0.35, 0, -0.08],
       forearmL: [-1.05, 0, 0], forearmR: [-1.05, 0, 0],
     });
-    const skin = new THREE.Color(0xc98450), gold = new THREE.Color(0xd9a521);
-    const colors = geo.getAttribute('color'), tags = geo.getAttribute('aMat');
-    for (let i = 0; i < colors.count; i++) {
-      const tag = tags.getX(i);
-      const tint = tag === 1 ? skin : tag === 2 ? gold : null;
-      if (tint) colors.setXYZ(i, colors.getX(i) * tint.r, colors.getY(i) * tint.g, colors.getZ(i) * tint.b);
-    }
+    this.material.map = models[g].map;
+    this.material.needsUpdate = true;
     this.geometries.push(geo);
     const mesh = new THREE.Mesh(geo, this.material);
     mesh.castShadow = mesh.receiveShadow = true;
