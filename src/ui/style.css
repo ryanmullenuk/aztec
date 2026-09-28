@@ -373,3 +373,12 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
   .rotate .rot { width: 34px; height: 34px; }
   .rotate .dial { width: 40px; height: 40px; }
 }
+
+/* Section labels and two-way toggles inside info cards (kennel dogs and role). */
+.sec-h { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); }
+.sec-h svg { width: 14px; height: 14px; }
+.actions .sec-h { width: 100%; margin-bottom: 0; }
+.seg { display: flex; gap: 6px; width: 100%; }
+.seg .btn { flex: 1; justify-content: center; background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: none; }
+.seg .btn.on { background: var(--gold-deep); color: #2a1a08; }
+.card-head svg { width: 16px; height: 16px; vertical-align: -3px; }

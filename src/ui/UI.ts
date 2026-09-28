@@ -1,5 +1,7 @@
-import { FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
+import { DOGS, FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
 import { MONKEY_BASE } from '../entities/Monkeys';
+import { DOG_BASE } from '../entities/Dogs';
+import { JAG_BASE } from '../entities/Jaguars';
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
 import { ROLE_LABEL } from '../entities/Islander';
@@ -21,7 +23,7 @@ const BUILD_ICON: Record<BuildingKey, string> = {
   campfire: 'belief', hut: 'b_hut', home: 'b_home', temple: 'b_temple', farm: 'b_farm', butcher: 'b_butcher',
   woodstore: 'b_woodstore', grainstore: 'b_grainstore', warroom: 'b_warroom', jetty: 'b_jetty',
   maizefarm: 'b_maize', chinampa: 'b_chinampa', smokehouse: 'b_smoke',
-  tradedock: 'b_trade', torch: 'b_torch', bonfire: 'b_bonfire', firepit: 'b_firepit', well: 'b_well',
+  tradedock: 'b_trade', torch: 'b_torch', bonfire: 'b_bonfire', firepit: 'b_firepit', well: 'b_well', kennel: 'b_kennel',
 };
 
 interface TutorialStep {
@@ -692,11 +694,14 @@ export class UI {
     const g = this.game;
     const isl = g.selectedIslander >= 0 ? g.colony.byId(g.selectedIslander) : undefined;
     const b = g.selectedBuilding >= 0 ? g.buildings.byId(g.selectedBuilding) : undefined;
-    const mk = g.selectedAnimal >= MONKEY_BASE ? g.wildlife.monkeys.get(g.selectedAnimal) : undefined;
-    if (g.selectedAnimal >= MONKEY_BASE && !mk) g.select(null);
+    const sa = g.selectedAnimal;
+    const mk = sa >= MONKEY_BASE && sa < DOG_BASE ? g.wildlife.monkeys.get(sa) : undefined;
+    const dog = sa >= DOG_BASE && sa < JAG_BASE ? g.dogs.byId(sa - DOG_BASE) : undefined;
+    const jag = sa >= JAG_BASE ? g.jaguars.list.find((j) => j.id === sa - JAG_BASE) : undefined;
+    if (sa >= MONKEY_BASE && !mk && !dog && !jag) g.select(null);
     const an = g.selectedAnimal >= 0 && g.selectedAnimal < MONKEY_BASE ? g.wildlife.animals.get(g.selectedAnimal) : undefined;
     if (an && !an.alive) g.select(null);
-    if (!isl && !b && !(an && an.alive) && !mk) {
+    if (!isl && !b && !(an && an.alive) && !mk && !dog && !jag) {
       this.info.classList.add('hidden');
       this.infoKey = '';
       return;
@@ -708,13 +713,14 @@ export class UI {
       const home = isl.home >= 0 ? g.buildings.byId(isl.home) : undefined;
       const role = isl.child ? 'Child' : isl.warrior ? (isl.warrior === 'jaguar' ? 'Jaguar warrior' : 'Eagle warrior') : ROLE_LABEL[isl.role];
       const carry = isl.carry ? `${icon(isl.carry.res === 'wood' ? 'wood' : isl.carry.res)} ${isl.carry.n} ${isl.carry.res}` : 'Nothing';
-      key = `i${isl.id}|${role}|${g.colony.activity(isl)}|${carry}|${home?.id}|${Math.round(isl.hunger * 20)}|${Math.round(isl.rest * 20)}|${Math.round(isl.happy * 20)}|${g.followId === isl.id}`;
+      key = `i${isl.id}|${Math.ceil(isl.injured / 10)}|${role}|${g.colony.activity(isl)}|${carry}|${home?.id}|${Math.round(isl.hunger * 20)}|${Math.round(isl.rest * 20)}|${Math.round(isl.happy * 20)}|${g.followId === isl.id}`;
       html = `
         <div class="card-head"><span>${isl.name}</span><span class="tag ${isl.gender}">${isl.gender === 'm' ? 'Male' : 'Female'}${isl.child ? ' · child' : ''}</span></div>
         <div class="kv"><span>Job</span><b>${role}${isl.manualRole ? ' <em>(assigned)</em>' : ''}</b></div>
         <div class="kv"><span>Doing</span><b>${g.colony.activity(isl)}</b></div>
         <div class="kv"><span>Carrying</span><b>${carry}</b></div>
         <div class="kv"><span>Home</span><b>${home ? home.label : 'None, sleeps by the fire'}</b></div>
+        ${isl.injured > 0 ? `<div class="kv"><span>Health</span><b>Injured by a jaguar, limping (${Math.ceil(isl.injured)}s)</b></div>` : ''}
         ${this.bar('Food', isl.hunger, isl.hunger < 0.3 ? 'low' : '')}
         ${this.bar('Rest', isl.rest, isl.rest < 0.25 ? 'low' : '')}
         ${this.bar('Happiness', isl.happy, isl.happy > 0.6 ? 'good' : '')}
@@ -723,6 +729,28 @@ export class UI {
           ${isl.manualRole ? '<button class="btn small" data-a="auto">Auto job</button>' : ''}
         </div>
         ${isl.child ? '' : '<p class="muted small">Tip: click a building, tree, rock or fruit bush to give them that job.</p>'}`;
+    } else if (dog) {
+      const D = g.dogs;
+      const owner = dog.owner >= 0 ? g.colony.byId(dog.owner) : undefined;
+      const k = g.buildings.byId(dog.kennel);
+      const doing = D.describe(dog);
+      const role = k?.dogRole === 'guard' ? 'Guarding the settlement' : 'Free to roam';
+      key = `d${dog.id}|${doing}|${owner?.id}|${role}|${Math.round(dog.hunger * 10)}|${Math.ceil(dog.injured / 10)}|${dog.puppy}`;
+      html = `
+        <div class="card-head"><span>${ICONS.dog} ${dog.name}</span><span class="tag">${dog.puppy ? 'Puppy' : 'Village dog'}</span></div>
+        <div class="kv"><span>Doing</span><b>${doing}</b></div>
+        <div class="kv"><span>Belongs to</span><b>${owner ? `${owner.name}'s household` : k ? 'The kennel' : 'The whole village'}</b></div>
+        <div class="kv"><span>Role</span><b>${role}</b></div>
+        ${dog.injured > 0 ? `<div class="kv"><span>Health</span><b>Injured, limping (${Math.ceil(dog.injured)}s)</b></div>` : ''}
+        ${this.bar('Fed', dog.hunger, dog.hunger < 0.3 ? 'low' : 'good')}
+        <p class="muted small">Dogs smell jaguars long before villagers see them, bark the alarm and try to drive them off.</p>`;
+    } else if (jag) {
+      const doing = g.jaguars.describe(jag);
+      key = `j${jag.id}|${doing}`;
+      html = `
+        <div class="card-head"><span>Jaguar</span><span class="tag">Predator</span></div>
+        <div class="kv"><span>Doing</span><b>${doing}</b></div>
+        <p class="muted small">Jaguars live deep in the jungle and sometimes stalk the village, especially at night. Villagers only see one when it's close. Dogs (build a Kennel) and warriors drive them off.</p>`;
     } else if (mk) {
       const M = g.wildlife.monkeys;
       const doing = M.describe(mk);
@@ -750,7 +778,7 @@ export class UI {
         <div class="actions"><button class="btn small" data-a="capture" ${free && (!d.needsPen || hasPen) ? '' : 'disabled'}>${ICONS.harvest} ${label}</button></div>
         <p class="muted small">Tip: select an islander first, then tap an animal to send them after it.</p>`;
     } else if (b) {
-      key = `b${b.id}|${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
+      key = `b${b.id}|${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
       html = this.buildingHtml(b);
     }
     if (!force && key === this.infoKey) return;
@@ -781,6 +809,16 @@ export class UI {
       const docked = ships.filter((s) => s.state === 'docked').length;
       body += `<div class="kv"><span>Trade boats</span><b>${ships.length ? `${docked} moored · ${ships.length - docked} at sea` : 'None yet'}${b.boatBuild > 0 ? ` (building ${Math.round((b.boatBuild / TRADE.boatBuildSeconds) * 100)}%)` : ''}</b></div>`;
     }
+    if (b.key === 'kennel' && b.complete) {
+      const D = g.dogs;
+      const all = D.alive;
+      const adults = all.filter((d) => !d.puppy).length, pups = all.length - adults;
+      body += `<div class="sec-h">${ICONS.dog} Dogs</div>
+        <div class="kv"><span>Adult</span><b>${adults}</b></div>
+        <div class="kv"><span>Puppies</span><b>${pups}${b.breedT > 0 ? ` (+1 on the way, ${Math.ceil(b.breedT)}s)` : ''}</b></div>
+        <div class="kv"><span>Capacity</span><b>${all.length}/${D.capacity}</b></div>
+        <div class="kv"><span>Food</span><b>~${(adults + pups * 0.5) * DOGS.foodPerMinute < 1 ? ((adults + pups * 0.5) * DOGS.foodPerMinute).toFixed(1) : Math.round((adults + pups * 0.5) * DOGS.foodPerMinute)} per minute</b></div>`;
+    }
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
     let actions = '';
     const up = g.buildings.canUpgrade(b);
@@ -799,6 +837,14 @@ export class UI {
       const canBoat = g.trade.of(b).length + (b.boatBuild > 0 ? 1 : 0) < TRADE.maxBoats && g.eco.canAfford(c);
       actions += `<button class="btn small" data-a="trade">${ICONS.boat} Trade goods</button>`;
       actions += `<button class="btn small" data-a="tradeboat" ${canBoat ? '' : 'disabled'}>${ICONS.boat} Build trade boat <span class="c">${icon('wood')}${c.wood} ${icon('stone')}${c.stone}</span></button>`;
+    }
+    if (b.key === 'kennel' && b.complete) {
+      const ok = g.dogs.canBreed(b);
+      actions += `<button class="btn small" data-a="breed" ${ok.ok ? '' : 'disabled'} title="${ok.reason}">${ICONS.dog} Breed dog <span class="c">${DOGS.breedFood} food</span></button>`;
+      if (!ok.ok) actions += `<p class="muted small">${ok.reason}.</p>`;
+      actions += `<div class="sec-h">Role</div><div class="seg">
+        <button class="btn small${b.dogRole === 'roam' ? ' on' : ''}" data-a="dogroam" title="Dogs wander farther and go out with hunters and explorers">Free roam</button>
+        <button class="btn small${b.dogRole === 'guard' ? ' on' : ''}" data-a="dogguard" title="Dogs stay close to the houses and people">Guard settlement</button></div>`;
     }
     if (b.key === 'warroom' && b.complete) {
       const c = WARRIOR.cost;
@@ -853,6 +899,12 @@ export class UI {
       }
       if (a === 'boat') g.buildBoat(b);
       if (a === 'tradeboat') this.toast(g.trade.orderBoat(b));
+      if (a === 'breed') this.toast(g.dogs.breed(b));
+      if (a === 'dogroam' || a === 'dogguard') {
+        b.dogRole = a === 'dogguard' ? 'guard' : 'roam';
+        this.toast(b.dogRole === 'guard' ? 'The dogs will stay close and guard the settlement.' : 'The dogs are free to roam and go out with villagers.');
+        this.renderInfo(true);
+      }
       if (a === 'trade') this.openTrade(b);
       if (a === 'jaguar' || a === 'eagle') {
         if (g.colony.trainWarrior(b, a)) this.toast(`A ${a === 'jaguar' ? 'Jaguar' : 'Eagle'} warrior begins training.`);

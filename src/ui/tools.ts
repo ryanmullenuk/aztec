@@ -27,4 +27,4 @@ export const TOOLS: ToolDef[] = [
   { id: 'calm', name: 'Calm', icon: 'calm', hint: 'Calm a storm and bring back the sun.', cost: POWERS.calm.cost },
 ];
 
-export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'chinampa', 'woodstore', 'grainstore', 'smokehouse', 'firepit', 'well', 'bonfire', 'torch', 'temple', 'butcher', 'jetty', 'tradedock', 'warroom'];
+export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'chinampa', 'woodstore', 'grainstore', 'smokehouse', 'firepit', 'well', 'bonfire', 'torch', 'temple', 'butcher', 'kennel', 'jetty', 'tradedock', 'warroom'];
