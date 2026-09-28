@@ -22,7 +22,7 @@
 
 html, body {
   margin: 0;
-  /* --app-h is the true screen height (set from script: iOS home-screen apps under-report 100vh). */
+  /* Share the available viewport height with the renderer. */
   height: var(--app-h, 100%);
   overflow: hidden;
   background: #007d83;
@@ -77,17 +77,20 @@ html, body {
   transition: opacity 0.9s ease;
   overflow: hidden;
 }
-/* Fill the viewport with the artwork's colours while keeping the complete poster visible. */
-.splash-bg { position: absolute; inset: -40px; background-position: center; background-size: cover; background-repeat: no-repeat; filter: blur(28px) saturate(1.1); }
+/* No blurred duplicate: keep all of the poster inside the phone's safe area. */
 .splash-art {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: contain; object-position: center;
+  padding: var(--safe-t) env(safe-area-inset-right, 0px) var(--safe-b) env(safe-area-inset-left, 0px);
+  object-fit: fill; object-position: center;
 }
-/* Anchor the controls inside the poster's blank lower panel, including short phones. */
 .splash-ui {
   position: absolute; left: 0; right: 0;
-  bottom: max(calc((100% - min(100%, 216.18vw)) / 2 + min(7%, 15.13vw)), calc(16px + var(--safe-b)));
+  bottom: calc(7% + var(--safe-b));
   display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+/* Preserve the portrait composition on tablets and landscape displays. */
+@media (min-aspect-ratio: 3/4) {
+  .splash-art { object-fit: contain; }
 }
 .splash-ui .loading-sub { margin: 0; color: #ffe08a; font-size: clamp(11px, 2.8vw, 14px); text-shadow: 0 1px 4px #004e53; }
 .play {
