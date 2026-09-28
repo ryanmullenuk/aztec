@@ -45,6 +45,7 @@ import { DOG_BASE, Dogs } from './entities/Dogs';
 import { JAG_BASE, Jaguar, Jaguars } from './entities/Jaguars';
 import { View } from './render/View';
 import { WaterBirds } from './entities/WaterBirds';
+import { Butterflies } from './entities/Butterflies';
 import { SeaTurtles } from './entities/SeaTurtles';
 import { Alligators } from './entities/Alligators';
 import { SwampView } from './water/Swamp';
@@ -138,6 +139,7 @@ export class Game {
   wildlife: Wildlife;
   dogs!: Dogs;
   waterBirds!: WaterBirds;
+  butterflies!: Butterflies;
   turtles!: SeaTurtles;
   gators!: Alligators;
   swampView!: SwampView;
@@ -285,6 +287,8 @@ export class Game {
     this.scene.add(this.marine.group);
     this.waterBirds = new WaterBirds(this.world, this.veg.plants.filter((p) => p.kind === 'searock').map((p) => ({ x: p.x, z: p.z })));
     this.scene.add(this.waterBirds.meshes.group);
+    this.butterflies = new Butterflies(this.world, this.veg.plants.filter((p) => p.kind === 'flowerbush' || p.kind === 'bush'), Math.round(110 * cfg.vegDensity));
+    this.scene.add(this.butterflies.mesh);
     this.turtles = new SeaTurtles(this.world, SEA_SURFACE);
     this.scene.add(this.turtles.meshes.group);
     this.swampView = new SwampView(this.world, this.water.shared);
@@ -1521,6 +1525,7 @@ export class Game {
     }
     this.dogs.update(dt, this.time.isNight);
     this.waterBirds.update(dt, this.time.hour);
+    this.butterflies.update(dt, realDt, ls.day, this.raining, this.input.hover.active && !this.input.navigating && this.cursorActive ? this.cursorWorld : null);
     this.turtles.people = this.colony.grid;
     this.turtles.update(dt);
     this.gators.update(dt);

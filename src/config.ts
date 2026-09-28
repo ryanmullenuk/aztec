@@ -592,10 +592,15 @@ export const WILDLIFE = {
   goats: 12,
   parrots: 28,
   gulls: 26,
-  reefFish: 140,
+  /** Rough budget of decorative reef fish (schools stop spawning once it's reached). */
+  reefFish: 280,
   schools: 4,
-  /** Big open-water schools that boats track down. */
+  /** Big open-water schools that boats track down: fishing stock per school (gameplay). */
   fishPerSchool: 110,
+  /** Fish drawn per deep school at full stock (the school visibly thins as its stock falls). */
+  schoolFishShown: 220,
+  /** Fish (reef and deep) further than this from the camera are sub-pixel: not drawn or steered. */
+  fishDrawDistance: 110,
   /** Radius around the cursor/touch point that scares birds. */
   birdFleeRadius: 6,
   fishFleeRadius: 5,
@@ -669,7 +674,7 @@ export const FAUNA = {
   gullBank: 6.5,
   gullScatter: 3,
   reefSchools: [11, 15] as [number, number],
-  reefSchoolSize: [5, 20] as [number, number],
+  reefSchoolSize: [10, 40] as [number, number],
   /** Beyond this distance from the camera target, animals think less often. */
   lodDistance: 70,
 };
@@ -689,9 +694,12 @@ export const MARINE = {
   whaleSpeed: 1.5,
   /** Cruising depth of the whale's body centre below the surface. */
   swimDepth: 1.7,
-  /** Seconds until the first breach, then a random gap between breaches per whale. */
-  firstBreach: 12,
-  breachEvery: [45, 95] as [number, number],
+  /** Seconds until the first breach, then a random gap between breaches per whale (rare). */
+  firstBreach: 45,
+  breachEvery: [100, 170] as [number, number],
+  /** Seconds until a whale first comes up to breathe (back, blow, dive), then the gap between breaths. */
+  firstSurface: 6,
+  surfaceEvery: [20, 40] as [number, number],
   pods: 2,
   dolphinsPerPod: 6,
   dolphinLength: 1.15,
