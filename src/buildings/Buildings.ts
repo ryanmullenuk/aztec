@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE, FARM_TYPES, isFarm } from '../config';
 import { Economy, Cost } from '../economy/Economy';
-import { canopyMaterial, flameMaterial, stylisedMaterial, FX } from '../render/materials';
+import { buildingMaterial, canopyMaterial, flameMaterial, FX } from '../render/materials';
 import { Terrain } from '../terrain/Terrain';
 import { Vegetation } from '../vegetation/Vegetation';
 import { World } from '../world/World';
@@ -484,11 +484,13 @@ export class BuildingSystem {
     return g === this.flameGeo || g === this.bellGeo || this.logGeos.includes(g) || this.stoneGeos.includes(g) || this.basketGeos.includes(g) || [...this.cropGeos.values()].includes(g);
   }
 
-  /** Where a building's animal pen is: the butcher's on its +x half, the vegetable farm's chicken run in its front corner. */
+  /** Where a building's animal pen is: the butcher's on its +x half, the vegetable farm's chicken run in its front corner, the pig and chicken pens' open yards. */
   private setPen(b: Building): void {
     const [sw, sd] = b.def.size;
     if (b.key === 'butcher') [b.penX, b.penZ] = b.local(sw / 4 + 0.15, 0.1);
     else if (b.key === 'farm') [b.penX, b.penZ] = b.local(...models.FARM_PEN.centre(sw, sd));
+    else if (b.key === 'pigpen') [b.penX, b.penZ] = b.local(...models.PIG_PEN.centre(sw, sd));
+    else if (b.key === 'chickenpen') [b.penX, b.penZ] = b.local(...models.CHICKEN_PEN.centre(sw, sd));
   }
 
   private modelFor(b: Building): models.BuildingModel {
@@ -509,6 +511,8 @@ export class BuildingSystem {
       case 'greathall': return models.greatHallModel();
       case 'well': return models.wellModel();
       case 'butcher': return models.butcherModel(sw, sd);
+      case 'pigpen': return models.pigpenModel(sw, sd);
+      case 'chickenpen': return models.chickenpenModel(sw, sd);
       case 'woodstore': return models.woodstoreModel(sw, sd);
       case 'grainstore': return models.grainstoreModel();
       case 'warroom': return models.warroomModel();
@@ -518,7 +522,7 @@ export class BuildingSystem {
   }
 
   private buildVisuals(b: Building): void {
-    const mat = stylisedMaterial();
+    const mat = buildingMaterial();
     const [sw, sd] = b.def.size;
     const model = this.modelFor(b);
     b.group.position.set(b.x, b.y, b.z);

@@ -984,6 +984,267 @@ export function butcherModel(w: number, d: number): BuildingModel {
   return { finished: b.build(), torches: [t], height: 1.5 };
 }
 
+// ---------------- Livestock pens ----------------
+
+const PEN = {
+  withy: c(0x8a6440),
+  withyDark: c(0x6b4a2c),
+  straw: c(0xd9b866),
+  strawDark: c(0xb8913f),
+  earth: c(0xa3805a),
+  dust: c(0xc7a77a),
+  mud: c(0x5c412a),
+  mudDark: c(0x3b2a1b),
+  puddle: c(0x6d7c80),
+  sheen: c(0xa9bcc0),
+  water: c(0x2f7fa0),
+  grain: c(0xe0b33a),
+  egg: c(0xf3e9d6),
+};
+
+/** The pig pen's yard (local): where penned animals roam, clear of the sty and troughs. */
+export const PIG_PEN = {
+  centre(_w: number, _d: number): [number, number] {
+    return [0.1, 0.25];
+  },
+};
+/** The chicken pen's yard (local), in front of the coop and perches. */
+export const CHICKEN_PEN = {
+  centre(_w: number, _d: number): [number, number] {
+    return [0, 0.4];
+  },
+};
+
+/** Woven wattle between (x0, z0) and (x1, z1): rows of withies, alternately in front of and behind the stakes. */
+function wattleRun(b: GeoBuilder, x0: number, z0: number, x1: number, z1: number, y0: number, h: number, rows: number, t = 0.035): void {
+  const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0);
+  const px = Math.cos(a), pz = -Math.sin(a);
+  const rh = h / rows;
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2 ? 1 : -1) * 0.012;
+    b.add(P.box(t, rh * 0.86, len), { color: r % 2 ? PEN.withy : PEN.withyDark }, M.t((x0 + x1) / 2 + px * off, y0 + (r + 0.5) * rh, (z0 + z1) / 2 + pz * off, 0, a, 0));
+  }
+}
+
+/** Posts along a straight run, `spacing` apart (both ends included). */
+function fencePosts(b: GeoBuilder, rng: RNG, x0: number, z0: number, x1: number, z1: number, spacing: number, h: number, r = 0.032): void {
+  const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / spacing));
+  for (let s = 0; s <= n; s++) {
+    const ph = h + rng.range(-0.03, 0.04);
+    b.add(P.cyl(r * 0.85, r, ph, 5), { color: K.timberDark }, M.t(x0 + ((x1 - x0) * s) / n, ph / 2, z0 + ((z1 - z0) * s) / n, 0, rng.range(0, 1), 0));
+  }
+}
+
+/** A low gable of thatch with its ridge along x: layered courses, a ridge roll and a ragged fringe at the eaves. */
+function gableThatch(b: GeoBuilder, x: number, eave: number, z: number, len: number, depth: number, rise: number, fringe = 6): void {
+  const half = depth / 2, L = Math.hypot(half, rise), a = Math.atan2(rise, half);
+  for (const s of [1, -1]) {
+    b.add(P.box(len, 0.06, L + 0.04), { color: K.thatch, leaf: 0.2 }, M.t(x, eave + rise / 2 + 0.02, z + (s * half) / 2, s * a, 0, 0));
+    // Two darker courses laid over the main thatch.
+    for (const f of [0.28, 0.66]) {
+      const zz = z + s * half * (1 - f), yy = eave + rise * f + 0.065;
+      b.add(P.box(len + 0.02, 0.03, 0.09), { color: K.thatchDark, leaf: 0.2 }, M.t(x, yy, zz, s * a, 0, 0));
+    }
+    for (let k = 0; k < fringe; k++) {
+      const fx = x - len / 2 + ((k + 0.5) / fringe) * len;
+      b.add(P.cone(0.05, 0.1, 4), { color: K.thatchDark, leaf: 0.2 }, M.t(fx, eave - 0.02, z + s * (half + 0.02), s * (Math.PI - 0.5), 0, 0));
+    }
+  }
+  b.add(P.cyl(0.05, 0.05, len + 0.06, 6), { color: K.thatchDark, leaf: 0.2 }, M.t(x, eave + rise + 0.03, z, 0, 0, Math.PI / 2));
+}
+
+/** A patch of scattered straw: a flat mat with a few loose stalks. */
+function strawPatch(b: GeoBuilder, rng: RNG, x: number, z: number, r: number, stalks = 5, y = 0.02): void {
+  b.add(P.cyl(r, r * 1.08, 0.014, 7), { color: PEN.straw }, M.t(x, y + 0.007, z, 0, rng.range(0, 3), 0, 1, 1, rng.range(0.6, 0.9)));
+  for (let k = 0; k < stalks; k++) {
+    const a = rng.range(0, Math.PI * 2), d = rng.range(0, r * 1.1);
+    b.add(P.box(0.012, 0.008, rng.range(0.08, 0.14)), { color: k % 2 ? PEN.strawDark : PEN.straw }, M.t(x + Math.cos(a) * d, y + 0.018, z + Math.sin(a) * d, 0, rng.range(0, 3.14), 0));
+  }
+}
+
+/** A four-board trough (length along z), optionally filled with water or feed. */
+function trough(b: GeoBuilder, x: number, z: number, len: number, wid: number, h: number, fill: THREE.Color, stone = false): void {
+  const col = stone ? K.stone : K.timber, t = stone ? 0.05 : 0.03;
+  b.add(P.box(wid, 0.04, len), { color: stone ? K.stoneDark : K.timberDark }, M.t(x, 0.02, z));
+  for (const s of [1, -1]) {
+    b.add(P.box(t, h, len), { color: col }, M.t(x + s * (wid / 2 - t / 2), h / 2, z));
+    b.add(P.box(wid, h, t), { color: col }, M.t(x, h / 2, z + s * (len / 2 - t / 2)));
+  }
+  b.add(P.box(wid - t * 2, 0.012, len - t * 2), { color: fill }, M.t(x, h * 0.72, z));
+}
+
+/**
+ * Pig pen: a wattle-fenced yard with a low thatched sty (open front, straw bedding) at the back left,
+ * a muddy wallow, a feeding trough and a stone water trough along the sides, and a hurdle gate swung open.
+ */
+export function pigpenModel(w: number, d: number): BuildingModel {
+  const b = new GeoBuilder();
+  const rng = new RNG(31);
+  const hw = w / 2 - 0.1, hd = d / 2 - 0.1, gate = 0.45, FH = 0.44;
+  // Trampled earth yard.
+  b.add(P.box(hw * 2 - 0.04, 0.02, hd * 2 - 0.04), { color: PEN.earth }, M.t(0, 0.01, 0));
+  // Wattle fence on posts, with a gateway at the front.
+  const runs: [number, number, number, number][] = [[-hw, -hd, hw, -hd], [hw, -hd, hw, hd], [-hw, -hd, -hw, hd], [-hw, hd, -gate, hd], [gate, hd, hw, hd]];
+  for (const [x0, z0, x1, z1] of runs) {
+    fencePosts(b, rng, x0, z0, x1, z1, 0.62, FH);
+    wattleRun(b, x0, z0, x1, z1, 0.03, FH - 0.08, 5);
+  }
+  // Taller gate posts and the hurdle gate swung open along the outside of the front fence.
+  for (const s of [-1, 1]) b.add(P.cyl(0.04, 0.046, 0.6, 6), { color: K.timberDark }, M.t(s * gate, 0.3, hd));
+  const gx = gate + 0.42, gz = hd + 0.07;
+  for (const s of [-1, 1]) b.add(P.box(0.04, 0.42, 0.04), { color: K.timber }, M.t(gx + s * 0.4, 0.23, gz));
+  wattleRun(b, gate + 0.03, gz, gate + 0.81, gz, 0.06, 0.34, 4, 0.03);
+
+  // Sty at the back left: wattle walls on three sides, open to the yard, under a low thatch gable.
+  const sx = -1.2, sz = -1.66, sw = 1.9, sd = 1.12, wallH = 0.38;
+  b.add(P.box(sw - 0.06, 0.03, sd - 0.06), { color: PEN.straw }, M.t(sx, 0.025, sz));
+  strawPatch(b, rng, sx + 0.3, sz + 0.5, 0.26, 4, 0.02);
+  strawPatch(b, rng, sx - 0.4, sz + 0.62, 0.18, 3, 0.02);
+  for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    const ph = oz > 0 ? 0.46 : 0.44;
+    b.add(P.cyl(0.035, 0.04, ph, 5), { color: K.timberDark }, M.t(sx + (ox * sw) / 2, ph / 2, sz + (oz * sd) / 2));
+  }
+  wattleRun(b, sx - sw / 2, sz - sd / 2, sx + sw / 2, sz - sd / 2, 0.02, wallH, 5, 0.045);
+  wattleRun(b, sx - sw / 2, sz - sd / 2, sx - sw / 2, sz + sd / 2, 0.02, wallH, 5, 0.045);
+  wattleRun(b, sx + sw / 2, sz - sd / 2, sx + sw / 2, sz + sd / 2, 0.02, wallH, 5, 0.045);
+  // Daub patches smeared on the back wall.
+  for (const ox of [-0.5, 0.35]) b.add(P.box(0.32, 0.14, 0.02), { color: K.adobe }, M.t(sx + ox, 0.2 + ox * 0.1, sz - sd / 2 - 0.035));
+  b.add(P.box(sw + 0.04, 0.04, 0.05), { color: K.timber }, M.t(sx, 0.46, sz + sd / 2));
+  gableThatch(b, sx, 0.46, sz, sw + 0.3, sd + 0.26, 0.3, 7);
+  // A heap of fresh straw beside the sty.
+  b.add(lumpy(P.sphere(0.24, 0), 0.18, 7, 0.5), { color: PEN.straw }, M.t(sx + sw / 2 + 0.32, 0.08, sz - 0.25));
+  b.add(lumpy(P.sphere(0.14, 0), 0.2, 9, 0.5), { color: PEN.strawDark }, M.t(sx + sw / 2 + 0.55, 0.05, sz - 0.05));
+
+  // Muddy wallow in the middle right of the yard: wet margin, dark mud, puddles catching the sky.
+  const wx = 0.85, wz = 0.55;
+  b.add(P.cyl(0.8, 0.84, 0.014, 14), { color: PEN.mud }, M.t(wx, 0.022, wz, 0, 0.3, 0, 1, 1, 0.78));
+  b.add(P.cyl(0.58, 0.62, 0.014, 12), { color: PEN.mudDark }, M.t(wx + 0.05, 0.03, wz - 0.02, 0, 1.1, 0, 1, 1, 0.8));
+  for (const [ox, oz, r] of [[-0.18, 0.08, 0.2], [0.2, -0.14, 0.14], [0.1, 0.24, 0.1]] as const) {
+    b.add(P.cyl(r, r, 0.01, 10), { color: PEN.puddle }, M.t(wx + ox, 0.04, wz + oz, 0, ox * 5, 0, 1, 1, 0.7));
+    b.add(P.cyl(r * 0.35, r * 0.35, 0.006, 6), { color: PEN.sheen }, M.t(wx + ox - r * 0.3, 0.046, wz + oz - r * 0.15, 0, 0, 0, 1.6, 1, 0.6));
+  }
+  // Churned lumps round the edge and a few splashes.
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2 + rng.range(-0.3, 0.3), r = rng.range(0.66, 0.82);
+    b.add(lumpy(P.sphere(rng.range(0.06, 0.1), 0), 0.3, 11 + k, 0.4), { color: k % 2 ? PEN.mud : PEN.mudDark }, M.t(wx + Math.cos(a) * r, 0.03, wz + Math.sin(a) * r * 0.78));
+  }
+  for (let k = 0; k < 5; k++) b.add(P.cyl(0.05, 0.05, 0.008, 6), { color: PEN.mud }, M.t(wx + rng.range(-1.1, 1.1), 0.024, wz + rng.range(-1, 1)));
+
+  // Feeding trough along the right fence (maize mash) and a stone water trough on the left.
+  trough(b, hw - 0.42, -0.95, 0.9, 0.26, 0.14, PEN.grain);
+  for (let k = 0; k < 4; k++) b.add(P.box(0.04, 0.02, 0.05), { color: c(0x8fb24a) }, M.t(hw - 0.42 + rng.range(-0.06, 0.06), 0.11, -1.3 + k * 0.22));
+  trough(b, -hw + 0.4, 0.75, 0.8, 0.3, 0.16, PEN.water, true);
+  // Loose straw about the yard, a water pot and a feed basket by the gate.
+  for (const [x, z, r] of [[-0.35, -0.55, 0.2], [0.55, -0.95, 0.16], [-0.9, 1.35, 0.18], [1.6, 1.55, 0.14], [-1.55, -0.4, 0.15]] as const) strawPatch(b, rng, x, z, r, 3);
+  b.add(P.cyl(0.1, 0.075, 0.2, 8), { color: K.terracotta }, M.t(-hw + 0.35, 0.1, 1.4));
+  b.add(P.cyl(0.06, 0.1, 0.05, 8), { color: K.terracotta }, M.t(-hw + 0.35, 0.225, 1.4));
+  b.add(P.cyl(0.13, 0.1, 0.13, 8), { color: K.rope }, M.t(gate + 0.35, 0.065, hd - 0.3));
+  b.add(P.cyl(0.11, 0.11, 0.01, 8), { color: PEN.grain }, M.t(gate + 0.35, 0.125, hd - 0.3));
+  return { finished: b.build(), torches: [], height: 0.9 };
+}
+
+/**
+ * Chicken pen: a cane-fenced yard of dust and straw, with a thatched coop raised on stilts at the back
+ * right (cleated ramp, nest boxes with eggs on its side), a roosting frame, grain feeders and a water dish.
+ */
+export function chickenpenModel(w: number, d: number): BuildingModel {
+  const b = new GeoBuilder();
+  const rng = new RNG(47);
+  const hw = w / 2 - 0.1, hd = d / 2 - 0.1, gate = 0.42, FH = 0.4;
+  // Dusty yard, a scratched-out dust bath and straw strewn about.
+  b.add(P.box(hw * 2 - 0.04, 0.02, hd * 2 - 0.04), { color: PEN.dust }, M.t(0, 0.01, 0));
+  b.add(P.cyl(0.42, 0.46, 0.012, 12), { color: c(0xa98a62) }, M.t(-0.7, 0.024, 0.9, 0, 0, 0, 1, 1, 0.75));
+  b.add(P.cyl(0.26, 0.28, 0.01, 10), { color: c(0x927550) }, M.t(-0.72, 0.03, 0.92, 0, 0, 0, 1, 1, 0.7));
+  for (const [x, z, r] of [[0.5, 0.2, 0.34], [-0.3, -0.4, 0.26], [1.2, 1.1, 0.24], [0.1, 1.6, 0.2], [-1.4, 0.2, 0.22], [0.8, -0.85, 0.3]] as const) strawPatch(b, rng, x, z, r, 4);
+  // Cane fence: close-set canes wired to two rails between stout posts, a gateway at the front.
+  const runs: [number, number, number, number][] = [[-hw, -hd, hw, -hd], [hw, -hd, hw, hd], [-hw, -hd, -hw, hd], [-hw, hd, -gate, hd], [gate, hd, hw, hd]];
+  for (const [x0, z0, x1, z1] of runs) {
+    fencePosts(b, rng, x0, z0, x1, z1, 0.95, FH + 0.06, 0.034);
+    const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0);
+    for (const y of [0.12, 0.32]) b.add(P.box(0.026, 0.026, len), { color: K.timber }, M.t((x0 + x1) / 2, y, (z0 + z1) / 2, 0, a, 0));
+    const n = Math.round(len / 0.2);
+    for (let s = 1; s < n; s++) {
+      const ch = FH + rng.range(-0.04, 0.03), f = s / n;
+      b.add(P.box(0.018, ch, 0.018), { color: s % 3 ? c(0xc9b27a) : c(0xa89260) }, M.t(x0 + (x1 - x0) * f, ch / 2, z0 + (z1 - z0) * f, 0, a, 0));
+    }
+  }
+  for (const s of [-1, 1]) b.add(P.cyl(0.038, 0.044, 0.56, 6), { color: K.timberDark }, M.t(s * gate, 0.28, hd));
+  // Little woven gate standing open against the front fence, inside.
+  wattleRun(b, -gate - 0.04, hd - 0.07, -gate - 0.8, hd - 0.07, 0.04, 0.3, 4, 0.03);
+
+  // Coop on stilts at the back right.
+  const cx = 1.05, cz = -1.62, cw = 1.2, cd = 0.78, fy = 0.38, ch = 0.46;
+  for (const [ox, oz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    b.add(P.cyl(0.035, 0.04, fy + ch, 5), { color: K.timberDark }, M.t(cx + ox * (cw / 2 - 0.02), (fy + ch) / 2, cz + oz * (cd / 2 - 0.02)));
+  }
+  b.add(P.box(cw + 0.06, 0.04, cd + 0.06), { color: K.timber }, M.t(cx, fy, cz));
+  // Walls: daubed wattle below a woven band, so the coop reads light and airy.
+  b.add(P.box(cw - 0.04, ch * 0.6, cd - 0.04), { color: K.adobe }, M.t(cx, fy + 0.02 + ch * 0.3, cz));
+  b.add(P.box(cw - 0.04, 0.04, cd - 0.04), { color: c(0xc9a474) }, M.t(cx, fy + 0.04, cz));
+  wattleRun(b, cx - cw / 2 + 0.02, cz + cd / 2 - 0.02, cx + cw / 2 - 0.02, cz + cd / 2 - 0.02, fy + ch * 0.62, ch * 0.38, 3, 0.03);
+  wattleRun(b, cx - cw / 2 + 0.02, cz - cd / 2 + 0.02, cx + cw / 2 - 0.02, cz - cd / 2 + 0.02, fy + ch * 0.62, ch * 0.38, 3, 0.03);
+  wattleRun(b, cx - cw / 2 + 0.02, cz - cd / 2 + 0.02, cx - cw / 2 + 0.02, cz + cd / 2 - 0.02, fy + ch * 0.62, ch * 0.38, 3, 0.03);
+  wattleRun(b, cx + cw / 2 - 0.02, cz - cd / 2 + 0.02, cx + cw / 2 - 0.02, cz + cd / 2 - 0.02, fy + ch * 0.62, ch * 0.38, 3, 0.03);
+  // Pop hole on the front, and a painted band.
+  const dx = cx - 0.28;
+  b.add(P.box(0.16, 0.2, 0.03), { color: K.door }, M.t(dx, fy + 0.12, cz + cd / 2 - 0.005));
+  b.add(P.box(0.22, 0.03, 0.035), { color: K.timberDark }, M.t(dx, fy + 0.235, cz + cd / 2));
+  b.add(P.box(cw - 0.02, 0.03, 0.02), { color: AD.red }, M.t(cx + 0.02, fy + ch * 0.6, cz + cd / 2 - 0.01));
+  gableThatch(b, cx, fy + ch, cz, cw + 0.28, cd + 0.3, 0.3, 6);
+  // Cleated ramp from the pop hole down into the yard.
+  const rl = 0.8, ra = Math.asin(fy / rl);
+  const r0z = cz + cd / 2 + 0.02, rmz = r0z + (Math.cos(ra) * rl) / 2;
+  b.add(P.box(0.18, 0.025, rl), { color: K.timber }, M.t(dx, fy / 2 + 0.01, rmz, ra, 0, 0));
+  for (let k = 1; k < 5; k++) {
+    const f = k / 5;
+    b.add(P.box(0.18, 0.018, 0.02), { color: K.timberDark }, M.t(dx, fy * (1 - f) + 0.03, r0z + Math.cos(ra) * rl * f, ra, 0, 0));
+  }
+  // Nest boxes along the coop's right side: three straw-lined cubbies, eggs in two.
+  const nx = cx + cw / 2 + 0.13, ny = fy + 0.03;
+  b.add(P.box(0.26, 0.03, cd - 0.06), { color: K.timber }, M.t(nx, ny, cz));
+  // Open to the outside behind a low lip, under a sloping lid.
+  b.add(P.box(0.03, 0.07, cd - 0.06), { color: K.timber }, M.t(nx + 0.12, ny + 0.035, cz));
+  for (let k = 0; k < 4; k++) b.add(P.box(0.26, 0.18, 0.025), { color: K.timberDark }, M.t(nx, ny + 0.105, cz - (cd - 0.08) / 2 + (k * (cd - 0.08)) / 3));
+  b.add(P.box(0.34, 0.03, cd + 0.02), { color: K.thatchDark, leaf: 0.2 }, M.t(nx + 0.02, ny + 0.25, cz, 0, 0, -0.3));
+  const cub = (cd - 0.08) / 3;
+  for (let k = 0; k < 3; k++) {
+    const zz = cz - (cd - 0.08) / 2 + cub * (k + 0.5);
+    b.add(P.cyl(0.08, 0.09, 0.04, 7), { color: PEN.straw }, M.t(nx, ny + 0.035, zz));
+    if (k !== 1) b.add(P.uvSphere(0.028, 6, 5), { color: PEN.egg }, M.t(nx + 0.02, ny + 0.07, zz + 0.02, 0, 0, 0, 1, 1.3, 1));
+  }
+  b.add(P.uvSphere(0.026, 6, 5), { color: PEN.egg }, M.t(nx - 0.03, ny + 0.07, cz - (cd - 0.08) / 2 + cub * 0.5 - 0.03, 0, 0, 0, 1, 1.3, 1));
+
+  // Roosting frame at the back left: two A-frame ends carrying perches at three heights.
+  const px = -1.35, pz = -1.65;
+  for (const s of [-1, 1]) {
+    for (const t of [-1, 1]) b.add(P.cyl(0.018, 0.022, 0.66, 5), { color: K.timberDark }, M.t(px + s * 0.5, 0.3, pz + t * 0.14, -t * 0.42, 0, 0));
+  }
+  for (const [y, oz] of [[0.18, 0.2], [0.34, 0.12], [0.5, 0.04]] as const) {
+    b.add(P.cyl(0.018, 0.018, 1.1, 5), { color: K.timber }, M.t(px, y, pz + oz, 0, 0, Math.PI / 2));
+    b.add(P.cyl(0.018, 0.018, 1.1, 5), { color: K.timber }, M.t(px, y, pz - oz, 0, 0, Math.PI / 2));
+  }
+  strawPatch(b, rng, px, pz, 0.34, 3);
+
+  // Feeders: a covered hanging gourd on a post, a long grain trough on legs, and a water dish.
+  const fx = -hw + 0.4, fz = -0.45;
+  b.add(P.cyl(0.025, 0.03, 0.62, 5), { color: K.timberDark }, M.t(fx, 0.31, fz));
+  b.add(P.box(0.3, 0.025, 0.025), { color: K.timberDark }, M.t(fx + 0.14, 0.6, fz));
+  b.add(P.cyl(0.006, 0.006, 0.22, 3), { color: K.rope }, M.t(fx + 0.26, 0.49, fz));
+  b.add(P.uvSphere(0.1, 8, 6), { color: c(0xc9a14a) }, M.t(fx + 0.26, 0.33, fz, 0, 0, 0, 1, 1.25, 1));
+  b.add(P.cyl(0.13, 0.1, 0.04, 10), { color: K.terracotta }, M.t(fx + 0.26, 0.17, fz));
+  b.add(P.cyl(0.11, 0.11, 0.01, 10), { color: PEN.grain }, M.t(fx + 0.26, 0.19, fz));
+  const tx = hw - 0.35, tz = 0.9;
+  for (const s of [-1, 1]) b.add(P.box(0.2, 0.08, 0.03), { color: K.timberDark }, M.t(tx, 0.04, tz + s * 0.36));
+  b.add(P.box(0.14, 0.03, 0.8), { color: K.timber }, M.t(tx, 0.09, tz));
+  for (const s of [-1, 1]) b.add(P.box(0.02, 0.06, 0.8), { color: K.timber }, M.t(tx + s * 0.07, 0.12, tz));
+  b.add(P.box(0.11, 0.012, 0.76), { color: PEN.grain }, M.t(tx, 0.115, tz));
+  b.add(P.cyl(0.16, 0.12, 0.06, 10), { color: K.terracotta }, M.t(-hw + 0.45, 0.03, 1.55));
+  b.add(P.cyl(0.14, 0.14, 0.01, 10), { color: PEN.water }, M.t(-hw + 0.45, 0.058, 1.55));
+  // Scattered grain round the feeders.
+  for (let k = 0; k < 10; k++) b.add(P.box(0.02, 0.01, 0.02), { color: PEN.grain }, M.t(rng.range(-0.6, 1.4), 0.025, rng.range(0, 1.3), 0, rng.range(0, 3), 0));
+  return { finished: b.build(), torches: [], height: 1.2 };
+}
+
 /** Wood store: an open-fronted adobe shed with a flat roof on timber beams. Log/stone piles are separate fill meshes. */
 export function woodstoreModel(w: number, d: number): BuildingModel {
   const b = new GeoBuilder();
