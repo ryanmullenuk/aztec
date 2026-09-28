@@ -6,12 +6,13 @@ export interface Mover {
   heading: number;
 }
 
-/** Can an animal stand here? Land, bridges, shallow water if it swims; not inside buildings. */
+/** Can an animal stand here? Land, bridges, shallow water if it swims; not inside buildings or rocks. */
 export function walkable(w: World, x: number, z: number, swim: boolean): boolean {
   const i = w.cellIndexAt(x, z);
   if (i < 0) return false;
   const o = w.occ[i];
   if (o && !w.passableBuildings.has(o - 1)) return false;
+  if (w.blocked(i)) return false;
   if (w.bridge[i]) return true;
   return w.heightAt(x, z) > (swim ? -1.7 : -0.12);
 }

@@ -696,7 +696,7 @@ export class Animals {
   private walkable(a: Animal, x: number, z: number): boolean {
     const w = this.world;
     const i = w.cellIndexAt(x, z);
-    if (i < 0 || w.layer[i] < 1 || !Number.isNaN(w.riverY[i])) return false;
+    if (i < 0 || w.layer[i] < 1 || !Number.isNaN(w.riverY[i]) || w.blocked(i)) return false;
     // Wild animals keep out of building footprints (the fire, huts, fields); penned ones stay in their pen.
     if (w.occ[i] && (a.pen < 0 || !w.passable(w.occ[i] - 1))) return false;
     return Math.abs(w.heightAt(x, z) - a.y) < SPECIES[a.sp].maxSlope;

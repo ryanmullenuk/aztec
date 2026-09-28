@@ -5,6 +5,7 @@ import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { View } from '../render/View';
 import { FishType, fishGeometry } from './animalModels';
+import { SEA_SURFACE } from '../water/Water';
 
 /** Beyond this distance (squared) reef fish use the lighter model. */
 const REEF_LOD2 = 16 * 16;
@@ -86,12 +87,11 @@ export class ReefFish {
     this.rng = new RNG(world.seed * 59 + 17);
     this.findReefs(reefPoints);
     this.spawn();
-    // Drawn after the water, softly blended, so their colours read through the surface.
-    // Its own material: the shared stylised one is used by boats, buildings and dolphins.
-    const mat = fishMaterial(8, { transparent: true, opacity: 0.62 });
+    // Drawn after the water, softly blended, so their colours read through the surface. They are
+    // depth-tested at the point where the view ray enters the sea, so the surface doesn't hide them
+    // but land, trees, rocks and buildings in front do.
+    const mat = fishMaterial(8, { transparent: true, opacity: 0.62 }, SEA_SURFACE);
     mat.depthWrite = false;
-    // The ocean writes depth; the fish keep to water deeper than the surf, so skipping the test is safe.
-    mat.depthTest = false;
     for (const t of TYPES) {
       const n = this.fish.filter((f) => this.schools[f.school].type === t).length;
       for (const lo of [false, true]) {
