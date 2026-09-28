@@ -107,6 +107,8 @@ export class UI {
     this.isleNameEl.textContent = n.toUpperCase() === 'GODMODE' ? '' : n;
     this.isleNameEl.classList.toggle('hidden', !this.isleNameEl.textContent);
     if (this.nameInput && document.activeElement !== this.nameInput) this.nameInput.value = n;
+    // God-mode-only settings.
+    this.settings?.querySelector('.godrow')?.classList.toggle('hidden', !this.game.eco.godMode);
   }
 
   private buildTopLeft(): void {
@@ -440,6 +442,7 @@ export class UI {
       <label class="row">Volume <input type="range" min="0" max="1" step="0.05" data-k="volume"></label>
       <label class="row">Music <input type="range" min="0" max="1" step="0.05" data-k="music"></label>
       <label class="row">Show FPS <input type="checkbox" data-k="fps"></label>
+      <label class="row godrow hidden">Instant build and upgrade <input type="checkbox" data-k="instantBuild"></label>
       <div class="obtns">
         <button class="obtn red" data-a="new">${ICONS.o_new}<span>New game</span></button>
         <button class="obtn gold" data-a="save">${ICONS.o_save}<span>Save</span></button>
@@ -613,6 +616,7 @@ export class UI {
     const on = show ?? m.classList.contains('hidden');
     m.classList.toggle('hidden', !on);
     if (on && this.presetSelect) this.presetSelect.value = this.game.settings.preset;
+    if (on) this.updateIslandName();
   }
 
   toggleHelp(): void {
@@ -1026,7 +1030,8 @@ export class UI {
       if (a === 'upgrade') {
         const nb = g.buildings.upgrade(b);
         if (nb) {
-          this.toast(b.key === 'hut' ? 'The hut will be rebuilt as a level 2 Home.' : b.key === 'home' ? `The house is being extended to level ${b.tier + 2}.` : 'Temple upgrade started.');
+          if (nb.complete && !nb.upgrading) this.toast(nb.key === 'home' ? `The house is now level ${nb.tier + 1}.` : 'The temple rises a tier.');
+          else this.toast(b.key === 'hut' ? 'The hut will be rebuilt as a level 2 Home.' : b.key === 'home' ? `The house is being extended to level ${b.tier + 2}.` : 'Temple upgrade started.');
           if (nb !== b) g.select({ building: nb.id });
         }
       }
