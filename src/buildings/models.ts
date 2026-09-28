@@ -30,6 +30,8 @@ export interface BuildingModel {
   torches: THREE.Vector3[];
   /** Approximate height for scaffolding. */
   height: number;
+  /** A roof drawn with the see-through canopy material (so people under it show when zoomed in). */
+  canopy?: THREE.BufferGeometry;
 }
 
 /** Bands of darker thatch along height for texture. */
@@ -942,4 +944,290 @@ export function flameGeometry(): THREE.BufferGeometry {
   const g = new THREE.ConeGeometry(0.06, 0.18, 7);
   g.translate(0, 0.09, 0);
   return g;
+}
+
+// ---------------- Great Hall ----------------
+
+/**
+ * Layout of the Great Hall (model-local, door faces +z): a raised stone platform reached by a
+ * wide front stair, benches in rows under a striped canopy facing a sun-disc dais at the back,
+ * and standing room round the edges. Shared by the model and the villagers who use it.
+ */
+export const HALL = {
+  /** Platform height and half-extent; the front stair's half-width and the foot of the stair. */
+  h: 0.5,
+  edge: 2.75,
+  stairHalf: 0.7,
+  stairFoot: 3.5,
+  /** Seats (hip position; seated villagers face -z, toward the dais). */
+  seats: [-1.05, -0.35, 0.35, 1.05].flatMap((z) => [-1.25, -0.85, -0.45, 0.45, 0.85, 1.25].map((x) => ({ x, z }))),
+  /** Standing room along the front terrace and the sides (facing the middle). */
+  stands: [
+    ...[-1.6, -0.95, 0.95, 1.6].map((x) => ({ x, z: 2.2 })),
+    ...[-1.6, -0.55, 0.55, 1.6].flatMap((z) => [{ x: -2.25, z }, { x: 2.25, z }]),
+  ],
+  /** Where the bell hangs from the front canopy beam (its pivot). */
+  bell: new THREE.Vector3(0, 0.5 + 1.24, 1.95),
+  /** Floor height at a local point: the platform top, the stair, else the ground. */
+  floorY(lx: number, lz: number): number {
+    const H = HALL.h, E = HALL.edge;
+    if (Math.abs(lx) <= E && Math.abs(lz) <= E) return H;
+    if (Math.abs(lx) <= HALL.stairHalf && lz > E && lz < HALL.stairFoot) return (H * (HALL.stairFoot - lz)) / (HALL.stairFoot - E);
+    return 0;
+  },
+};
+
+/** A fern: a fan of long drooping fronds. */
+function fern(b: GeoBuilder, x: number, y: number, z: number, s: number, seed: number): void {
+  const r = new RNG(seed);
+  const n = 9;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + r.range(-0.3, 0.3);
+    const col = c(0x3f8a34).lerp(c(0x7cbc4c), r.next());
+    // Each frond: two segments, rising from the crown then arching over and down.
+    const lift = r.range(0.5, 0.9);
+    const L = 0.26 * s * r.range(0.85, 1.15);
+    const base = M.t(x, y, z).multiply(M.t(0, 0, 0, 0, a, 0));
+    b.add(P.box(0.09 * s, 0.014, L), { color: col, leaf: 1, sway: 0.4 }, base.clone().multiply(M.t(0, 0, 0, -lift, 0, 0)).multiply(M.t(0, 0, L / 2)));
+    const tip = base.clone().multiply(M.t(0, 0, 0, -lift, 0, 0)).multiply(M.t(0, 0, L)).multiply(M.t(0, 0, 0, lift + 0.45, 0, 0));
+    b.add(P.box(0.075 * s, 0.012, L * 0.9), { color: col.clone().multiplyScalar(1.08), leaf: 1, sway: 0.7 }, tip.multiply(M.t(0, 0, L * 0.45)));
+  }
+}
+
+/** A broad-leaved tropical plant (like a young banana or elephant ear). */
+function broadLeaf(b: GeoBuilder, x: number, y: number, z: number, s: number, seed: number): void {
+  const r = new RNG(seed);
+  const n = 5;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + r.range(-0.4, 0.4);
+    const col = c(0x2f7a2e).lerp(c(0x5ea43c), r.next());
+    const lift = r.range(0.35, 0.7);
+    const m = M.t(x, y, z).multiply(M.t(0, 0, 0, 0, a, 0)).multiply(M.t(0, 0, 0, -lift - 0.4, 0, 0));
+    b.add(P.cyl(0.01, 0.014, 0.22 * s, 3), { color: c(0x4c8a34) }, m.clone().multiply(M.t(0, 0.11 * s, 0)));
+    const leaf = m.clone().multiply(M.t(0, 0.22 * s, 0)).multiply(M.t(0, 0, 0, 0.9, 0, 0));
+    b.add(new THREE.OctahedronGeometry(0.1 * s, 0), { color: col, leaf: 1, sway: 0.6 }, leaf.multiply(M.t(0, 0, 0.1 * s, 0, 0, 0, 0.75, 0.12, 1.4)));
+  }
+}
+
+/** A grid of slabs (w × d cells of size `cell`), each coloured on its own. */
+function slabs(b: GeoBuilder, x0: number, z0: number, w: number, d: number, cell: number, y: number, h: number, color: (i: number, j: number) => THREE.Color, skip?: (x: number, z: number) => boolean): void {
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < d; j++) {
+      const x = x0 + (i + 0.5) * cell, z = z0 + (j + 0.5) * cell;
+      if (skip?.(x, z)) continue;
+      b.add(P.box(cell - 0.012, h, cell - 0.012), { color: color(i, j) }, M.t(x, y + h / 2, z));
+    }
+  }
+}
+
+/** A cheap flower head (8 faces). */
+const FLOWER = new THREE.OctahedronGeometry(0.045, 0);
+
+/** A clump of red (and a few orange) tropical flowers on short stems. */
+function blooms(b: GeoBuilder, x: number, y: number, z: number, n: number, sx: number, sz: number, seed: number): void {
+  const r = new RNG(seed);
+  for (let k = 0; k < n; k++) {
+    const px = x + r.range(-sx, sx), pz = z + r.range(-sz, sz);
+    const h = r.range(0.1, 0.2);
+    b.add(P.cyl(0.008, 0.01, h, 3), { color: c(0x3c7a2e) }, M.t(px, y + h / 2, pz));
+    const petal = r.next() < 0.75 ? c(0xd8322a) : c(0xef7a22);
+    b.add(FLOWER, { color: (q) => (q.y > y + h + 0.035 ? c(0xf2d04a) : petal.clone()), leaf: 1 }, M.t(px, y + h + 0.02, pz, 0, r.next() * 3, 0, 1, 0.6, 1));
+  }
+}
+
+/** A long red banner with a golden sun, hung flat against a face (facing +z before rotation). */
+function sunBanner(b: GeoBuilder, m: THREE.Matrix4, w: number, h: number): void {
+  const at = (x: number, y: number, z: number) => m.clone().multiply(M.t(x, y, z));
+  b.add(P.box(w, h, 0.02), { color: K.red }, m);
+  b.add(P.box(w * 1.08, 0.035, 0.03), { color: K.gold }, at(0, h / 2, 0.005));
+  b.add(P.box(w * 0.9, 0.02, 0.022), { color: K.gold }, at(0, -h / 2 + 0.03, 0.006));
+  b.add(P.cyl(w * 0.24, w * 0.24, 0.012, 10), { color: K.gold }, at(0, h * 0.12, 0.014).multiply(M.t(0, 0, 0, Math.PI / 2, 0, 0)));
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    b.add(P.box(0.018, w * 0.13, 0.01), { color: K.gold }, at(Math.cos(a) * w * 0.33, h * 0.12 + Math.sin(a) * w * 0.33, 0.016).multiply(M.t(0, 0, 0, 0, 0, a - Math.PI / 2)));
+  }
+}
+
+/** The Great Hall's bronze bell with its clapper (pivot at the top, hanging down -y). */
+export function hallBellGeometry(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const pts = [
+    [0.0, 0], [0.035, 0], [0.05, -0.02], [0.06, -0.07], [0.075, -0.13], [0.11, -0.19], [0.12, -0.2], [0.0, -0.2],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const bronze = c(0xb5832e);
+  // Hung on a short rope below the beam, bigger than life so it reads from the usual camera.
+  const S = 1.6, drop = 0.1;
+  b.add(P.cyl(0.012, 0.012, drop, 4), { color: K.rope }, M.t(0, -drop / 2, 0));
+  b.add(new THREE.LatheGeometry(pts, 12), { color: bronze }, M.t(0, -drop, 0, 0, 0, 0, S));
+  b.add(P.cyl(0.12 * S, 0.12 * S, 0.02, 12), { color: c(0xd9a54a) }, M.t(0, -drop - 0.19 * S, 0));
+  b.add(P.box(0.05, 0.05, 0.05), { color: K.timberDark }, M.t(0, -drop + 0.01, 0));
+  b.add(P.sphere(0.04, 0), { color: c(0x5a4630) }, M.t(0, -drop - 0.21 * S, 0));
+  return b.build();
+}
+
+/**
+ * Great Hall: a two-stepped sandstone platform with red key-pattern panels, a wide front stair
+ * with a red runner between stone cheeks, four corner pillars hung with sun banners and topped
+ * with fire braziers, and a red-and-white striped canopy on timber posts sheltering rows of
+ * benches that face a sun-disc dais. Ferns and red flowers fill planters beside the stair and
+ * along the sides. The bell under the front beam is a separate mesh (it swings when rung).
+ */
+export function greatHallModel(): BuildingModel {
+  const b = new GeoBuilder();
+  const rng = new RNG(707);
+  const H = HALL.h, E = HALL.edge;
+  const sand = c(0xdcb57c), sandDark = c(0xc39a62), cream = c(0xf1e2c0);
+  const pave = (i: number, j: number) => c(0xcfc5b3).lerp(c(0xa39683), ((i * 7 + j * 13) % 5) / 6 + rng.range(0, 0.15));
+  // Paved court round the platform.
+  b.add(P.box(6.95, 0.012, 6.95), { color: c(0x9c917f) }, M.t(0, 0.006, 0));
+  slabs(b, -3.45, -3.45, 14, 14, 6.9 / 14, 0.004, 0.022, pave, (x, z) => Math.abs(x) < E + 0.15 && Math.abs(z) < E + 0.15);
+  // Lower step: a course of blocks; then the platform proper under a sand-coloured coping.
+  b.add(P.box(2 * E + 0.4, 0.2, 2 * E + 0.4), { color: K.stoneDark }, M.t(0, 0.1, 0));
+  for (let side = 0; side < 4; side++) {
+    const ry = (side * Math.PI) / 2;
+    for (let k = 0; k < 10; k++) {
+      const u = -E - 0.2 + ((2 * E + 0.4) / 10) * (k + 0.5);
+      b.add(P.box((2 * E + 0.4) / 10 - 0.02, 0.17, 0.03), { color: k % 2 ? K.stone : c(0xb4a894) }, M.t(Math.sin(ry) * (E + 0.2) + Math.cos(ry) * u, 0.1, Math.cos(ry) * (E + 0.2) - Math.sin(ry) * u, 0, ry, 0));
+    }
+  }
+  b.add(P.box(2 * E, H - 0.2, 2 * E), { color: sand }, M.t(0, 0.2 + (H - 0.2) / 2, 0));
+  b.add(P.box(2 * E + 0.06, 0.05, 2 * E + 0.06), { color: sandDark }, M.t(0, H - 0.025, 0));
+  // Red key-pattern panels round the sides (not across the stair).
+  const panel = (m: THREE.Matrix4) => {
+    b.add(P.box(0.46, 0.17, 0.02), { color: K.red }, m);
+    b.add(P.box(0.3, 0.09, 0.024), { color: cream }, m.clone().multiply(M.t(0, 0, 0.002)));
+    b.add(P.box(0.18, 0.035, 0.028), { color: K.red }, m.clone().multiply(M.t(-0.02, 0.012, 0.002)));
+    b.add(P.box(0.035, 0.07, 0.028), { color: K.red }, m.clone().multiply(M.t(0.08, 0, 0.002)));
+  };
+  for (let side = 0; side < 4; side++) {
+    const ry = (side * Math.PI) / 2;
+    for (let k = -2; k <= 2; k++) {
+      if (side === 0 && Math.abs(k) < 1) continue;
+      const u = k * 1.0;
+      const m = M.t(Math.sin(ry) * (E + 0.011) + Math.cos(ry) * u, 0.33, Math.cos(ry) * (E + 0.011) - Math.sin(ry) * u, 0, ry, 0);
+      panel(m);
+    }
+  }
+  // Floor: pale stone slabs, a red border inlay and a red runner up the aisle to the dais.
+  slabs(b, -E + 0.05, -E + 0.05, 9, 9, (2 * E - 0.1) / 9, H, 0.02, (i, j) => ((i + j) % 2 ? cream.clone() : c(0xe4d0a8)));
+  for (const s of [-1, 1]) {
+    b.add(P.box(2 * E - 0.5, 0.012, 0.08), { color: K.red }, M.t(0, H + 0.022, s * (E - 0.3)));
+    b.add(P.box(0.08, 0.012, 2 * E - 0.5), { color: K.red }, M.t(s * (E - 0.3), H + 0.022, 0));
+  }
+  b.add(P.box(0.42, 0.014, 4.6), { color: c(0xa92c22) }, M.t(0, H + 0.024, 0.3));
+  // Front stair: red risers, cream treads, stone cheeks either side.
+  const steps = 5, run = (HALL.stairFoot - E) / steps, rise = H / steps;
+  for (let k = 0; k < steps; k++) {
+    const top = H - k * rise, z = E + run * (k + 0.5);
+    b.add(P.box(HALL.stairHalf * 2, top - 0.025, run), { color: K.red }, M.t(0, (top - 0.025) / 2, z));
+    b.add(P.box(HALL.stairHalf * 2 + 0.02, 0.025, run + 0.02), { color: cream }, M.t(0, top - 0.0125, z));
+  }
+  // Sloped stone cheeks either side of the stair.
+  const cheekShape = new THREE.Shape([
+    new THREE.Vector2(E - 0.05, 0), new THREE.Vector2(HALL.stairFoot + 0.06, 0), new THREE.Vector2(HALL.stairFoot + 0.06, 0.1), new THREE.Vector2(E - 0.05, H + 0.08),
+  ]);
+  const cheekGeo = new THREE.ExtrudeGeometry(cheekShape, { depth: 0.2, bevelEnabled: false });
+  for (const sx of [-1, 1]) {
+    b.add(cheekGeo, { color: K.stone }, M.t(sx * (HALL.stairHalf + 0.1) + 0.1, 0, 0, 0, -Math.PI / 2, 0));
+  }
+  // Corner pillars: plinth, banded shaft, sun banners on the outer faces, a brazier on top.
+  const torches: THREE.Vector3[] = [];
+  const PC = 2.3, PH = 1.45;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const x = sx * PC, z = sz * PC;
+      b.add(P.box(0.7, 0.14, 0.7), { color: sandDark }, M.t(x, H + 0.07, z));
+      b.add(P.box(0.55, PH, 0.55), { color: sand }, M.t(x, H + 0.14 + PH / 2, z));
+      b.add(P.box(0.57, 0.09, 0.57), { color: K.red }, M.t(x, H + 0.14 + PH * 0.86, z));
+      b.add(P.box(0.575, 0.03, 0.575), { color: K.gold }, M.t(x, H + 0.14 + PH * 0.86 + 0.06, z));
+      b.add(P.box(0.575, 0.03, 0.575), { color: K.gold }, M.t(x, H + 0.14 + PH * 0.86 - 0.06, z));
+      b.add(P.box(0.64, 0.08, 0.64), { color: cream }, M.t(x, H + 0.14 + PH + 0.04, z));
+      b.add(P.box(0.08, 0.08, 0.08), { color: K.gold }, M.t(x + sx * 0.28, H + 0.14 + PH + 0.12, z + sz * 0.28));
+      // Banners on the two outward faces.
+      sunBanner(b, M.t(x, H + 0.14 + PH * 0.42, z + sz * 0.286, 0, sz > 0 ? 0 : Math.PI, 0), 0.34, 0.62);
+      sunBanner(b, M.t(x + sx * 0.286, H + 0.14 + PH * 0.42, z, 0, sx > 0 ? Math.PI / 2 : -Math.PI / 2, 0), 0.34, 0.62);
+      // Brazier: a stone bowl on a short stem.
+      const top = H + 0.14 + PH + 0.08;
+      b.add(P.cyl(0.07, 0.1, 0.1, 8), { color: K.stoneDark }, M.t(x, top + 0.05, z));
+      b.add(P.cyl(0.24, 0.12, 0.14, 10), { color: c(0x7d746c) }, M.t(x, top + 0.17, z));
+      b.add(P.cyl(0.2, 0.2, 0.02, 10), { color: c(0x2a1c14) }, M.t(x, top + 0.23, z));
+      torches.push(new THREE.Vector3(x, top + 0.3, z));
+    }
+  }
+  // Canopy: six timber posts, beams, and a low striped gable roof with a red fascia and gold studs.
+  const PX = 1.75, PZ = [-1.9, 0, 1.9], CH = H + 1.3;
+  for (const sx of [-1, 1]) {
+    for (const z of PZ) {
+      b.add(P.box(0.13, 1.3, 0.13), { color: K.timberDark }, M.t(sx * PX, H + 0.65, z));
+      b.add(P.box(0.18, 0.08, 0.18), { color: K.timber }, M.t(sx * PX, H + 0.04, z));
+    }
+    b.add(P.box(0.14, 0.12, 4.2), { color: K.timber }, M.t(sx * PX, CH, 0));
+  }
+  for (const z of PZ) b.add(P.box(3.7, 0.1, 0.12), { color: K.timber }, M.t(0, CH - 0.02, z));
+  const roof = new GeoBuilder();
+  const RW = 2.25, RL = 4.8, rise2 = 0.32, slope = Math.atan2(rise2, RW);
+  const bands = 12;
+  for (const sx of [-1, 1]) {
+    for (let k = 0; k < bands; k++) {
+      const z = -RL / 2 + (RL / bands) * (k + 0.5);
+      const m = M.t(sx * RW / 2, CH + 0.1 + rise2 / 2, z, 0, 0, -sx * slope);
+      roof.add(P.box(Math.hypot(RW, rise2) + 0.02, 0.05, RL / bands + 0.002), { color: k % 2 ? K.white : K.red }, m);
+    }
+    // Fascia board along the eave, studded with gold blocks.
+    roof.add(P.box(0.06, 0.12, RL + 0.04), { color: c(0x9e2c22) }, M.t(sx * (RW + 0.01), CH + 0.08, 0));
+    for (let k = 0; k <= 4; k++) roof.add(P.box(0.1, 0.1, 0.1), { color: K.gold }, M.t(sx * (RW + 0.05), CH + 0.08, -RL / 2 + (RL / 4) * k));
+  }
+  roof.add(P.box(0.12, 0.1, RL + 0.1), { color: K.gold }, M.t(0, CH + 0.1 + rise2 + 0.03, 0));
+  for (const sz of [-1, 1]) roof.add(P.box(2 * RW + 0.1, 0.1, 0.06), { color: c(0x9e2c22) }, M.t(0, CH + 0.06, sz * (RL / 2 + 0.01)));
+  // Benches in rows (facing the dais), each a plank on two legs.
+  for (const z of [-1.05, -0.35, 0.35, 1.05]) {
+    for (const sx of [-1, 1]) {
+      b.add(P.box(1.25, 0.04, 0.17), { color: K.timber }, M.t(sx * 0.85, H + 0.12, z - 0.03));
+      for (const lx of [0.32, 1.38]) b.add(P.box(0.05, 0.11, 0.13), { color: K.timberDark }, M.t(sx * lx, H + 0.055, z - 0.03));
+    }
+  }
+  // Dais at the back: a low step, a carved stela with a great golden sun, and two pots of ferns.
+  b.add(P.box(2.4, 0.09, 0.8), { color: sandDark }, M.t(0, H + 0.045, -2.15));
+  b.add(P.box(1.0, 0.95, 0.18), { color: sand }, M.t(0, H + 0.09 + 0.475, -2.4));
+  b.add(P.box(1.06, 0.07, 0.22), { color: K.red }, M.t(0, H + 0.09 + 0.98, -2.4));
+  b.add(P.cyl(0.34, 0.34, 0.04, 16), { color: K.gold }, M.t(0, H + 0.62, -2.3, Math.PI / 2, 0, 0));
+  b.add(P.cyl(0.2, 0.2, 0.05, 12), { color: K.red }, M.t(0, H + 0.62, -2.29, Math.PI / 2, 0, 0));
+  b.add(P.cyl(0.1, 0.1, 0.06, 10), { color: K.gold }, M.t(0, H + 0.62, -2.28, Math.PI / 2, 0, 0));
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    b.add(P.cone(0.05, 0.12, 4), { color: K.gold }, M.t(Math.cos(a) * 0.42, H + 0.62 + Math.sin(a) * 0.42, -2.3, 0, 0, a - Math.PI / 2));
+  }
+  for (const sx of [-1, 1]) {
+    b.add(P.cyl(0.13, 0.1, 0.2, 8), { color: K.terracotta }, M.t(sx * 0.85, H + 0.19, -2.25));
+    fern(b, sx * 0.85, H + 0.22, -2.25, 0.8, 30 + sx);
+  }
+  // Planters: beside the stair and along the sides, full of ferns and red flowers.
+  const planter = (x: number, z: number, w: number, d: number, seed: number) => {
+    b.add(P.box(w, 0.22, d), { color: sand }, M.t(x, 0.11, z));
+    b.add(P.box(w + 0.03, 0.05, d + 0.03), { color: K.red }, M.t(x, 0.245, z));
+    b.add(P.box(w - 0.08, 0.02, d - 0.08), { color: c(0x4a3624) }, M.t(x, 0.26, z));
+    const long = Math.max(w, d), along = w >= d;
+    const n = Math.max(1, Math.round(long / 0.4));
+    for (let k = 0; k < n; k++) {
+      const u = -long / 2 + (long / n) * (k + 0.5);
+      const px = along ? x + u : x + rng.range(-0.04, 0.04), pz = along ? z + rng.range(-0.06, 0.06) : z + u;
+      if (k % 2) broadLeaf(b, px, 0.27, pz, 1.3 + rng.range(-0.2, 0.25), seed + k);
+      else fern(b, px, 0.27, pz, 1.25 + rng.range(-0.15, 0.25), seed + k);
+    }
+    blooms(b, x, 0.26, z, Math.round(long * 9), w / 2 - 0.08, d / 2 - 0.08, seed + 50);
+  };
+  for (const s of [-1, 1]) {
+    planter(s * 1.75, 3.15, 1.6, 0.55, 400 + s);
+    planter(s * 3.2, 0, 0.45, 2.4, 500 + s);
+  }
+  // Banner poles at the front corners of the court.
+  for (const s of [-1, 1]) {
+    const x = s * 3.1, z = 3.1;
+    b.add(P.cyl(0.035, 0.045, 1.6, 6), { color: K.timberDark }, M.t(x, 0.8, z));
+    b.add(P.box(0.4, 0.035, 0.035), { color: K.timberDark }, M.t(x, 1.52, z + 0.0));
+    sunBanner(b, M.t(x, 1.2, z + 0.03), 0.3, 0.6);
+  }
+  // Bell frame under the front beam (the bell itself swings separately).
+  b.add(P.box(0.05, 0.1, 0.05), { color: K.timberDark }, M.t(0, HALL.bell.y + 0.04, HALL.bell.z));
+  return { finished: b.build(), torches, height: 2.4, canopy: roof.build() };
 }

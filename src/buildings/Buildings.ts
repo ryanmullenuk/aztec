@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE, FARM_TYPES, isFarm } from '../config';
 import { Economy, Cost } from '../economy/Economy';
-import { flameMaterial, stylisedMaterial, FX } from '../render/materials';
+import { canopyMaterial, flameMaterial, stylisedMaterial, FX } from '../render/materials';
 import { Terrain } from '../terrain/Terrain';
 import { Vegetation } from '../vegetation/Vegetation';
 import { World } from '../world/World';
@@ -9,8 +9,8 @@ import { RNG } from '../world/rng';
 import * as models from './models';
 
 /** Flame size per building, and the fires that burn day and night. */
-const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.4, bonfire: 3.2, firepit: 1.7, torch: 1.25 };
-const ALWAYS_LIT = new Set<BuildingKey>(['campfire', 'bonfire', 'firepit']);
+const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.4, bonfire: 3.2, firepit: 1.7, torch: 1.25, greathall: 1.45 };
+const ALWAYS_LIT = new Set<BuildingKey>(['campfire', 'bonfire', 'firepit', 'greathall']);
 import { Particles } from '../render/Particles';
 
 /** Door direction per rotation (door faces +z at rot 0). */
@@ -73,6 +73,9 @@ export class Building {
   dogRole: 'roam' | 'guard' = 'roam';
   // War room: queued trainees
   training: { id: number; t: number; type: 'jaguar' | 'eagle' }[] = [];
+  // Great Hall: the bell (swings while ringing, seconds left).
+  bell: THREE.Object3D | null = null;
+  ring = 0;
   // Butcher
   penX = 0;
   penZ = 0;
@@ -106,6 +109,14 @@ export class Building {
     const t = (this.rot * Math.PI) / 2;
     const c = Math.cos(t), s = Math.sin(t);
     return [this.x + lx * c + lz * s, this.z - lx * s + lz * c];
+  }
+
+  /** World (x, z) to model-local (x, z): the inverse of local(). */
+  toLocal(wx: number, wz: number): [number, number] {
+    const t = (this.rot * Math.PI) / 2;
+    const c = Math.cos(t), s = Math.sin(t);
+    const dx = wx - this.x, dz = wz - this.z;
+    return [dx * c - dz * s, dx * s + dz * c];
   }
 
   /** Builders still wanted on the construction site. */
@@ -156,6 +167,7 @@ export class BuildingSystem {
   private logGeos = [models.logPileGeometry(1), models.logPileGeometry(2), models.logPileGeometry(3)];
   private stoneGeos = [models.stonePileGeometry(4), models.stonePileGeometry(5)];
   private basketGeos = [models.basketGeometry(0), models.basketGeometry(1), models.basketGeometry(2)];
+  private bellGeo = models.hallBellGeometry();
   /** Called when a building completes (for milestones, sounds, AI). */
   onComplete: (b: Building) => void = () => {};
   /** Called when a building is removed (pens release animals, etc.). */
@@ -472,7 +484,7 @@ export class BuildingSystem {
   }
 
   private sharedGeo(g: THREE.BufferGeometry): boolean {
-    return g === this.flameGeo || this.logGeos.includes(g) || this.stoneGeos.includes(g) || this.basketGeos.includes(g) || [...this.cropGeos.values()].includes(g);
+    return g === this.flameGeo || g === this.bellGeo || this.logGeos.includes(g) || this.stoneGeos.includes(g) || this.basketGeos.includes(g) || [...this.cropGeos.values()].includes(g);
   }
 
   private modelFor(b: Building): models.BuildingModel {
@@ -490,6 +502,7 @@ export class BuildingSystem {
       case 'bonfire': return models.bonfireModel();
       case 'firepit': return models.firepitModel();
       case 'kennel': return models.kennelModel();
+      case 'greathall': return models.greatHallModel();
       case 'well': return models.wellModel();
       case 'butcher': return models.butcherModel(sw, sd);
       case 'woodstore': return models.woodstoreModel(sw, sd);
@@ -514,6 +527,13 @@ export class BuildingSystem {
     b.scaffold = new THREE.Mesh(models.scaffoldGeometry(sw, sd, model.height), mat);
     b.scaffold.castShadow = true;
     b.group.add(b.foundation, b.scaffold, b.finished);
+    if (model.canopy) {
+      // Rides on the finished model (shown and raised with it).
+      const roof = new THREE.Mesh(model.canopy, canopyMaterial());
+      roof.castShadow = true;
+      roof.receiveShadow = true;
+      b.finished.add(roof);
+    }
     this.setTorches(b, model.torches);
 
     if (isFarm(b.key)) {
@@ -551,7 +571,21 @@ export class BuildingSystem {
         b.group.add(m);
       }
     }
+    if (b.key === 'greathall') {
+      const pivot = new THREE.Group();
+      pivot.position.copy(models.HALL.bell);
+      const bell = new THREE.Mesh(this.bellGeo, mat);
+      bell.castShadow = true;
+      pivot.add(bell);
+      b.bell = pivot;
+      b.group.add(pivot);
+    }
     this.updateStageVisuals(b);
+  }
+
+  /** Ring a Great Hall's bell (it swings for a few seconds). */
+  ringBell(b: Building, seconds = 6): void {
+    b.ring = Math.max(b.ring, seconds);
   }
 
   private setTorches(b: Building, points: THREE.Vector3[]): void {
@@ -592,6 +626,7 @@ export class BuildingSystem {
   }
 
   private updateStageVisuals(b: Building): void {
+    if (b.bell) b.bell.visible = b.complete;
     if (b.complete && !b.upgrading) {
       b.foundation.visible = false;
       b.scaffold.visible = false;
@@ -708,6 +743,11 @@ export class BuildingSystem {
   update(dt: number, time: number, night: number, seasonIndex: number, raining: boolean, camTarget: THREE.Vector3): void {
     for (const b of this.list) {
       if (!b.complete) continue;
+      if (b.bell) {
+        // Swinging hard while it rings, settling as it stops.
+        b.ring = Math.max(0, b.ring - dt);
+        b.bell.rotation.x = Math.sin(time * 7.5) * 0.55 * Math.min(1, b.ring / 1.5);
+      }
       if (b.key === 'smokehouse') {
         b.tendTimer = Math.max(0, b.tendTimer - dt);
         this.smokeFrom(b, dt);
