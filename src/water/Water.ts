@@ -2,9 +2,13 @@ import * as THREE from 'three';
 import { COLORS, WORLD } from '../config';
 import { World } from '../world/World';
 import { GeoBuilder, M, P, lumpy } from '../render/GeoBuilder';
-import { stylisedMaterial } from '../render/materials';
+import { stylisedMaterial, treeMaterial } from '../render/materials';
+import { angularRockGeometry, rockColor } from '../render/rocks';
+import { bushGeometry, fernGeometry } from '../vegetation/models';
+import { hangingVine } from '../vegetation/detail';
 import { Particles } from '../render/Particles';
 import { RNG } from '../world/rng';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /** The sea plane sits a little above 0 so surf can wash up the beaches (and drain back below 0). */
 export const SEA_SURFACE = 0.07;
@@ -315,10 +319,12 @@ const fallFrag = /* glsl */ `
     float streak = vnoise(vec2(u * 60.0, fall * 3.5 + 9.0));
     // Aeration: glassy at the lip, turning white as it falls.
     float aer = smoothstep(0.05, 0.7, v) * 0.75 + ropes * 0.35;
-    vec3 glass = vec3(0.24, 0.72, 0.76);
+    vec3 glass = vec3(0.2, 0.68, 0.8);
     vec3 white = vec3(0.95, 0.99, 1.0);
-    vec3 col = mix(glass, white, clamp(aer + streak * 0.25, 0.0, 1.0));
-    col *= 0.88 + 0.2 * streak;
+    vec3 col = mix(glass, white, clamp(aer * 0.42 + streak * 0.22 + smoothstep(0.82, 1.0, v) * 0.4 - 0.06, 0.0, 1.0));
+    // Faceted vertical bands, as if the sheet of water were cut into flat strips.
+    float band = hsh(vec2(floor(u * 11.0 + sin(v * 3.0) * 0.4), uLayer));
+    col *= 0.86 + 0.18 * band + 0.08 * streak;
     // Ragged, wobbling side edges and gaps between the ropes lower down.
     float wob = (vnoise(vec2(v * 6.0 - t * 1.2, uLayer * 5.0)) - 0.5) * 0.12 * (0.3 + v);
     float edge = smoothstep(0.0, 0.1 + 0.08 * v, u + wob) * smoothstep(0.0, 0.1 + 0.08 * v, 1.0 - u - wob);
@@ -376,6 +382,62 @@ const plungeFrag = /* glsl */ `
     float a = clamp(core * (0.55 + churn * 0.6) + rings * 0.28 + bubbles * 0.55 * (1.0 - core), 0.0, 1.0);
     if (a < 0.02) discard;
     gl_FragColor = vec4(vec3(0.95, 0.99, 1.0) * mix(0.32, 1.0, uDay), a * 0.92);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #include <fog_fragment>
+  }
+`;
+
+/**
+ * The waterfall's plunge pool: clear turquoise, a pale sandy shallow rim shading to deep teal in
+ * the middle, with slowly drifting faceted ripple cells and a bright water line at the edge.
+ * Partly see-through so the rocks on the bottom show.
+ */
+const poolFrag = /* glsl */ `
+  #include <common>
+  #include <fog_pars_fragment>
+  uniform float uTime;
+  uniform float uDay;
+  uniform float uR;
+  varying vec2 vUv;
+  float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  vec2 hsh2(vec2 p){ return vec2(hsh(p), hsh(p + 17.31)); }
+  float vnoise(vec2 p){
+    vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hsh(i), hsh(i + vec2(1.0, 0.0)), u.x), mix(hsh(i + vec2(0.0, 1.0)), hsh(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+  void main() {
+    vec2 q = vUv * 2.0 - 1.0;
+    float ang = atan(q.y, q.x);
+    float r = length(q) + (vnoise(vec2(ang * 2.2, 3.0)) - 0.5) * 0.14 + (vnoise(vec2(ang * 7.0, 9.0)) - 0.5) * 0.05;
+    if (r > 1.0) discard;
+    float depth = 1.0 - smoothstep(0.3, 0.98, r);
+    // Linear colours (the output is converted to sRGB): sandy shallows, turquoise, deep teal.
+    vec3 shallow = vec3(0.34, 0.62, 0.45);
+    vec3 mid = vec3(0.012, 0.45, 0.55);
+    vec3 deep = vec3(0.004, 0.16, 0.3);
+    vec3 col = mix(shallow, mid, smoothstep(0.0, 0.42, depth));
+    col = mix(col, deep, smoothstep(0.5, 1.0, depth));
+    // Faceted ripple cells drifting slowly (Voronoi): each cell a slightly different shade.
+    vec2 pc = q * uR * 0.9 + vec2(uTime * 0.05, -uTime * 0.035);
+    vec2 cell = floor(pc);
+    float f1 = 9.0, f2 = 9.0; vec2 id = vec2(0.0);
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 g = cell + vec2(float(i), float(j));
+      vec2 o = hsh2(g);
+      o = 0.5 + 0.35 * sin(uTime * 0.6 + 6.2831 * o);
+      float d = length(g + o - pc);
+      if (d < f1) { f2 = f1; f1 = d; id = g; } else if (d < f2) f2 = d;
+    }
+    col *= 0.9 + hsh(id) * 0.16;
+    float line = 1.0 - smoothstep(0.0, 0.07, f2 - f1);
+    col = mix(col, vec3(0.35, 0.82, 0.88), line * 0.06);
+    // Bright water line against the rim.
+    float rim = smoothstep(0.9, 0.99, r);
+    col = mix(col, vec3(0.85, 0.95, 0.9), rim * 0.35);
+    float a = mix(0.58, 0.9, depth);
+    a = max(a, rim * 0.8);
+    gl_FragColor = vec4(col * mix(0.3, 1.0, uDay), a);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     #include <fog_fragment>
@@ -648,8 +710,17 @@ export class Water {
     }
     if (w.waterfall) {
       const f = w.waterfall;
-      const pool = new THREE.Mesh(new THREE.CircleGeometry(f.poolR + 0.9, 40).rotateX(-Math.PI / 2), this.riverMat);
-      pool.position.set(f.x + f.dx * (f.poolR + 1.2), f.poolY, f.z + f.dz * (f.poolR + 1.2));
+      const R = f.poolR + 1.4;
+      const poolMat = new THREE.ShaderMaterial({
+        uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTime: this.shared.uTime, uDay: this.shared.uDay, uR: { value: R } },
+        vertexShader: fallVert,
+        fragmentShader: poolFrag,
+        transparent: true,
+        depthWrite: false,
+        fog: true,
+      });
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(R, 56).rotateX(-Math.PI / 2), poolMat);
+      pool.position.set(f.x + f.dx * (f.poolR + 1.2), f.poolY + 0.004, f.z + f.dz * (f.poolR + 1.2));
       pool.renderOrder = 11;
       this.group.add(pool);
     }
@@ -706,8 +777,8 @@ export class Water {
       m.frustumCulled = false;
       this.group.add(m);
     };
-    curtain(2.3, 0.35, 0.8, 0);
-    curtain(1.6, 0.25, 1.05, 1);
+    curtain(2.5, 0.3, 0.8, 0);
+    curtain(1.7, 0.22, 1.05, 1);
     this.fallMat = null;
 
     // Plunge pool: churning foam and rings where the water lands.
@@ -728,41 +799,82 @@ export class Water {
     plunge.renderOrder = 12;
     this.group.add(plunge);
 
-    // Boulders framing the lip and scattered around the plunge pool, wet near the water, mossy on top.
+    // Rock setting (after the reference art): tall faceted columns stepping up either side of the
+    // fall, a rock face behind the curtain, blocks round the pool and stones on its bed, with
+    // moss on the crowns and ferns, bushes and vines growing on the ledges.
     const rng = new RNG(this.world.seed * 17 + 5);
     const b = new GeoBuilder();
-    const rock = (x: number, z: number, y: number, r: number, squash: number, wetY: number) => {
-      const g = lumpy(P.sphere(r, 1), 0.2, Math.floor(rng.next() * 1e6), squash);
-      b.add(g, {
-        color: (p, n) => {
-          let c = new THREE.Color(0x7d7078).lerp(new THREE.Color(0xa99c96), n.y * 0.5 + 0.35);
-          if (n.y > 0.55 && Math.sin(p.x * 13 + p.z * 9) > -0.1) c.lerp(new THREE.Color(0x6f8f38), 0.6);
-          if (p.y < wetY + 0.25) c.multiplyScalar(0.72);
-          return c;
-        },
-        ao: { y0: y - r * squash, y1: y + r * squash * 0.4, min: 0.62 },
-      }, M.t(x, y, z, rng.next(), rng.next() * 3, rng.next()));
+    const plants = new GeoBuilder();
+    const leafy: THREE.BufferGeometry[] = [];
+    const H0 = f.topY - f.poolY;
+    const at = (a: number, l: number): [number, number] => [f.x + px * a + f.dx * l, f.z + pz * a + f.dz * l];
+    /** A rock: across / along the fall, base height, size (across, height, along), turn, moss. */
+    const rock = (a: number, l: number, y0: number, w: number, h: number, d: number, turn = 0, moss = 0.55, wet = f.poolY + 0.08) => {
+      const [x, z] = at(a, l);
+      b.add(angularRockGeometry(Math.floor(rng.next() * 1e6)), { color: rockColor(moss, wet), ao: { y0: y0 - 0.2, y1: y0 + h * 0.6, min: 0.6 } }, M.t(x, y0, z, 0, yaw + turn, 0, w / 2, h, d / 2));
+      return { x, z, top: y0 + h * 1.02, w, d };
     };
-    const lipW = 1.55;
-    for (const side of [-1, 1]) {
-      // Big shoulder boulders either side of the lip, and a smaller one tucked in.
-      rock(f.x + px * side * (lipW + 0.35) - f.dx * 0.2, f.z + pz * side * (lipW + 0.35) - f.dz * 0.2, f.topY - 0.05, 0.75, 0.75, f.topY - 1);
-      rock(f.x + px * side * (lipW - 0.1) + f.dx * 0.1, f.z + pz * side * (lipW - 0.1) + f.dz * 0.1, f.topY - 0.3, 0.42, 0.7, f.topY - 1);
-      rock(f.x + px * side * (lipW + 0.9) - f.dx * 0.9, f.z + pz * side * (lipW + 0.9) - f.dz * 0.9, f.topY - 0.2, 0.5, 0.7, f.topY - 1);
-      // Rocks the river splits around just before the drop.
-      rock(f.x + px * side * 0.75 - f.dx * 0.95, f.z + pz * side * 0.75 - f.dz * 0.95, f.topY - 0.2, 0.26, 0.6, f.topY - 0.2);
-      // Base: tumbled boulders at the foot of the cliff and a few in the pool.
-      rock(f.x + px * side * (lipW + 0.4) + f.dx * 0.8, f.z + pz * side * (lipW + 0.4) + f.dz * 0.8, f.poolY + 0.1, 0.8, 0.75, f.poolY);
-      rock(f.x + px * side * (lipW + 1.3) + f.dx * 1.7, f.z + pz * side * (lipW + 1.3) + f.dz * 1.7, f.poolY + 0.05, 0.55, 0.7, f.poolY);
-      // A couple of stones at the pool's edge, half in the water.
-      const ex = f.x + px * side * 3.0 + f.dx * 3.4, ez = f.z + pz * side * 3.0 + f.dz * 3.4;
-      rock(ex, ez, Math.max(f.poolY - 0.02, this.world.heightAt(ex, ez) + 0.05), 0.42, 0.6, f.poolY);
+    const ledges: { x: number; z: number; top: number; w: number; d: number; face: number }[] = [];
+    for (const s of [-1, 1]) {
+      const add = (r: ReturnType<typeof rock>, face = 1) => ledges.push({ ...r, face });
+      // Tall columns flanking the fall, stepping back and up.
+      add(rock(s * 1.6, -0.1, f.poolY - 0.5, 1.4, H0 + 0.8, 1.6, rng.range(-0.3, 0.3), 0.6));
+      add(rock(s * 2.65, -1.0, f.poolY + 0.1, 1.9, H0 + 1.25, 1.9, rng.range(-0.3, 0.3), 0.6));
+      add(rock(s * 4.4, -0.6, f.poolY + 0.4, 1.9, H0 * 0.8 + 0.5, 1.7, rng.range(-0.4, 0.4), 0.65));
+      // A lower step down toward the pool, and a block sitting in its edge.
+      add(rock(s * 3.5, 0.9, f.poolY - 0.4, 1.7, H0 * 0.55, 1.6, rng.range(-0.4, 0.4), 0.6));
+      add(rock(s * 3.3, 2.7, f.poolY - 0.45, 1.5, 1.15, 1.4, rng.range(-0.6, 0.6), 0.5));
+      // Stones framing the lip, and the ones the river splits round before the drop.
+      rock(s * 1.2, 0.05, f.topY - 0.55, 0.85, 0.8, 0.9, rng.range(-0.5, 0.5), 0.75, f.topY - 0.2);
+      rock(s * 0.72, -1.05, f.topY - 0.38, 0.55, 0.5, 0.6, rng.range(-0.5, 0.5), 0.4, f.topY - 0.1);
+    }
+    // Rock face behind the curtain, so the water falls against stone.
+    rock(0, -0.6, f.poolY - 0.45, 2.7, H0 + 0.1, 1.0, 0, 0.3);
+    // Pool: stones on the bed and a couple breaking the surface, blocks and pebbles round the rim.
+    const pc = at(0, f.poolR + 1.2);
+    const R = f.poolR + 1.4;
+    rock(-1.7, 3.7, f.poolY - 0.5, 1.0, 0.62, 0.9, rng.next() * 3, 0.35);
+    rock(2.0, 4.9, f.poolY - 0.5, 1.1, 0.68, 1.0, rng.next() * 3, 0.35);
+    for (const [a, l, w] of [[0.5, 5.5, 0.9], [-1.1, 2.8, 0.8], [1.4, 6.7, 0.7], [-2.3, 6.0, 0.8]] as const) rock(a, l, f.poolY - 0.62, w, 0.38, w * 0.9, rng.next() * 3, 0);
+    for (const deg of [55, 80, 105, 135, 225, 255, 280, 305]) {
+      const ang = (deg * Math.PI) / 180;
+      const rr = R * rng.range(0.92, 1.08);
+      const a = Math.sin(ang) * rr, l = f.poolR + 1.2 + Math.cos(ang) * rr;
+      const big = rng.chance(0.45);
+      const [x, z] = at(a, l);
+      const g0 = Math.min(this.world.heightAt(x, z), f.poolY + 0.3);
+      const w = big ? rng.range(0.9, 1.3) : rng.range(0.45, 0.7);
+      rock(a, l, g0 - 0.15, w, big ? rng.range(0.6, 0.95) : rng.range(0.3, 0.45), w * rng.range(0.8, 1.1), rng.next() * 3, 0.5);
+    }
+    void pc;
+    // Plants on the ledges: ferns and bushes on the crowns, vines hanging down the faces.
+    const fern = fernGeometry(false, 31), bush = bushGeometry(false, false, 41), flower = bushGeometry(true, false, 42);
+    const vine = new THREE.Color(0x4c702f), vineLeaf = new THREE.Color(0x7aa83f);
+    for (const L of ledges) {
+      const n = rng.int(1, 3);
+      for (let k = 0; k < n; k++) {
+        const ox = rng.range(-0.35, 0.35) * L.w, oz = rng.range(-0.35, 0.35) * L.d;
+        const g = rng.chance(0.5) ? fern : rng.chance(0.7) ? bush : flower;
+        const sc = g === fern ? rng.range(0.8, 1.3) : rng.range(0.55, 0.8);
+        leafy.push(g.clone().applyMatrix4(M.t(L.x + ox, L.top - 0.06, L.z + oz, 0, rng.next() * 6.28, 0, sc)));
+      }
+      // Vines down the face turned toward the pool.
+      for (let v = 0; v < rng.int(1, 3); v++) {
+        const off = rng.range(-0.4, 0.4) * L.w;
+        const top = new THREE.Vector3(L.x + f.dx * L.d * 0.42 + px * off, L.top - 0.05, L.z + f.dz * L.d * 0.42 + pz * off);
+        hangingVine(plants, top, rng.range(0.6, Math.min(2.2, L.top - f.poolY)), rng, vine, vineLeaf);
+      }
     }
     const rocks = new THREE.Mesh(b.build(), stylisedMaterial());
     rocks.castShadow = true;
     rocks.receiveShadow = true;
     rocks.name = 'waterfallRocks';
     this.group.add(rocks);
+    const green = new THREE.Mesh(mergeGeometries([plants.build(), ...leafy])!, treeMaterial());
+    green.castShadow = true;
+    green.receiveShadow = true;
+    green.name = 'waterfallPlants';
+    this.group.add(green);
 
     // Spray droplets thrown up in arcs and soft mist rolling downstream.
     this.spray = new Particles(520, 0xf4fcff);
