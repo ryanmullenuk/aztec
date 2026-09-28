@@ -519,7 +519,17 @@ export class Animals {
   // ---------------- Pens & capture API ----------------
 
   registerPen(b: Building): void {
-    this.pens.set(b.id, { x: b.penX, z: b.penZ, r: 0.9 });
+    // A farm's chicken run is small; the butcher's pen is roomier.
+    const p = { x: b.penX, z: b.penZ, r: b.key === 'farm' ? 0.36 : 0.9 };
+    this.pens.set(b.id, p);
+    // Animals already penned here (e.g. from a save made before the pen had a place) move into it.
+    for (const a of this.list) {
+      if (a.pen !== b.id || Math.hypot(a.x - p.x, a.z - p.z) <= p.r) continue;
+      a.x = p.x + (this.rng.next() - 0.5) * p.r;
+      a.z = p.z + (this.rng.next() - 0.5) * p.r;
+      a.tx = a.x;
+      a.tz = a.z;
+    }
   }
   /** A pen whose building was moved: its animals follow it to the new spot. */
   movePen(b: Building): void {

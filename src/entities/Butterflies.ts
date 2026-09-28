@@ -41,7 +41,7 @@ interface Home {
   r: number;
   /** Bushes to land on (checked alive when landing). */
   bushes: Plant[];
-  /** Ground spots (flowers, low plants) to land on. */
+  /** Places to land at ground level: x, z and the height above the ground (a flower head, or 0 for a low plant). */
   spots: number[];
 }
 
@@ -175,9 +175,10 @@ export class Butterflies {
   /** 0..1: how many are out (daylight, no rain), eased. */
   private presence = 1;
 
-  constructor(private world: World, bushes: Plant[], count: number) {
+  /** @param flowers wildflowers (where their blooms are) to visit and land on */
+  constructor(private world: World, bushes: Plant[], count: number, flowers: { x: number; z: number; top: number }[] = []) {
     this.rng = new RNG(world.seed * 977 + 311);
-    this.spawn(bushes, count);
+    this.spawn(bushes, count, flowers);
     const n = Math.max(1, this.list.length);
     const geo = butterflyGeometry();
     this.flap = new Float32Array(n);
@@ -204,8 +205,27 @@ export class Butterflies {
     return i >= 0 && w.isLandCell(i) && w.sandy[i] < 0.45 && w.rocky[i] < 0.5 && w.swamp[i] < 0.4 && !w.occ[i] && !w.blocked(i);
   }
 
-  private spawn(bushes: Plant[], count: number): void {
+  private spawn(bushes: Plant[], count: number, flowers: { x: number; z: number; top: number }[]): void {
     const w = this.world, rng = this.rng, N = w.N;
+    // Wildflowers by cell, to find the ones near each home.
+    const byCell = new Map<number, { x: number; z: number; top: number }[]>();
+    for (const f of flowers) {
+      const i = w.cellIndexAt(f.x, f.z);
+      if (i < 0) continue;
+      let l = byCell.get(i);
+      if (!l) byCell.set(i, (l = []));
+      l.push(f);
+    }
+    const flowersNear = (x: number, z: number, r: number) => {
+      const out: { x: number; z: number; top: number }[] = [];
+      const [cx0, cz0] = w.cellOf(x, z);
+      const R = Math.ceil(r);
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        if (!w.inBounds(cx0 + dx, cz0 + dz)) continue;
+        for (const f of byCell.get(w.idx(cx0 + dx, cz0 + dz)) ?? []) if ((f.x - x) ** 2 + (f.z - z) ** 2 < r * r) out.push(f);
+      }
+      return out;
+    };
     const alive = bushes.filter((p) => p.state === PlantState.Alive && this.groundOk(p.cell));
     const flowering = alive.filter((p) => p.kind === 'flowerbush');
     // Open ground at woodland edges and round the meadow rim.
@@ -226,11 +246,16 @@ export class Butterflies {
     for (let tries = 0; tries < 4000 && placed < count; tries++) {
       let x: number, z: number;
       const r = rng.next();
-      if (r < 0.5 && flowering.length) {
+      if (r < 0.3 && flowers.length) {
+        // A clump of wildflowers.
+        const f = rng.pick(flowers);
+        x = f.x;
+        z = f.z;
+      } else if (r < 0.6 && flowering.length) {
         const p = rng.pick(flowering);
         x = p.x;
         z = p.z;
-      } else if (r < 0.65 && alive.length) {
+      } else if (r < 0.72 && alive.length) {
         const p = rng.pick(alive);
         x = p.x;
         z = p.z;
@@ -245,10 +270,16 @@ export class Butterflies {
         if (home.bushes.length >= 4) break;
         if ((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < 12) home.bushes.push(p);
       }
-      for (let k = 0; k < 8 && home.spots.length < 6; k++) {
+      // Land on the real flowers nearby first; low plants on open ground if there are none.
+      const near = flowersNear(x, z, home.r + 0.6);
+      for (let k = 0; k < 8 && near.length && home.spots.length < 8 * 3; k++) {
+        const f = near.splice(Math.floor(rng.next() * near.length), 1)[0];
+        if (this.groundOk(w.cellIndexAt(f.x, f.z))) home.spots.push(f.x, f.z, f.top);
+      }
+      for (let k = 0; k < 8 && home.spots.length < 6 * 3; k++) {
         const a = rng.range(0, Math.PI * 2), d = rng.range(0, home.r);
         const sx = x + Math.cos(a) * d, sz = z + Math.sin(a) * d;
-        if (this.groundOk(w.cellIndexAt(sx, sz))) home.spots.push(sx, sz);
+        if (this.groundOk(w.cellIndexAt(sx, sz))) home.spots.push(sx, sz, 0);
       }
       homes.push(home);
       // A few per patch, often of one kind.
@@ -296,13 +327,14 @@ export class Butterflies {
       }
     }
     if (h.spots.length) {
-      const k = Math.floor(rng.next() * (h.spots.length / 2)) * 2;
-      const x = h.spots[k], z = h.spots[k + 1];
+      const k = Math.floor(rng.next() * (h.spots.length / 3)) * 3;
+      const x = h.spots[k], z = h.spots[k + 1], top = h.spots[k + 2];
       const i = w.cellIndexAt(x, z);
       if (this.groundOk(i) && !w.path[i] && w.soil[i] < 0.05 && w.wear[i] < 0.3) {
         f.px = x;
         f.pz = z;
-        f.py = w.heightAt(x, z) + rng.range(0.1, 0.17);
+        // On a flower head, or low over a small plant.
+        f.py = w.heightAt(x, z) + (top > 0 ? top + 0.01 : rng.range(0.1, 0.17));
         return true;
       }
     }
