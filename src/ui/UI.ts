@@ -9,6 +9,7 @@ import { ROLE_LABEL } from '../entities/Islander';
 import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
+import type { Where } from './where';
 import { BUILD_MENU, PAINT_TOOLS, TOOLS, ToolId } from './tools';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -157,8 +158,28 @@ export class UI {
     const over = el('button', 'ib', ICONS.island);
     over.title = 'See the whole map from above (O) · again to go back';
     over.onclick = () => this.game.rig.toggleOverview();
-    tr.append(over, this.muteBtn, help, gear);
+    const eye = el('button', 'ib', ICONS.eye);
+    eye.title = 'Hide the interface: just the island (V)';
+    eye.onclick = () => this.toggleZen(true);
+    tr.append(over, this.muteBtn, help, gear, eye);
     this.root.appendChild(tr);
+    // Shown on its own while the interface is hidden: brings everything back.
+    this.zenBtn = el('button', 'ib zen-eye', ICONS.eye);
+    this.zenBtn.title = 'Show the interface again (V)';
+    this.zenBtn.onclick = () => this.toggleZen(false);
+    this.root.appendChild(this.zenBtn);
+  }
+
+  private zenBtn!: HTMLButtonElement;
+  /** Natural mode: every button, panel, hint and notification hidden but the one eye. */
+  zen = false;
+
+  toggleZen(on = !this.zen): void {
+    this.zen = on;
+    this.root.classList.toggle('zen', on);
+    this.tooltip.classList.add('hidden');
+    if (on) this.toasts.replaceChildren();
+    this.game.audio?.sfx('click');
   }
 
   private buildBottom(): void {
@@ -592,8 +613,20 @@ export class UI {
 
   // ---------------- Notifications ----------------
 
-  toast(text: string, kind: 'info' | 'milestone' | 'warn' = 'info'): void {
+  /** @param at where the news is: clicking the notification takes the camera there */
+  toast(text: string, kind: 'info' | 'milestone' | 'warn' = 'info', at?: Where): void {
+    // Natural mode: no notifications at all until the interface is back.
+    if (this.zen) return;
     const t = el('div', `toast ${kind}`, kind === 'milestone' ? `<span class="tm">${ICONS.bless}</span><span><small>Milestone</small><br>${text}</span>` : text);
+    if (at) {
+      t.classList.add('go');
+      t.title = 'Click to go there';
+      t.insertAdjacentHTML('beforeend', '<span class="go-arrow" aria-hidden="true">›</span>');
+      t.onclick = () => {
+        this.game.focusAt(at);
+        t.remove();
+      };
+    }
     this.toasts.appendChild(t);
     requestAnimationFrame(() => t.classList.add('in'));
     setTimeout(() => {

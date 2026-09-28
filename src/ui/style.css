@@ -385,3 +385,17 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
 .seg .btn { flex: 1; justify-content: center; background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: none; }
 .seg .btn.on { background: var(--gold-deep); color: #2a1a08; }
 .card-head svg { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* Notifications that know where their news is: click to go there. */
+.toast.go { pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.toast.go:hover { filter: brightness(1.12); }
+.toast .go-arrow { font-size: 1.4em; line-height: 1; opacity: 0.8; margin-left: 2px; }
+
+/* Natural mode: only the eye stays on screen. */
+.zen-eye { display: none; }
+#hud.zen > *:not(.zen-eye) { display: none !important; }
+#hud.zen > .zen-eye {
+  display: grid; position: absolute; top: calc(12px + var(--safe-t)); right: calc(12px + var(--safe-r, 0px));
+  pointer-events: auto; opacity: 0.55; background: rgba(20, 16, 24, 0.45); backdrop-filter: blur(6px); border-radius: 12px;
+}
+#hud.zen > .zen-eye:hover { opacity: 1; }
