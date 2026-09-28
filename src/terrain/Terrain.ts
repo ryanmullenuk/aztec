@@ -255,7 +255,8 @@ export class Terrain {
       d[i * 4] = w.path[i] === 2 ? 255 : Math.min(255, w.wear[i] * 255);
       d[i * 4 + 1] = Math.min(255, w.soil[i] * 255);
       d[i * 4 + 2] = w.path[i] === 1 ? 255 : 0;
-      d[i * 4 + 3] = 255;
+      // Alpha: swampland (wet ground → mud).
+      d[i * 4 + 3] = Math.min(255, w.swamp[i] * 255);
     }
     this.wearTex.needsUpdate = true;
   }
@@ -361,6 +362,14 @@ export class Terrain {
           // Trampled paths: terracotta dirt with a ragged edge.
           float wear = smoothstep(0.3 + grain * 0.35, 0.9 + grain * 0.1, wr.r) * (0.4 + 0.6 * vMask.y);
           diffuseColor.rgb = mix(diffuseColor.rgb, mix(uPathCol, uPathCol2, grain), wear);
+          // Swamp: the ground turns dark and wet, then to slick mud toward the pools.
+          float swp = wr.a;
+          if (swp > 0.004) {
+            // Patchy: tussocks of dark wet grass among the mud.
+            float mud = smoothstep(0.42, 0.8, swp + (grain - 0.5) * 0.55);
+            diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.58, 0.64, 0.44), smoothstep(0.03, 0.4, swp));
+            diffuseColor.rgb = mix(diffuseColor.rgb, mix(lin(vec3(0.36, 0.26, 0.15)), lin(vec3(0.28, 0.21, 0.12)), grain), mud);
+          }
           // Tiny wildflower specks on sunny meadow grass.
           vec2 fc = floor(vWPos.xz * 4.0);
           float h = th21(fc);
