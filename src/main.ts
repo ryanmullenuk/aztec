@@ -43,6 +43,9 @@ async function boot(): Promise<void> {
   if (btn) {
     btn.classList.remove('hidden');
     btn.addEventListener('click', go, { once: true });
+    // Tap anywhere on the splash too: in mobile browsers the Play button can end up under the
+    // browser's own address and tab bars.
+    loading?.addEventListener('click', go, { once: true });
   } else go();
 }
 
