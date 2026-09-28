@@ -8,7 +8,8 @@ import { World } from '../world/World';
 import { Islander } from './Islander';
 import type { Jaguar, Jaguars } from './Jaguars';
 import {
-  DOG_DIMS, DOG_EARS, QuadKeys, QuadMeshes, blankPose, dogBodyHalves, dogEar, dogHead, dogJaw, dogNeck, drawQuad, envelope, idleHash, legParts, smooth, stepGait, tailPiece,
+  DOG_DIMS, DOG_EARS, QuadDyn, QuadKeys, QuadMeshes, blankPose, dogBodyParts, dogEar, dogHead, dogJaw, dogLegParts, dogNeckParts, dogTail, dogTongue, drawQuad, envelope, idleHash,
+  smooth, stepGait,
 } from './quadRig';
 import { steer, turnTo, walkable } from './steer';
 
@@ -68,6 +69,20 @@ export interface Dog {
   /** Waypoints for a long walk home, and where along them it is. */
   route: { x: number; z: number }[] | null;
   routeIdx: number;
+  /** Drawing-only animation state (springs, stretch and shake timers); never saved. */
+  anim?: DogAnim;
+}
+
+/** Per-dog animation state kept between frames for drawing. */
+interface DogAnim {
+  dyn: QuadDyn;
+  /** View frame it was last drawn in (the springs reset after time off screen). */
+  frame: number;
+  /** Lying weight last frame, to catch the dog getting up (it stretches, then may shake off). */
+  prevLie: number;
+  stretch: number;
+  shake: number;
+  shakePh: number;
 }
 
 /** Coat colours: tan, brown, dark brown, black, cream. */
@@ -122,18 +137,21 @@ export class Dogs {
     const n = DOGS.maxTotal + 4;
     // One set of meshes for every coat: markings (tricolour bib, socks, muzzle) take a second
     // per-dog colour, which for plain dogs is just the coat colour.
-    const [F, R] = dogBodyHalves();
-    this.meshes.add('dog_F', F, n, true);
-    this.meshes.add('dog_R', R, n, true);
-    this.meshes.add('dog_neck', dogNeck(), n, true);
+    const body = dogBodyParts();
+    this.meshes.add('dog_F', body.chest, n, true);
+    this.meshes.add('dog_M', body.loin, n, true);
+    this.meshes.add('dog_R', body.pelvis, n, true);
+    const [neck1, neck2] = dogNeckParts();
+    this.meshes.add('dog_neck', neck1, n, true);
+    this.meshes.add('dog_neck2', neck2, n, true);
     this.meshes.add('dog_head', dogHead(), n, true);
     this.meshes.add('dog_jaw', dogJaw(), n, true);
+    this.meshes.add('dog_tongue', dogTongue(), n);
     this.meshes.add('dog_ear_prick', dogEar('prick'), n * 2);
     this.meshes.add('dog_ear_floppy', dogEar('floppy'), n * 2);
-    this.meshes.add('dog_tail0', tailPiece(DOG_DIMS.tailLen[0], 0.016, 0.012), n);
-    this.meshes.add('dog_tail1', tailPiece(DOG_DIMS.tailLen[1], 0.012, 0.005), n);
-    const legs = legParts(DOG_DIMS, 0x2a2220, false);
-    ['dog_legUF', 'dog_legLF', 'dog_pawF', 'dog_legUH', 'dog_legLH', 'dog_pawH'].forEach((k, i) => this.meshes.add(k, legs[i], n * 2, true));
+    dogTail().forEach((g, i) => this.meshes.add(`dog_tail${i}`, g, n, true));
+    const legs = dogLegParts(0x2a2220);
+    DOG_LEG_KEYS.forEach((k, i) => this.meshes.add(k, legs[i], n * 2, true));
   }
 
   // ---------------- Population ----------------
@@ -859,10 +877,13 @@ export class Dogs {
     const p = this.pose;
     for (const d of this.list) {
       if (!View.sees(d.x, d.y + 0.15, d.z, 0.4)) continue;
+      const a = (d.anim ??= { dyn: new QuadDyn(), frame: -10, prevLie: d.lie, stretch: 0, shake: 0, shakePh: 0 });
+      // Back on screen after a while: let the springs settle from rest rather than whip.
+      if (View.frame - a.frame > 2) a.dyn.ready = false;
+      a.frame = View.frame;
       const dead = d.state === 'dead';
       const spd = dead ? 0 : d.speed;
       const s = d.scale * (d.puppy ? 0.5 + 0.3 * Math.min(1, d.age / DOGS.puppyGrow) : 1);
-      d.gait = stepGait(d.gait, spd, dt, DOG_DIMS, s);
       let dh = d.heading - d.prevHeading;
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
@@ -871,6 +892,9 @@ export class Dogs {
         d.turn += (THREE.MathUtils.clamp(dh / dt, -5, 5) - d.turn) * Math.min(1, dt * 6);
         d.pant = spd > 1.6 ? Math.min(1, d.pant + dt * 0.4) : Math.max(0, d.pant - dt * DOG_PANT_DECAY);
       }
+      // Turning on the spot steps the feet round (not while sitting or lying).
+      const yaw = dead || d.sit > 0.5 || d.lie > 0.5 ? 0 : d.turn;
+      d.gait = stepGait(d.gait, spd, dt, DOG_DIMS, s, yaw);
       const t = d.phase;
       const G = d.gait * Math.PI * 2;
       const run = smooth(1.4, 2.4, spd);
@@ -878,6 +902,26 @@ export class Dogs {
       const scared = !dead && (d.state === 'yelp' || d.state === 'hide' || d.injured > 0);
       const happy = d.state === 'social' || d.state === 'follow' || d.state === 'zoom';
       const sleep = d.state === 'sleep';
+      // Tail carriage varies by dog (some carry a curled sickle tail): fixed by coat and size so it survives a reload.
+      const sickle = idleHash(d.coat * 7 + 3, Math.round(d.scale * 1000)) < 0.35 ? 1 : 0;
+
+      // Getting up from lying down: a long stretch (play bow), and often a shake-off after it.
+      if (dt > 0 && !dead) {
+        if (a.prevLie > 0.6 && d.lie < 0.35 && !sleep && d.state !== 'lie') {
+          a.stretch = DOG_STRETCH_TIME;
+          a.prevLie = 0;
+        } else a.prevLie = d.lie;
+        if (a.stretch > 0) {
+          a.stretch = Math.max(0, a.stretch - dt);
+          if (a.stretch === 0 && idleHash(Math.floor(t), d.id + 7) < 0.55) a.shake = DOG_SHAKE_TIME;
+        } else if (a.shake > 0) a.shake = Math.max(0, a.shake - dt);
+        a.shakePh += dt * DOG_SHAKE_RATE;
+      }
+      // Only while standing still: moving off cancels them.
+      const idleOK = (1 - smooth(0.15, 0.4, spd)) * (1 - d.sit) * (1 - d.lie);
+      let bow = a.stretch > 0 ? envelope(DOG_STRETCH_TIME - a.stretch, 0, DOG_STRETCH_TIME, 0.7) * idleOK : 0;
+      let shake = a.shake > 0 ? envelope(DOG_SHAKE_TIME - a.shake, 0, DOG_SHAKE_TIME, 0.25) * idleOK : 0;
+
       p.x = d.x;
       p.y = d.y;
       p.z = d.z;
@@ -885,6 +929,8 @@ export class Dogs {
       p.scale = s;
       p.gait = d.gait;
       p.speed = spd;
+      p.yaw = yaw;
+      p.dt = dt;
       p.bend = THREE.MathUtils.clamp(d.turn * 0.1, -0.35, 0.35);
       p.sit = d.sit;
       p.lie = dead ? 1 : d.lie;
@@ -899,26 +945,37 @@ export class Dogs {
       p.ovW = 0;
 
       // ---- Head, neck and jaw ----
-      let neck = (scared ? 0.3 : 0) + (alertish ? -0.15 : 0) + (sleep ? 0.35 : 0) + (d.state === 'lie' ? 0.1 : 0);
+      let neck = (scared ? 0.3 : 0) + (alertish ? -0.15 : 0) + (sleep ? 0.5 : 0) + (d.state === 'lie' ? 0.1 : 0) + run * 0.3;
       let hp = (sleep ? 0.35 : d.state === 'lie' ? 0.08 : 0) + (alertish ? -0.12 : 0) + (scared ? 0.2 : 0) + run * 0.1;
       let hy = d.headYaw, hr = 0, jaw = 0;
       let earL = 0, earR = 0, earYaw = 0;
-      if (d.state === 'sniff' && spd < 0.1) {
-        // Nose down, snuffling along the ground.
-        neck += 0.85;
-        hp += 0.3 + Math.sin(t * 7) * 0.08;
-        hy += Math.sin(t * 1.3) * 0.25;
+      let wagK = 1;
+      if (d.state === 'sniff') {
+        // Nose down, snuffling along the ground, the head sweeping side to side (the spine curves with it).
+        const close = spd < 0.1 ? 1 : 0.45;
+        neck += 0.85 * close;
+        hp += (0.3 + Math.sin(t * 7) * 0.08) * close;
+        hy += Math.sin(t * 1.3) * (spd < 0.1 ? 0.5 : 0.2);
+        earL += 0.15;
+        earR += 0.15;
       }
       if (d.bark > 0) {
-        const b = Math.sin((d.bark / 0.22) * Math.PI);
-        hp -= b * 0.35;
-        neck -= b * 0.1;
-        jaw += b * 0.5;
+        // Each bark: the head jerks up with the mouth snapping open, the chest thrusts, ears go forward.
+        const b = Math.pow(Math.sin((d.bark / 0.22) * Math.PI), 0.7);
+        hp -= b * 0.38;
+        neck -= b * 0.14;
+        jaw += b * 0.62;
+        p.spine -= b * 0.08;
+        p.bob += b * 0.004 * s;
+        earL += b * 0.25;
+        earR += b * 0.25;
+        wagK = 0.4;
       }
       if (d.state === 'yelp') jaw += 0.3 + Math.sin(t * 20) * 0.08;
-      // Panting after a run: mouth open, quick shallow breaths.
+      // Panting after a run: mouth open, tongue lolling, quick shallow breaths.
       const pant = sleep || dead || spd > 1.2 ? 0 : d.pant;
-      jaw += pant * (0.22 + Math.sin(t * 16) * 0.06);
+      jaw += pant * (0.13 + Math.sin(t * 16) * 0.04);
+      let tongue = sleep || dead || d.bark > 0 ? 0 : Math.min(1, pant * 1.3 + run * 0.7 + (happy && spd > 0.6 ? 0.45 : 0));
       p.breath = dead ? 0 : sleep ? Math.sin(t * 1.5) * 0.028 : pant > 0.05 ? Math.sin(t * 16) * 0.02 * pant : Math.sin(t * 2.4) * 0.012;
 
       // ---- Idle fidgets while standing, sitting or lying about ----
@@ -926,20 +983,24 @@ export class Dogs {
       if (still) {
         const wt = t + d.id * 2.3, wk = Math.floor(wt / DOG_IDLE_WINDOW), u = wt - wk * DOG_IDLE_WINDOW;
         const h = idleHash(wk, d.id), side = idleHash(wk, d.id + 50) < 0.5 ? 1 : -1;
+        const standing = d.sit < 0.3 && d.lie < 0.3 && a.stretch <= 0 && a.shake <= 0;
         if (d.sit > 0.8 && h < 0.2) {
-          // Scratching behind the ear with a hind leg, head tipped toward it.
+          // Scratching behind the ear with a hind leg, head tipped down toward it, eyes half shut.
           const e = envelope(u, 0.4, 3.2);
+          const k = Math.sin(t * 30);
           p.ovLeg = 2;
           p.ovW = e * d.sit;
-          p.ov[0] = -1.6 + Math.sin(t * 30) * 0.22;
-          p.ov[1] = 0.9 + Math.sin(t * 30 + 1) * 0.15;
-          p.ov[2] = -0.3;
-          hy += 0.7 * e;
-          hr += 0.45 * e;
-          neck += 0.25 * e;
-          hp += 0.2 * e;
-          earL += Math.sin(t * 30) * 0.2 * e;
-        } else if (h < 0.45 && d.lie < 0.5) {
+          p.ov[0] = -1.9 + k * 0.15;
+          p.ov[1] = 0.7 + Math.sin(t * 30 + 1) * 0.25;
+          p.ov[2] = -0.7 + k * 0.1;
+          p.ov[3] = 0.5;
+          p.ov[4] = 0.4;
+          hy += 0.75 * e;
+          hr += 0.5 * e;
+          neck += 0.35 * e;
+          hp += 0.25 * e;
+          earL += k * 0.2 * e;
+        } else if (h < 0.4 && d.lie < 0.5) {
           // Head tilt, ears pricked, as if listening.
           const e = envelope(u, 0.3, 2.6);
           hr += side * 0.38 * e;
@@ -947,34 +1008,66 @@ export class Dogs {
           earL += 0.2 * e;
           earR += 0.2 * e;
           earYaw -= 0.12 * e;
-        } else if (h < 0.58 && !sleep) {
-          // A big yawn.
+        } else if (h < 0.52 && !sleep) {
+          // A big yawn, tongue curling out.
           const e = envelope(u, 0.5, 2.2, 0.5);
           jaw += 0.75 * e;
           hp -= 0.35 * e;
           neck -= 0.1 * e;
           earL -= 0.4 * e;
           earR -= 0.4 * e;
-        } else if (h < 0.75 && d.sit < 0.3 && d.lie < 0.3) {
-          // A sniff at the ground.
-          const e = envelope(u, 0.3, 2.8);
+          tongue = Math.max(tongue, 0.4 * e);
+        } else if (h < 0.66 && standing) {
+          // Sniffing about on the ground, nose working side to side.
+          const e = envelope(u, 0.3, 3.4);
           neck += 0.8 * e;
           hp += (0.3 + Math.sin(t * 8) * 0.06) * e;
-        } else if (h < 0.88 && d.lie > 0.5 && !sleep) {
+          hy += Math.sin(t * 1.7 + d.id) * 0.45 * e;
+        } else if (h < 0.74 && standing) {
+          // Shaking off, head to tail.
+          shake = Math.max(shake, envelope(u, 0.6, 0.6 + DOG_SHAKE_TIME, 0.25));
+        } else if (h < 0.8 && standing) {
+          // A play bow / stretch.
+          bow = Math.max(bow, envelope(u, 0.4, 3.2, 0.6));
+        } else if (h < 0.9 && d.lie > 0.5 && !sleep) {
           // Head up from the paws to look around.
           const e = envelope(u, 0.4, 3.6);
           neck -= 0.3 * e;
           hp -= 0.15 * e;
           hy += Math.sin(t * 0.8) * 0.6 * e;
+        } else if (d.lie > 0.5 && !sleep) {
+          // Chin down on the forepaws.
+          const e = envelope(u, 0.5, 4.5, 0.8);
+          neck += 0.4 * e;
+          hp += 0.3 * e;
         }
       }
+      // A playful dog greeting another sometimes drops into a bow.
+      if (d.state === 'social' && spd < 0.1 && d.sit < 0.3) bow = Math.max(bow, envelope((t * 0.45 + d.id * 0.37) % 3, 0.3, 1.6, 0.35));
+      if (bow > 0) {
+        // Head up, ears forward, tail high and wagging (a stretch after lying holds a yawn in the middle).
+        hp -= 0.15 * bow;
+        earL += 0.15 * bow;
+        earR += 0.15 * bow;
+        if (a.stretch > 0) jaw += 0.5 * envelope(DOG_STRETCH_TIME - a.stretch, 0.8, 1.9, 0.4);
+      }
+      if (shake > 0) {
+        // Eyes screwed up, mouth loose, the head leading the shake.
+        jaw += 0.12 * shake;
+        neck += 0.12 * shake;
+        tongue = 0;
+      }
+      p.bow = bow;
+      p.shake = shake;
+      p.shakePh = a.shakePh;
       p.neck = neck;
       p.headPitch = hp;
       p.headYaw = hy;
       p.headRoll = hr;
-      p.jaw = dead ? 0.15 : Math.min(0.85, jaw);
+      p.jaw = dead ? 0.15 : Math.min(0.85, jaw + tongue * 0.06);
+      p.tongue = tongue;
 
-      // ---- Ears: pricked when alert, pinned back when scared or running, with little flicks ----
+      // ---- Ears: pricked when alert, pinned back when scared or running, with little flicks (springs add the bounce) ----
       if (d.ears === 'prick') {
         const base = alertish ? 0.25 : scared ? -0.9 : sleep ? -0.35 : d.lie > 0.5 ? -0.15 : 0;
         const wind = -0.45 * run;
@@ -982,18 +1075,17 @@ export class Dogs {
         earR += base + wind + this.flick(t, d.id, 1) * -0.5;
         earYaw += scared ? 0.3 : 0;
       } else {
-        // Drop ears swing back in the wind and bounce with each stride.
+        // Drop ears stream back in the wind; they bounce and swing on their own springs.
         const base = scared ? 0.5 : alertish ? -0.12 : 0;
-        const bounce = smooth(0.1, 0.6, spd) * Math.sin(G * 2 - 1) * (0.18 + 0.2 * run);
-        earL += base + 0.7 * run + bounce + this.flick(t, d.id, 0) * 0.25 + p.bend * 0.8;
-        earR += base + 0.7 * run + bounce * 0.9 + this.flick(t, d.id, 1) * 0.25 - p.bend * 0.8;
+        earL += base + 0.7 * run + this.flick(t, d.id, 0) * 0.25 + p.bend * 0.8;
+        earR += base + 0.7 * run + this.flick(t, d.id, 1) * 0.25 - p.bend * 0.8;
       }
       p.earL = earL;
       p.earR = earR;
       p.earYaw = earYaw;
 
-      // ---- Tail: carriage and wag follow the dog's mood ----
-      // Carriage (base pitch, tip pitch), wag amplitude and rate (rad/s) per mood.
+      // ---- Tail: carriage and wag follow the dog's mood; the pieces follow through on springs ----
+      // Carriage (base pitch, curve toward the tip), wag amplitude and rate (rad/s) per mood.
       let tp0 = -0.35, tp1 = 0.38, amp = 0.22, rate = 9;
       if (scared) {
         tp0 = -1.25;
@@ -1005,9 +1097,9 @@ export class Dogs {
         tp1 = 0.25;
         amp = 0.08;
         rate = 22;
-      } else if (happy) {
+      } else if (happy || bow > 0.3) {
         tp0 = 0.55;
-        amp = d.state === 'social' ? 0.75 : 0.55;
+        amp = d.state === 'social' || bow > 0.3 ? 0.75 : 0.55;
         rate = d.state === 'social' ? 30 : 26;
       }
       // Sitting: the tail lies on the ground behind, sweeping; lying: flat out, a thump now and then.
@@ -1022,15 +1114,30 @@ export class Dogs {
       // Running: out behind, streaming with the stride.
       tp0 = THREE.MathUtils.lerp(tp0, 0.25, run * (scared ? 0.3 : 1));
       tp1 += run * 0.2 * Math.sin(G - 1);
+      // Sickle-tailed dogs curl a raised tail up over the back.
+      const curlUp = sickle * smooth(0.1, 0.6, tp0) * (1 - run);
+      amp *= wagK;
       const w = t * rate + d.id;
-      p.tailP[0] = dead ? -0.5 : tp0;
-      p.tailP[1] = dead ? 0 : tp1;
-      p.tailY[0] = dead ? 0.2 : amp * Math.sin(w) + smooth(0.1, 1, spd) * (1 - run) * 0.12 * Math.sin(G) + (sleep ? 0.9 * d.lie : 0);
-      p.tailY[1] = dead ? 0 : amp * 0.85 * Math.sin(w - 1.0) + (sleep ? 0.6 * d.lie : 0);
+      const trotSwing = smooth(0.1, 1, spd) * (1 - run) * 0.12 * Math.sin(G);
+      const nT = DOG_DIMS.tailLen.length;
+      for (let i = 0; i < nT; i++) {
+        if (dead) {
+          p.tailP[i] = i ? 0.02 : -0.5;
+          p.tailY[i] = i ? 0 : 0.2;
+          continue;
+        }
+        if (i === 0) {
+          p.tailP[0] = tp0;
+          p.tailY[0] = amp * Math.sin(w) + trotSwing + (sleep ? 0.7 * d.lie : 0);
+        } else {
+          p.tailP[i] = tp1 * DOG_TAIL_CURVE[i - 1] + curlUp * 0.32;
+          p.tailY[i] = amp * 0.22 * Math.sin(w - i * 0.7) + (sleep ? 0.32 * d.lie : 0);
+        }
+      }
       // A hard greeting wag wiggles the whole back end.
       p.wiggle = d.state === 'social' && spd < 0.2 ? 0.08 * Math.sin(w + Math.PI) * (1 - d.sit) : 0;
       const mark = d.tri ? DOG_MARKS[d.coat] ?? DOG_MARKS[0] : d.color;
-      drawQuad(m, this.keys[d.ears], DOG_DIMS, p, d.color, d.puppy ? 1.25 : 1, mark);
+      drawQuad(m, this.keys[d.ears], DOG_DIMS, p, d.color, d.puppy ? 1.25 : 1, mark, a.dyn);
     }
     m.end();
   }
@@ -1047,10 +1154,20 @@ const DOG_MARKS = [new THREE.Color(0xf2eadc), new THREE.Color(0xeee0c4), new THR
 /** Seconds between idle fidget choices, and how fast panting fades after a run. */
 const DOG_IDLE_WINDOW = 5;
 const DOG_PANT_DECAY = 0.06;
+/** Getting-up stretch and shake-off durations (s), and the shake's rate (rad/s, about 4 shakes a second). */
+const DOG_STRETCH_TIME = 2.6;
+const DOG_SHAKE_TIME = 1.2;
+const DOG_SHAKE_RATE = 26;
+/** How the tail's curve (tp1) is spread over the joints after the base. */
+const DOG_TAIL_CURVE = [0.38, 0.32, 0.28, 0.24];
+
+const DOG_LEG_KEYS = ['dog_scap', 'dog_legUF', 'dog_legLF', 'dog_pawF', 'dog_toeF', 'dog_legUH', 'dog_legLH', 'dog_pawH', 'dog_toeH'];
 
 function DOG_KEYS(ears: 'prick' | 'floppy'): QuadKeys {
   return {
-    F: 'dog_F', R: 'dog_R', neck: 'dog_neck', head: 'dog_head', jaw: 'dog_jaw', ear: `dog_ear_${ears}`, earPos: DOG_EARS[ears].pos, earRest: DOG_EARS[ears].rest,
-    tail: ['dog_tail0', 'dog_tail1'], legUF: 'dog_legUF', legLF: 'dog_legLF', pawF: 'dog_pawF', legUH: 'dog_legUH', legLH: 'dog_legLH', pawH: 'dog_pawH',
+    F: 'dog_F', M: 'dog_M', R: 'dog_R', neck: 'dog_neck', neck2: 'dog_neck2', head: 'dog_head', jaw: 'dog_jaw', tongue: 'dog_tongue',
+    ear: `dog_ear_${ears}`, earPos: DOG_EARS[ears].pos, earRest: DOG_EARS[ears].rest, earSoft: DOG_EARS[ears].soft,
+    tail: DOG_DIMS.tailLen.map((_, i) => `dog_tail${i}`), scap: 'dog_scap',
+    legUF: 'dog_legUF', legLF: 'dog_legLF', pawF: 'dog_pawF', toeF: 'dog_toeF', legUH: 'dog_legUH', legLH: 'dog_legLH', pawH: 'dog_pawH', toeH: 'dog_toeH',
   };
 }

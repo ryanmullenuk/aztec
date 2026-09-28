@@ -4,11 +4,18 @@ import { peopleMaterial } from '../render/materials';
 import { splitBody } from './animalModels';
 
 /**
- * A small jointed four-legged rig shared by dogs and jaguars: front and rear body halves with a
- * spine joint, a neck, a head with a hinged jaw and mobile ears, a jointed tail of up to three
- * pieces and three-segment legs. Legs are placed by two-bone IK onto gait-driven paw targets, so
- * planted paws stay put while the body moves over them (stride is tied to ground speed). A pose
- * adds blend weights for sitting, lying, curling up, crouching (stalking), lunging and limping.
+ * A jointed four-legged rig shared by dogs and jaguars. The body is two or three pieces along
+ * the spine (chest, loin, pelvis) so the back arches and stretches in the gallop and curves into
+ * turns; a one- or two-piece neck; a head with a hinged jaw (and optional tongue) and mobile
+ * ears; a jointed tail of any number of pieces; optional shoulder blades that rock with the
+ * forelegs; and legs of three or four segments (upper, lower, pastern / metatarsus, toes).
+ *
+ * Legs are placed by two-bone IK onto gait-driven paw targets expressed in the heading frame,
+ * so planted paws stay put while the body moves over them (stride is tied to ground speed, and
+ * turning on the spot steps the feet round). The toe tip is the planted point, so the heel of
+ * the paw rolls up off the ground at push-off. A pose adds blend weights for sitting, lying,
+ * curling up, crouching (stalking), lunging, limping, the play bow and a shake-off; a QuadDyn
+ * gives an animal springy follow-through on the tail, ears, jaw and tongue.
  *
  * Vertices tagged mat 2 take the per-animal coat colour; mat 1 vertices are markings (cream
  * chest, pale belly, socks) tinted by a second per-animal colour, so one mesh serves plain,
@@ -16,6 +23,7 @@ import { splitBody } from './animalModels';
  */
 
 const TAU = Math.PI * 2;
+const HALF_PI = Math.PI / 2;
 const COAT = { color: 0xffffff, mat: 2 };
 const coat = (shade: number) => ({ color: new THREE.Color(shade, shade, shade), mat: 2 });
 const MARK = { color: 0xffffff, mat: 1 };
@@ -63,13 +71,40 @@ export interface QuadDims {
   pawH: number;
   /** Paw lift in swing, fraction of hipY. */
   clear: number;
+  // ---- Optional refinements (absent = the simpler two-piece rig) ----
+  /** Three-piece spine: z of the chest and pelvis joints from the body centre (the loin piece lies between). */
+  spineJ?: [number, number];
+  /** Second neck piece: length and resting pitch relative to the first. */
+  neckLen2?: number;
+  neckPitch2?: number;
+  /** Shoulder blades: top pivot (x, y, z in body space), length, resting angle (negative = lower end forward), inward tilt. */
+  scap?: [number, number, number, number, number, number];
+  /** Toe segments (fractions of hipY) adding a joint at the ball of the paw, and the toe line's height above ground. */
+  toeF?: number;
+  toeH?: number;
+  padH?: number;
+  /** Lever arm used to step the feet round when turning on the spot (0 = turn without stepping). */
+  turnR?: number;
+  /** Stride at a crawl as a fraction of the walking stride, and the extra stride at a trot (default 0.2). */
+  slowStride?: number;
+  trotK?: number;
+  /** Gallop spine flex (radians at full gather / stretch) and sideways weight shift at a walk (fraction of hipY). */
+  flexK?: number;
+  swayK?: number;
 }
 
+/**
+ * A medium village dog, about half an islander's height at the withers: deep chest, tucked
+ * waist, sloping croup; shoulder blades; four-segment legs with a toe joint.
+ */
 export const DOG_DIMS: QuadDims = {
-  spineY: 0.2, hipY: 0.165, frontK: 0.93, hindK: 0.92, x: 0.036, zF: 0.1, zR: -0.105, footF: -0.14, footH: -0.16,
-  neck: [0, 0.035, 0.1], neckLen: 0.085, neckPitch: -0.75, jaw: [-0.004, 0.045], tail: [0, 0.032, -0.15], tailLen: [0.075, 0.07],
-  segF: [0.4, 0.42, 0.2], segH: [0.42, 0.44, 0.26], r: 0.017, stride: 0.24, gallopK: 2.0, trotV: [0.95, 1.25], gallopV: [1.6, 2.1],
-  crouchDrop: 0.3, lieY: 0.42, pawF: -0.25, pawH: -0.08, clear: 0.2,
+  spineY: 0.2, hipY: 0.165, frontK: 1.115, hindK: 1.14, x: 0.034, zF: 0.121, zR: -0.112, footF: -0.2, footH: -0.05,
+  neck: [0, 0.028, 0.128], neckLen: 0.05, neckPitch: -0.95, neckLen2: 0.046, neckPitch2: 0.5, jaw: [-0.005, 0.028],
+  tail: [0, 0.03, -0.163], tailLen: [0.036, 0.034, 0.032, 0.03, 0.028],
+  segF: [0.436, 0.5, 0.18], segH: [0.455, 0.485, 0.29], toeF: 0.13, toeH: 0.12, padH: 0.009,
+  r: 0.017, stride: 0.24, gallopK: 2.6, trotK: 0.52, trotV: [0.55, 0.8], gallopV: [1.6, 2.1],
+  crouchDrop: 0.3, lieY: 0.5, pawF: -0.25, pawH: -0.08, clear: 0.22,
+  spineJ: [0.035, -0.07], scap: [0.024, 0.05, 0.085, 0.075, -0.5, 0.14], turnR: 0.12, slowStride: 0.6, flexK: 0.42, swayK: 0.05,
 };
 
 export const JAG_DIMS: QuadDims = {
@@ -205,89 +240,363 @@ const grain = (i: number, amt: number) => 1 - amt + 2 * amt * hash(i, 77);
 /** Compose a matrix into a GeoBuilder transform relative to a parent. */
 const at = (parent: THREE.Matrix4, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) => parent.clone().multiply(M.t(x, y, z, rx, ry, rz, sx, sy, sz));
 
+// ---------------- Lofted shapes ----------------
+
+/** A cross-section of a lofted shape: centre (x, y) at z along the axis, half width, half heights above (u) and below (d). */
+interface Sec {
+  z: number;
+  x: number;
+  y: number;
+  w: number;
+  u: number;
+  d: number;
+}
+const sec = (z: number, y: number, w: number, u: number, d: number, x = 0): Sec => ({ z, x, y, w, u, d });
+const spow = (v: number, e: number) => Math.sign(v) * Math.pow(Math.abs(v), e);
+/** Dome rings (angles from the section plane) used to round off the ends of a loft. */
+const DOME = [1.1, 0.6];
+
+/**
+ * A closed tube through cross-sections along +z, with domed ends (a cap length of 0 leaves that
+ * end open). `ex` above 2 squares the sections off a little (ribcage), `jit` jitters the rings
+ * for a hand-cut look. Sections must be in increasing z.
+ */
+function loft(secs: Sec[], radial: number, cap0: number, cap1: number, ex = 2, jit = 0, seed = 1): THREE.BufferGeometry {
+  const all: Sec[] = [];
+  const sc = (s: Sec, z: number, k: number): Sec => ({ z, x: s.x, y: s.y, w: s.w * k, u: s.u * k, d: s.d * k });
+  const first = secs[0], last = secs[secs.length - 1];
+  if (cap0 > 0) for (const t of DOME) all.push(sc(first, first.z - cap0 * Math.sin(t), Math.cos(t)));
+  all.push(...secs);
+  if (cap1 > 0) for (let i = DOME.length - 1; i >= 0; i--) all.push(sc(last, last.z + cap1 * Math.sin(DOME[i]), Math.cos(DOME[i])));
+  const pos: number[] = [];
+  const idx: number[] = [];
+  all.forEach((s, r) => {
+    for (let j = 0; j < radial; j++) {
+      const a = HALF_PI + (TAU * j) / radial;
+      const c = Math.cos(a), sn = Math.sin(a);
+      const k = jit ? 1 + jit * (2 * hash(r, j, seed) - 1) : 1;
+      pos.push(s.x + s.w * spow(c, 2 / ex) * k, s.y + (sn > 0 ? s.u : s.d) * spow(sn, 2 / ex) * k, s.z);
+    }
+  });
+  const n = all.length;
+  for (let r = 0; r + 1 < n; r++) {
+    for (let j = 0; j < radial; j++) {
+      const j1 = (j + 1) % radial;
+      const p00 = r * radial + j, p01 = r * radial + j1, p10 = (r + 1) * radial + j, p11 = (r + 1) * radial + j1;
+      idx.push(p00, p01, p10, p01, p11, p10);
+    }
+  }
+  if (cap0 > 0) {
+    const a = pos.length / 3;
+    pos.push(first.x, first.y, first.z - cap0);
+    for (let j = 0; j < radial; j++) idx.push(a, (j + 1) % radial, j);
+  }
+  if (cap1 > 0) {
+    const a = pos.length / 3, b = (n - 1) * radial;
+    pos.push(last.x, last.y, last.z + cap1);
+    for (let j = 0; j < radial; j++) idx.push(a, b + j, b + ((j + 1) % radial));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A loft running down a bone (distance along −y): `u` is the depth toward the front (+z), `d` toward the back. */
+function limb(secs: Sec[], radial: number, cap0: number, cap1: number, jit = 0.04, seed = 3): THREE.BufferGeometry {
+  return loft(secs, radial, cap0, cap1, 2, jit, seed).applyMatrix4(M.t(0, 0, 0, HALF_PI, 0, 0));
+}
+
+/** Catmull-Rom through a table of sections (increasing, roughly even z), sampled at z. */
+function sampleSec(tab: Sec[], z: number): Sec {
+  let i = 0;
+  while (i < tab.length - 2 && tab[i + 1].z < z) i++;
+  const a = tab[Math.max(0, i - 1)], b = tab[i], c = tab[i + 1], d = tab[Math.min(tab.length - 1, i + 2)];
+  const t = Math.min(1, Math.max(0, (z - b.z) / (c.z - b.z)));
+  const cr = (p0: number, p1: number, p2: number, p3: number) =>
+    0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
+  return { z, x: cr(a.x, b.x, c.x, d.x), y: cr(a.y, b.y, c.y, d.y), w: cr(a.w, b.w, c.w, d.w), u: cr(a.u, b.u, c.u, d.u), d: cr(a.d, b.d, c.d, d.d) };
+}
+
+/**
+ * One piece of a lofted body: its own span [z0, z1] plus overlaps ov0 / ov1 reaching into its
+ * neighbours, shrunk a touch so they stay hidden at rest and fill the joint as it bends.
+ */
+function bodyPiece(tab: Sec[], z0: number, z1: number, ov0: number, ov1: number, radial: number, step: number, ex: number, seed: number, endCap = 0.014): THREE.BufferGeometry {
+  const secs: Sec[] = [];
+  const a = z0 - ov0, b = z1 + ov1;
+  const n = Math.max(2, Math.ceil((b - a) / step));
+  const lo = tab[0].z, hi = tab[tab.length - 1].z;
+  for (let i = 0; i <= n; i++) {
+    const z = a + ((b - a) * i) / n;
+    const s = sampleSec(tab, Math.min(hi, Math.max(lo, z)));
+    s.z = z;
+    const inside = z < z0 ? (z0 - z) / ov0 : z > z1 ? (z - z1) / ov1 : 0;
+    const k = 1 - 0.07 * Math.min(1, inside * 3);
+    s.w *= k;
+    s.u *= k;
+    s.d *= k;
+    secs.push(s);
+  }
+  const f = secs[0], l = secs[secs.length - 1];
+  const cap = (s: Sec, ov: number) => (ov > 0 ? 0.75 * Math.min(s.w, s.u, s.d) : endCap);
+  return loft(secs, radial, cap(f, ov0), cap(l, ov1), ex, 0.03, seed);
+}
+
+/** Retag faces (coat, mat 2) as markings (mat 1) where fn(centroid, normal) holds. Non-indexed geometry. */
+function markFaces(g: THREE.BufferGeometry, fn: (x: number, y: number, z: number, nx: number, ny: number, nz: number) => boolean): THREE.BufferGeometry {
+  const pos = g.getAttribute('position'), nor = g.getAttribute('normal'), mat = g.getAttribute('aMat');
+  for (let i = 0; i < pos.count; i += 3) {
+    if (mat.getX(i) < 1.5) continue;
+    const x = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3;
+    const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+    const z = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+    if (fn(x, y, z, nor.getX(i), nor.getY(i), nor.getZ(i))) for (let k = 0; k < 3; k++) mat.setX(i + k, 1);
+  }
+  mat.needsUpdate = true;
+  return g;
+}
+
+/** Coat shading: a darker saddle on upward faces above `y0`, and per-facet grain. */
+const saddle = (y0: number, amt: number) => (_x: number, y: number, _z: number, _nx: number, ny: number, _nz: number, m: number, i: number) =>
+  (m > 1.5 ? 1 - amt * Math.min(1, Math.max(0, (ny - 0.35) * 2.5)) * Math.min(1, Math.max(0, (y - y0) * 60)) : 1) * grain(i, 0.045);
+
 // ---------------- Dog geometry ----------------
 
-/** Dog body: deep chest, withers, tucked waist, rounded croup; cream chest bib and belly (markings). */
-export function dogBodyHalves(): [THREE.BufferGeometry, THREE.BufferGeometry] {
-  const b = new GeoBuilder();
-  const y0 = DOG_DIMS.spineY;
-  b.add(P.sphere(0.066, 1), COAT, M.t(0, y0 - 0.012, 0.072, 0, 0, 0, 0.9, 1.22, 1.08));
-  b.add(P.sphere(0.042, 1), COAT, M.t(0, y0 - 0.004, 0.125, 0, 0, 0, 0.95, 1.1, 0.9));
-  for (const x of [-1, 1]) b.add(P.sphere(0.034, 1), COAT, M.t(x * 0.028, y0 + 0.024, 0.08, -0.4, 0, 0, 0.55, 1.35, 0.9));
-  // Ribs narrowing to the waist; the underline tucks up toward the loin.
-  b.add(P.cyl(0.056, 0.04, 0.13, 8), COAT, M.t(0, y0 + 0.004, -0.012, Math.PI / 2 + 0.14, 0, 0, 1, 1, 0.95));
-  b.add(P.sphere(0.046, 1), COAT, M.t(0, y0 + 0.01, -0.07, 0, 0, 0, 0.92, 0.88, 1.15));
-  b.add(P.sphere(0.055, 1), COAT, M.t(0, y0 + 0.006, -0.108, 0, 0, 0, 1.05, 1, 1));
-  b.add(P.sphere(0.03, 1), COAT, M.t(0, y0 + 0.03, -0.145, 0, 0, 0, 1, 0.9, 1));
-  // Markings: chest bib and belly strip.
-  b.add(P.sphere(0.05, 1), MARK, M.t(0, y0 - 0.03, 0.118, 0, 0, 0, 0.8, 1.2, 0.75));
-  b.add(P.sphere(0.04, 1), MARK, M.t(0, y0 - 0.055, 0.02, 0, 0, 0, 0.7, 0.4, 1.6));
-  const g = facet(b.build());
-  // Darker saddle along the back.
-  paintFaces(g, (_x, y, _z, _nx, ny, _nz, m, i) => (m > 1.5 && ny > 0.5 && y > y0 + 0.025 ? 0.84 : 1) * grain(i, 0.04));
-  return splitBody(g, y0);
+/**
+ * Body profile in body space (y from the spine height): rounded rump and haunch, a tucked waist,
+ * the deep ribcage and brisket, the point of the chest.
+ */
+const DOG_BODY: Sec[] = [
+  sec(-0.18, 0.002, 0.026, 0.028, 0.034),
+  sec(-0.167, 0.004, 0.036, 0.037, 0.044),
+  sec(-0.15, 0.006, 0.043, 0.045, 0.05),
+  sec(-0.125, 0.009, 0.047, 0.05, 0.05),
+  sec(-0.1, 0.011, 0.046, 0.051, 0.049),
+  sec(-0.075, 0.012, 0.042, 0.049, 0.045),
+  sec(-0.05, 0.01, 0.041, 0.048, 0.046),
+  sec(-0.02, 0.004, 0.045, 0.052, 0.055),
+  sec(0.01, -0.002, 0.049, 0.058, 0.066),
+  sec(0.04, -0.006, 0.052, 0.064, 0.077),
+  sec(0.07, -0.008, 0.052, 0.068, 0.082),
+  sec(0.1, -0.006, 0.05, 0.066, 0.08),
+  sec(0.128, -0.002, 0.045, 0.058, 0.068),
+  sec(0.152, 0.0, 0.037, 0.046, 0.054),
+  sec(0.17, -0.003, 0.025, 0.031, 0.036),
+];
+
+/**
+ * Dog body in three pieces, each with its pivot at its spine joint: chest (withers, ribcage, bib),
+ * loin (tucked waist) and pelvis (croup, rump, hip points). Pale bib and belly are markings.
+ */
+export function dogBodyParts(): { chest: THREE.BufferGeometry; loin: THREE.BufferGeometry; pelvis: THREE.BufferGeometry } {
+  const [jc, jp] = DOG_DIMS.spineJ!;
+  const piece = (z0: number, z1: number, ov0: number, ov1: number, seed: number, extra?: (b: GeoBuilder) => void) => {
+    const b = new GeoBuilder();
+    b.add(bodyPiece(DOG_BODY, z0, z1, ov0, ov1, 12, 0.016, 2.25, seed), COAT);
+    extra?.(b);
+    const g = facet(b.build());
+    markFaces(g, (_x, y, z, _nx, ny, nz) => ny < -0.7 && z > -0.13 && z < 0.16 || (z > 0.09 && y < 0.012 && (nz > 0.3 || ny < -0.35)));
+    paintFaces(g, saddle(0.03, 0.17));
+    return g;
+  };
+  const chest = piece(jc, 0.17, 0.03, 0, 11).translate(0, 0, -jc);
+  const loin = piece(jp, jc, 0.026, 0.026, 12);
+  const pelvis = piece(-0.18, jp, 0, 0.03, 13, (b) => {
+    // Points of the hip either side of the croup.
+    for (const x of [-1, 1]) b.add(P.sphere(0.009, 1), COAT, M.t(x * 0.025, 0.045, -0.09, 0, 0, 0, 1, 0.75, 1.4));
+  }).translate(0, 0, -jp);
+  return { chest, loin, pelvis };
 }
 
-/** Dog neck: pivot at its base inside the chest, running forward along +z to the head joint. */
-export function dogNeck(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  const len = DOG_DIMS.neckLen;
-  b.add(P.sphere(0.04, 1), COAT, M.t(0, 0, 0, 0, 0, 0, 0.95, 1, 1));
-  b.add(P.cyl(0.03, 0.04, len + 0.01, 7), COAT, M.t(0, 0, len / 2, Math.PI / 2, 0, 0, 1, 1, 0.95));
-  b.add(P.sphere(0.031, 1), COAT, M.t(0, 0.002, len));
-  // Cream throat.
-  b.add(P.cyl(0.02, 0.028, len, 6), MARK, M.t(0, -0.016, len / 2, Math.PI / 2, 0, 0, 1, 1, 0.8));
-  return paintFaces(facet(b.build()), (_x, _y, _z, _nx, ny, _nz, m, i) => (m > 1.5 && ny > 0.6 ? 0.86 : 1) * grain(i, 0.04));
+/** Two-piece dog neck (pivots at the base in the chest and at the middle); cream throat. */
+export function dogNeckParts(): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const fin = (g: THREE.BufferGeometry) => {
+    const f = facet(new GeoBuilder().add(g, COAT).build());
+    markFaces(f, (_x, _y, _z, _nx, ny) => ny < -0.35);
+    return paintFaces(f, saddle(0.008, 0.14));
+  };
+  const n1 = loft([sec(0, -0.002, 0.037, 0.037, 0.043), sec(0.02, -0.001, 0.034, 0.034, 0.04), sec(0.04, 0, 0.031, 0.031, 0.035), sec(0.05, 0, 0.03, 0.03, 0.033), sec(0.064, 0, 0.027, 0.027, 0.03)], 10, 0.022, 0.014, 2, 0.04, 21);
+  const n2 = loft([sec(-0.014, 0, 0.028, 0.028, 0.031), sec(0, 0, 0.03, 0.03, 0.033), sec(0.022, 0, 0.029, 0.029, 0.031), sec(0.04, 0.001, 0.027, 0.027, 0.029), sec(0.056, 0.002, 0.023, 0.023, 0.024)], 10, 0.012, 0.012, 2, 0.04, 22);
+  return [fin(n1), fin(n2)];
 }
 
-/** Dog head (pivot at the neck joint): domed skull, stop, cheeks, muzzle, nose, eyes; ears and jaw are separate parts. */
+/** Dog head (pivot at the top of the neck): domed skull, a clear stop, tapering muzzle, flews, nose, eyes; jaw and ears are separate parts. */
 export function dogHead(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.sphere(0.046, 1), COAT, M.t(0, 0.026, 0.024, 0, 0, 0, 0.95, 0.88, 1.1));
-  b.add(P.sphere(0.022, 0), COAT, M.t(0, 0.05, -0.006));
-  b.add(P.sphere(0.026, 1), COAT, M.t(0, 0.036, 0.058, 0, 0, 0, 1.15, 0.75, 0.9));
+  const skull = loft([
+    sec(-0.012, 0.027, 0.031, 0.03, 0.028),
+    sec(0.004, 0.028, 0.04, 0.038, 0.034),
+    sec(0.022, 0.029, 0.043, 0.04, 0.036),
+    sec(0.04, 0.03, 0.039, 0.035, 0.034),
+    sec(0.054, 0.027, 0.031, 0.025, 0.033),
+    sec(0.066, 0.022, 0.026, 0.019, 0.031),
+    sec(0.08, 0.02, 0.022, 0.017, 0.027),
+    sec(0.095, 0.019, 0.0195, 0.016, 0.023),
+    sec(0.108, 0.018, 0.017, 0.015, 0.019),
+    sec(0.116, 0.018, 0.0145, 0.013, 0.015),
+  ], 12, 0.014, 0.006, 2.1, 0.035, 31);
+  b.add(skull, COAT);
   for (const x of [-1, 1]) {
-    b.add(P.sphere(0.024, 1), COAT, M.t(x * 0.024, 0.006, 0.046));
-    // Eyes with a glint, tan "eyebrow" spots and cheek patches (markings).
-    b.add(P.sphere(0.0085, 0), C(0x140e0a), M.t(x * 0.021, 0.04, 0.064));
-    b.add(P.sphere(0.0025, 0), C(0xffffff), M.t(x * 0.023, 0.043, 0.071));
-    b.add(P.sphere(0.007, 0), MARK, M.t(x * 0.018, 0.055, 0.061));
-    b.add(P.sphere(0.016, 0), MARK, M.t(x * 0.022, 0.0, 0.06, 0, 0, 0, 1, 0.8, 1));
+    // Flews: the loose upper lips hanging either side of the muzzle.
+    b.add(P.sphere(0.012, 1), COAT, M.t(x * 0.015, -0.001, 0.082, 0, x * 0.12, 0, 0.62, 0.85, 1.8));
+    // Eyes with a glint; tan brow spots (markings) above.
+    b.add(P.sphere(0.0082, 1), C(0x140e0a), M.t(x * 0.0205, 0.042, 0.052));
+    b.add(P.sphere(0.0022, 0), C(0xffffff), M.t(x * 0.0225, 0.045, 0.059));
+    b.add(P.sphere(0.006, 0), MARK, M.t(x * 0.0165, 0.054, 0.049, 0, 0, 0, 1.2, 0.8, 1));
+    // Upper canines, seen when the mouth opens.
+    b.add(P.cone(0.0022, 0.007, 4), C(0xf2eadc), M.t(x * 0.0105, -0.007, 0.1, Math.PI, 0, 0));
   }
-  b.add(P.cyl(0.019, 0.026, 0.07, 7), MARK, M.t(0, 0.012, 0.09, Math.PI / 2, 0, 0, 1, 1, 0.82));
-  b.add(P.sphere(0.0135, 0), C(0x1a1412), M.t(0, 0.021, 0.126, 0, 0, 0, 1.2, 0.9, 0.85));
+  // Nose leather and nostrils.
+  b.add(P.sphere(0.0115, 1), C(0x1a1412), M.t(0, 0.028, 0.117, -0.25, 0, 0, 1.25, 0.9, 0.85));
   // Dark mouth roof, hidden by the jaw until it opens.
-  b.add(P.box(0.026, 0.004, 0.056), C(0x3a1a1a), M.t(0, -0.001, 0.09));
-  return paintFaces(facet(b.build()), (_x, _y, _z, _nx, _ny, _nz, _m, i) => grain(i, 0.035));
+  b.add(P.box(0.024, 0.003, 0.066), C(0x3a1a1a), M.t(0, -0.005, 0.072));
+  const g = facet(b.build());
+  // Pale muzzle, cheeks and chin (markings): the lower half of the face forward of the eyes.
+  markFaces(g, (_x, y, z, _nx, ny) => z > 0.058 && y < 0.018 && ny < 0.55);
+  return paintFaces(g, saddle(0.05, 0.12));
 }
 
-/** Lower jaw (pivot at the hinge) with tongue. */
+/** Lower jaw (pivot at the hinge): pale chin, dark mouth floor with the tongue, lower canines. */
 export function dogJaw(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(P.cyl(0.012, 0.017, 0.074, 6), MARK, M.t(0, -0.006, 0.037, Math.PI / 2, 0, 0, 1, 1, 0.65));
-  b.add(P.sphere(0.012, 0), MARK, M.t(0, -0.008, 0.07, 0, 0, 0, 1, 0.7, 1));
-  b.add(P.box(0.017, 0.006, 0.055), C(0xd86a78), M.t(0, 0.001, 0.042));
+  b.add(loft([sec(0, -0.006, 0.019, 0.006, 0.013), sec(0.028, -0.007, 0.017, 0.005, 0.012), sec(0.052, -0.006, 0.0145, 0.005, 0.0105), sec(0.074, -0.004, 0.011, 0.004, 0.008)], 8, 0.01, 0.006, 2, 0.03, 41), MARK);
+  b.add(P.box(0.02, 0.003, 0.066), C(0x4a2020), M.t(0, -0.0005, 0.04));
+  b.add(P.box(0.016, 0.004, 0.05), C(0xd86a78), M.t(0, 0.0012, 0.04));
+  for (const x of [-1, 1]) b.add(P.cone(0.0019, 0.006, 4), C(0xf2eadc), M.t(x * 0.009, 0.002, 0.07));
   return facet(b.build());
 }
 
-/** Ears (pivot at the base): pricked triangles, or soft drop ears hanging from the top. */
+/** The tongue, lolled out over the lower teeth when panting (pivot inside the jaw). */
+export function dogTongue(): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.add(loft([sec(0, 0, 0.0105, 0.0028, 0.0028), sec(0.02, 0, 0.0115, 0.003, 0.003), sec(0.04, -0.0015, 0.011, 0.0028, 0.0028), sec(0.054, -0.005, 0.0085, 0.0024, 0.0024)], 8, 0.003, 0.005, 2), C(0xd8687a));
+  b.add(P.box(0.0016, 0.0012, 0.045), C(0xa84a5a), M.t(0, 0.0028, 0.026));
+  return facet(b.build());
+}
+
+/** Ears (pivot at the base): pricked, cupped triangles with a pink inside, or soft drop ears hanging from a fold. */
 export function dogEar(kind: 'prick' | 'floppy'): THREE.BufferGeometry {
   const b = new GeoBuilder();
   if (kind === 'prick') {
-    b.add(P.cone(0.021, 0.054, 4).rotateY(Math.PI / 4), coat(0.85), M.t(0, 0.025, 0, 0, 0, 0, 1, 1, 0.5));
-    b.add(P.cone(0.013, 0.036, 4).rotateY(Math.PI / 4), C(0x9a6a60), M.t(0, 0.02, 0.006, 0, 0, 0, 1, 1, 0.35));
+    // Loft up the ear: thin front-to-back (d = front), broad at the base, narrowing to a rounded point.
+    const up = M.t(0, 0, 0, -HALF_PI, 0, 0);
+    b.add(loft([sec(-0.004, 0, 0.0175, 0.0065, 0.0075), sec(0.012, 0, 0.0165, 0.0055, 0.0065), sec(0.028, 0, 0.0125, 0.004, 0.005), sec(0.042, 0, 0.0065, 0.0025, 0.003), sec(0.05, 0, 0.0022, 0.0015, 0.0018)], 8, 0.003, 0.003, 2), coat(0.86), up);
+    b.add(loft([sec(0.004, 0, 0.0115, 0.001, 0.0015), sec(0.02, 0, 0.0095, 0.001, 0.0015), sec(0.036, 0, 0.005, 0.001, 0.0012)], 6, 0.002, 0.004, 2), C(0x9a6a60), M.t(0, 0, 0.0035, -HALF_PI, 0, 0));
   } else {
-    b.add(P.sphere(0.013, 0), coat(0.8), M.t(0, -0.004, 0));
-    b.add(P.sphere(0.031, 1), coat(0.78), M.t(0, -0.03, 0.002, 0, 0, 0, 0.3, 1, 0.62));
+    // A flap hanging down the side of the head, broad and thin, with a soft fold at the top.
+    b.add(P.sphere(0.0105, 1), coat(0.82), M.t(0, -0.002, 0, 0, 0, 0, 0.75, 0.9, 1.2));
+    b.add(loft([sec(-0.004, 0, 0.005, 0.011, 0.011), sec(0.01, 0, 0.0055, 0.015, 0.014), sec(0.026, 0.001, 0.005, 0.018, 0.016), sec(0.042, 0.002, 0.0045, 0.015, 0.014), sec(0.052, 0.002, 0.004, 0.009, 0.009)], 8, 0.003, 0.006, 2, 0.04, 51), coat(0.78), M.t(0, 0, 0, HALF_PI, 0, 0));
   }
-  return facet(b.build());
+  return paintFaces(facet(b.build()), (_x, _y, _z, _nx, _ny, _nz, _m, i) => grain(i, 0.04));
 }
 
-/** Ear placement and resting tilt (pitch, outward roll) for each ear type. */
+/** Ear placement and resting tilt (pitch, outward roll) for each ear type, and how soft (floppy) the ear is. */
 export const DOG_EARS = {
-  prick: { pos: [0.026, 0.06, 0.012] as [number, number, number], rest: [-0.12, 0.3] as [number, number] },
-  floppy: { pos: [0.042, 0.05, 0.008] as [number, number, number], rest: [0.15, -0.3] as [number, number] },
+  prick: { pos: [0.024, 0.061, 0.006] as [number, number, number], rest: [-0.1, 0.32] as [number, number], soft: 0.12 },
+  floppy: { pos: [0.036, 0.057, 0.004] as [number, number, number], rest: [0.12, -0.28] as [number, number], soft: 1 },
 };
+
+/** Tail radii at the joints, base to tip. */
+const DOG_TAIL_R = [0.0135, 0.013, 0.0122, 0.011, 0.0088, 0.0045];
+
+/** Dog tail pieces (pivot at each base, running back along −z): a bushy, tapering brush with a pale underside and tip. */
+export function dogTail(): THREE.BufferGeometry[] {
+  const L = DOG_DIMS.tailLen;
+  return L.map((len, i) => {
+    const r0 = DOG_TAIL_R[i], r1 = DOG_TAIL_R[i + 1];
+    const b = new GeoBuilder();
+    b.add(P.sphere(r0 * 1.04, 1), COAT);
+    const m = (r0 + r1) / 2 * 1.08;
+    b.add(loft([sec(0, 0, r0, r0, r0), sec(len * 0.5, 0, m, m, m * 1.04), sec(len, 0, r1, r1, r1)], 7, 0, i === L.length - 1 ? r1 * 1.6 : 0, 2, 0.05, 60 + i), COAT, M.t(0, 0, 0, 0, Math.PI, 0));
+    const g = facet(b.build());
+    const last = i === L.length - 1;
+    markFaces(g, (_x, _y, z, _nx, ny) => ny < -0.55 || (last && z < -len * 0.55));
+    return paintFaces(g, (_x, _y, _z, _nx, ny, _nz, m2, k) => (m2 > 1.5 && ny > 0.5 ? 0.88 : 1) * grain(k, 0.05));
+  });
+}
+
+/** A dog paw (pivot at the ball joint, toes forward along +z, sole on y = −padH): toes, nails and dark pads. */
+function dogPaw(len: number, padH: number, k: number, pad: number): GeoBuilder {
+  const b = new GeoBuilder();
+  const nail = 0x2a2220;
+  b.add(P.sphere(0.0088 * k, 1), MARK);
+  b.add(P.sphere(0.0115 * k, 1), MARK, M.t(0, -0.001, len * 0.34, 0, 0, 0, 1.05, 0.72, 1.25));
+  for (let i = 0; i < 4; i++) {
+    const x = (i - 1.5) * 0.0078 * k, outer = i === 0 || i === 3;
+    const z = len * (outer ? 0.72 : 0.86);
+    b.add(P.sphere(0.0058 * k, 0), MARK, M.t(x, -0.0028, z, 0, 0, 0, 0.95, 0.85, 1.2));
+    b.add(P.cone(0.0021 * k, 0.005 * k, 4), C(nail), M.t(x, -0.0042, z + 0.0062 * k, HALF_PI + 0.5, 0, 0));
+    b.add(P.sphere(0.003 * k, 0), C(pad), M.t(x, -padH + 0.0016, z - 0.001, 0, 0, 0, 1, 0.55, 1.1));
+  }
+  b.add(P.sphere(0.0066 * k, 0), C(pad), M.t(0, -padH + 0.0022, len * 0.2, 0, 0, 0, 1.25, 0.4, 0.95));
+  return b;
+}
+
+/**
+ * Dog leg parts, in order: shoulder blade, upper arm (shoulder ball, triceps, point of elbow),
+ * forearm (to the wrist / carpus), front pastern, front paw; thigh (ham), shin (gaskin, point
+ * of hock), hind pastern (metatarsus), hind paw. Socks are markings.
+ */
+export function dogLegParts(pad: number): THREE.BufferGeometry[] {
+  const q = DOG_DIMS, L = q.hipY;
+  const fin = (b: GeoBuilder) => paintFaces(facet(b.build()), (_x, _y, _z, _nx, _ny, _nz, _m, i) => grain(i, 0.05));
+  const lF = q.segF.map((f) => f * L), lH = q.segH.map((f) => f * L);
+  const out: THREE.BufferGeometry[] = [];
+  // Shoulder blade: a flat blade lying against the chest wall.
+  {
+    const b = new GeoBuilder(), ls = q.scap![3];
+    b.add(limb([sec(0.006, 0, 0.005, 0.015, 0.014), sec(0.03, 0, 0.0075, 0.017, 0.016), sec(0.05, 0, 0.0095, 0.015, 0.014), sec(ls - 0.008, 0, 0.012, 0.014, 0.013)], 8, 0.006, 0.01), COAT);
+    out.push(fin(b));
+  }
+  // Upper arm.
+  {
+    const b = new GeoBuilder(), l = lF[0];
+    b.add(P.sphere(0.0195, 1), COAT, M.t(0, 0, 0.002, 0, 0, 0, 0.95, 1, 1.05));
+    b.add(limb([sec(0, 0, 0.019, 0.02, 0.021), sec(0.018, 0, 0.018, 0.016, 0.026), sec(0.038, 0, 0.016, 0.013, 0.023), sec(0.056, 0, 0.0135, 0.011, 0.016), sec(l - 0.002, 0, 0.012, 0.011, 0.012)], 8, 0.012, 0.01, 0.04, 71), COAT);
+    b.add(P.sphere(0.0095, 1), COAT, M.t(0, -l + 0.004, -0.013));
+    out.push(fin(b));
+  }
+  // Forearm with the wrist (carpus) and its pad.
+  {
+    const b = new GeoBuilder(), l = lF[1];
+    b.add(limb([sec(0, 0, 0.0125, 0.012, 0.013), sec(0.016, 0, 0.013, 0.014, 0.012), sec(0.04, 0, 0.011, 0.011, 0.0095), sec(0.066, 0, 0.009, 0.0085, 0.008), sec(l, 0, 0.0085, 0.0085, 0.0085)], 8, 0.01, 0.006, 0.04, 72), COAT);
+    b.add(P.sphere(0.0094, 1), COAT, M.t(0, -l, 0, 0, 0, 0, 1, 0.9, 1));
+    b.add(P.sphere(0.0045, 0), COAT, M.t(0, -l + 0.004, -0.009));
+    out.push(fin(b));
+  }
+  // Front pastern (sock).
+  {
+    const b = new GeoBuilder(), l = lF[2];
+    b.add(limb([sec(0, 0, 0.0082, 0.0085, 0.0085), sec(l * 0.5, 0, 0.0077, 0.008, 0.0077), sec(l, 0, 0.0085, 0.0088, 0.0085)], 8, 0.005, 0.005, 0.03, 73), MARK);
+    out.push(fin(b));
+  }
+  out.push(fin(dogPaw(q.toeF! * L, q.padH!, 1, pad)));
+  // Thigh: hams behind, the stifle (knee) at the bottom; the top domes up into the pelvis.
+  {
+    const b = new GeoBuilder(), l = lH[0];
+    b.add(limb([sec(0, 0, 0.025, 0.028, 0.034), sec(0.016, 0, 0.025, 0.027, 0.038), sec(0.036, 0, 0.021, 0.022, 0.03), sec(0.056, 0, 0.016, 0.016, 0.018), sec(l - 0.001, 0, 0.0125, 0.013, 0.012)], 9, 0.022, 0.01, 0.04, 74), COAT);
+    b.add(P.sphere(0.0105, 1), COAT, M.t(0, -l + 0.001, 0.007));
+    out.push(fin(b));
+  }
+  // Shin (gaskin behind), hock joint and its point.
+  {
+    const b = new GeoBuilder(), l = lH[1];
+    b.add(limb([sec(0, 0, 0.0125, 0.012, 0.014), sec(0.016, 0, 0.0125, 0.011, 0.02), sec(0.036, 0, 0.0105, 0.0095, 0.015), sec(0.058, 0, 0.0085, 0.008, 0.009), sec(l, 0, 0.0078, 0.0078, 0.0078)], 8, 0.01, 0.006, 0.04, 75), COAT);
+    b.add(P.sphere(0.0085, 1), COAT, M.t(0, -l, 0));
+    b.add(P.sphere(0.0062, 0), COAT, M.t(0, -l + 0.003, -0.0105));
+    out.push(fin(b));
+  }
+  // Hind pastern (metatarsus, sock).
+  {
+    const b = new GeoBuilder(), l = lH[2];
+    b.add(limb([sec(0, 0, 0.0078, 0.0078, 0.0082), sec(l * 0.5, 0, 0.0072, 0.0072, 0.0075), sec(l, 0, 0.008, 0.008, 0.008)], 8, 0.005, 0.005, 0.03, 76), MARK);
+    out.push(fin(b));
+  }
+  out.push(fin(dogPaw(q.toeH! * L, q.padH!, 0.92, pad)));
+  return out;
+}
 
 /** Tail piece: pivot at its base (with a joint knob), tapering back along -z. */
 export function tailPiece(len: number, r0: number, r1: number, tip?: number, paint?: (x: number, y: number, z: number, i: number) => number): THREE.BufferGeometry {
@@ -470,6 +779,10 @@ export interface QuadPose {
   /** Gait cycle 0..1 (advanced by stepGait) and ground speed (drives gait blend, stride and lift). */
   gait: number;
   speed: number;
+  /** Turning rate (rad/s, + = heading increasing): steps the feet round when turning on the spot, swings the tail. */
+  yaw: number;
+  /** Frame time for the springy follow-through (0 = hold). */
+  dt: number;
   /** Spine bend into turns. */
   bend: number;
   sit: number;
@@ -481,6 +794,11 @@ export interface QuadPose {
   crouch: number;
   lunge: number;
   limp: number;
+  /** Play bow / stretch: elbows down, rump up. */
+  bow: number;
+  /** Shake-off: weight 0..1 and phase (radians, advanced by the caller); a roll wave running from the head to the tail. */
+  shake: number;
+  shakePh: number;
   /** Extra spine flex (+ arched / gathered, − extended). */
   spine: number;
   /** Rear-end wiggle (yaw of the hindquarters) with a hard wag. */
@@ -492,6 +810,8 @@ export interface QuadPose {
   headYaw: number;
   headRoll: number;
   jaw: number;
+  /** Tongue lolled out (0..1), for rigs with a tongue. */
+  tongue: number;
   /** Ear pitch offsets (left, right) and spread. */
   earL: number;
   earR: number;
@@ -502,7 +822,7 @@ export interface QuadPose {
   /** Breathing signal (chest swell). */
   breath: number;
   bob: number;
-  /** One leg (0 LF, 1 RF, 2 LH, 3 RH) blended toward joint angles ov (relative) by ovW. */
+  /** One leg (0 LF, 1 RF, 2 LH, 3 RH) blended toward joint angles ov (relative: upper, lower, pastern, toe, then an outward swing of the whole leg) by ovW. */
   ovLeg: number;
   ovW: number;
   ov: number[];
@@ -510,29 +830,82 @@ export interface QuadPose {
 
 export function blankPose(): QuadPose {
   return {
-    x: 0, y: 0, z: 0, heading: 0, scale: 1, gait: 0, speed: 0, bend: 0, sit: 0, lie: 0, curl: 0, flat: 0, crouch: 0, lunge: 0, limp: 0,
-    spine: 0, wiggle: 0, neck: 0, headPitch: 0, headYaw: 0, headRoll: 0, jaw: 0, earL: 0, earR: 0, earYaw: 0,
-    tailP: [0, 0, 0], tailY: [0, 0, 0], breath: 0, bob: 0, ovLeg: -1, ovW: 0, ov: [0, 0, 0],
+    x: 0, y: 0, z: 0, heading: 0, scale: 1, gait: 0, speed: 0, yaw: 0, dt: 0, bend: 0, sit: 0, lie: 0, curl: 0, flat: 0, crouch: 0, lunge: 0, limp: 0,
+    bow: 0, shake: 0, shakePh: 0, spine: 0, wiggle: 0, neck: 0, headPitch: 0, headYaw: 0, headRoll: 0, jaw: 0, tongue: 0, earL: 0, earR: 0, earYaw: 0,
+    tailP: [0, 0, 0, 0, 0, 0, 0, 0], tailY: [0, 0, 0, 0, 0, 0, 0, 0], breath: 0, bob: 0, ovLeg: -1, ovW: 0, ov: [0, 0, 0, 0, 0],
   };
 }
 
 export interface QuadKeys {
+  /** Front and rear body pieces; with `M` (and dims spineJ) the body has a middle (loin) piece too. */
   F: string;
   R: string;
+  M?: string;
   neck: string;
+  /** Upper neck piece (with dims neckLen2). */
+  neck2?: string;
   head: string;
   jaw?: string;
+  tongue?: string;
   ear?: string;
   earPos?: [number, number, number];
   earRest?: [number, number];
+  /** How soft the ears are (0 stiff and pricked … 1 floppy, swinging and hanging with gravity). */
+  earSoft?: number;
   /** Tail pieces from the base. */
   tail: string[];
+  /** Shoulder blades (with dims scap). */
+  scap?: string;
   legUF: string;
   legLF: string;
   pawF: string;
   legUH: string;
   legLH: string;
   pawH: string;
+  /** Toe pieces (with dims toeF / toeH): the paw then hinges at the ball of the foot. */
+  toeF?: string;
+  toeH?: string;
+}
+
+const TAIL_MAX = 8;
+
+/**
+ * Per-animal state for springy secondary motion: tail pieces that lag and whip behind the wag and
+ * turns, ears that bounce with the stride and hang with gravity, a loose jaw and tongue. Keep one
+ * per animal and pass it to drawQuad; set `ready = false` to snap back to rest (e.g. after the
+ * animal has been off screen).
+ */
+export class QuadDyn {
+  ready = false;
+  /** Unwrapped heading, and the last heading seen. */
+  yaw = 0;
+  lastHeading = 0;
+  /** Tail pieces: absolute pitch / yaw and their rates. */
+  readonly tP = new Float64Array(TAIL_MAX);
+  readonly tPv = new Float64Array(TAIL_MAX);
+  readonly tY = new Float64Array(TAIL_MAX);
+  readonly tYv = new Float64Array(TAIL_MAX);
+  p0 = 0;
+  y0 = 0;
+  /** Ears: pitch (L, R) and outward flare (L, R), and their rates. */
+  readonly ear = new Float64Array(4);
+  readonly earV = new Float64Array(4);
+  jaw = 0;
+  jawV = 0;
+  tng = 0;
+  tngV = 0;
+  /** Head height, pitch and roll with their rates and accelerations; ground speed and its rate. */
+  hy = 0;
+  hvy = 0;
+  hay = 0;
+  hp = 0;
+  hvp = 0;
+  hap = 0;
+  hr = 0;
+  hvr = 0;
+  har = 0;
+  v = 0;
+  av = 0;
 }
 
 const _e = new THREE.Euler();
@@ -546,9 +919,15 @@ function compose(out: THREE.Matrix4, x: number, y: number, z: number, rx: number
 }
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+const frac = (x: number) => x - Math.floor(x);
 export const smooth = (a: number, b: number, x: number) => {
   const t = clamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
+};
+const wrapPi = (a: number) => {
+  while (a > Math.PI) a -= TAU;
+  while (a < -Math.PI) a += TAU;
+  return a;
 };
 
 /** Instanced meshes for the rig parts, tinted per animal through the accent (coat) and optional marking colours. */
@@ -603,10 +982,16 @@ export class QuadMeshes {
   }
 }
 
-const _M = new THREE.Matrix4(), _F = new THREE.Matrix4(), _R = new THREE.Matrix4(), _N = new THREE.Matrix4(), _H = new THREE.Matrix4();
-const _J = new THREE.Matrix4(), _T = new THREE.Matrix4(), _L = new THREE.Matrix4(), _D = new THREE.Matrix4();
+const _W = new THREE.Matrix4(), _Mid = new THREE.Matrix4(), _F = new THREE.Matrix4(), _R = new THREE.Matrix4(), _N = new THREE.Matrix4(), _N2 = new THREE.Matrix4();
+const _H = new THREE.Matrix4(), _J = new THREE.Matrix4(), _T = new THREE.Matrix4(), _L = new THREE.Matrix4(), _O = new THREE.Matrix4(), _A = new THREE.Matrix4();
+const _Hp = new THREE.Matrix4(), _Inv = new THREE.Matrix4();
+const _v = new THREE.Vector3();
 const _off = [0, 0, 0, 0];
 const _ik = [0, 0];
+/** Per-leg gait targets in the heading frame: toe tip (x, y, z), pastern angle, toe angle, load. */
+const _tx = [0, 0, 0, 0], _ty = [0, 0, 0, 0], _tz = [0, 0, 0, 0], _tp = [0, 0, 0, 0], _tt = [0, 0, 0, 0], _ld = [0, 0, 0, 0];
+/** Relative tail angles actually drawn. */
+const _rp = new Float64Array(TAIL_MAX), _ry = new Float64Array(TAIL_MAX);
 
 /**
  * Two-bone IK in a leg's sagittal plane. Angles are about x, with 0 hanging straight down and
@@ -624,153 +1009,440 @@ function ik2(hy: number, hz: number, ty: number, tz: number, l1: number, l2: num
   _ik[1] = Math.atan2(-(cz - ez), -(cy - ey));
 }
 
-/** Joint poses relative to the body half: lying sphinx-style, and flat on the side (legs out). */
-const LIE_F = [1.2, -2.7, -0.05], LIE_H = [-1.3, 2.75, -2.95];
-const FLAT_F = [0.35, -0.15, -0.2], FLAT_H = [-0.3, 0.4, -0.3];
+/** Leg joint angles (relative: upper, lower, pastern, toe) lying flat on the side, legs out (dead). */
+const FLAT_F = [0.35, -0.15, -0.2, 0.3], FLAT_H = [-0.3, 0.4, -0.3, 0.3];
+
+/** The shake-off roll wave at a lag of `lag` radians behind the head. */
+const shk = (p: QuadPose, lag: number) => (p.shake > 0 ? p.shake * Math.sin(p.shakePh - lag) : 0);
 
 /** Distance covered per gait cycle at this speed (unscaled; world distance is this times the animal's scale). */
 export function cycleLen(q: QuadDims, speed: number): number {
   const trot = smooth(q.trotV[0], q.trotV[1], speed), gal = smooth(q.gallopV[0], q.gallopV[1], speed);
-  return q.stride * (1 + 0.2 * trot) * (1 + (q.gallopK / 1.2 - 1) * gal);
+  const slow = q.slowStride ?? 1;
+  const crawl = slow + (1 - slow) * smooth(0, q.trotV[0], speed);
+  return q.stride * crawl * (1 + (q.trotK ?? 0.2) * trot) * (1 + (q.gallopK / 1.2 - 1) * gal);
 }
 
-/** Pose and draw one animal. `headScale` enlarges the head (puppies); `mark` tints the markings. */
-export function drawQuad(out: QuadMeshes, keys: QuadKeys, q: QuadDims, p: QuadPose, col: THREE.Color, headScale = 1, mark?: THREE.Color): void {
-  const s = p.scale, L = q.hipY, v = p.speed;
+/** Speed that drives the gait cycle: ground speed plus stepping round while turning. */
+export function gaitSpeed(q: QuadDims, speed: number, yaw: number, scale = 1): number {
+  return speed + Math.abs(yaw) * (q.turnR ?? 0) * scale;
+}
+
+/** Pose and draw one animal. `headScale` enlarges the head (puppies); `mark` tints the markings; `dyn` adds springy follow-through. */
+export function drawQuad(out: QuadMeshes, keys: QuadKeys, q: QuadDims, p: QuadPose, col: THREE.Color, headScale = 1, mark?: THREE.Color, dyn?: QuadDyn): void {
+  const s = p.scale, L = q.hipY, v = p.speed, w = p.yaw || 0;
+  const ve = gaitSpeed(q, v, w, s);
   const g = p.gait, G = g * TAU;
   const lie = Math.max(p.lie, p.flat), flat = p.flat, curl = p.curl * (1 - flat);
   const sit = p.sit * (1 - lie), crouch = p.crouch * (1 - lie), lunge = p.lunge * (1 - lie);
+  const bow = (p.bow || 0) * (1 - lie) * (1 - sit);
   const trot = smooth(q.trotV[0], q.trotV[1], v), gal = smooth(q.gallopV[0], q.gallopV[1], v);
-  // Locomotion weight: fades in with speed, out when sitting or lying.
-  const mv = smooth(0.02, 0.3, v) * (1 - lie) * (1 - sit);
+  // Locomotion weight: fades in with speed (or turning), out when sitting, lying or bowing.
+  const mv = smooth(0.02, 0.3, ve) * (1 - lie) * (1 - sit) * (1 - bow);
   const walkW = mv * (1 - trot) * (1 - gal), trotW = mv * trot * (1 - gal), galW = mv * gal;
   const beta = mix(mix(0.64, 0.46, trot), 0.36, gal);
-  const S = beta * cycleLen(q, v);
+  const S = beta * cycleLen(q, ve);
+  // Stance sweep per unit of planted-paw velocity (stance lasts beta of a cycle).
+  const kD = (S / Math.max(ve, 1e-3)) * mv;
   for (let k = 0; k < 4; k++) _off[k] = mix(mix(WALK[k], TROT[k], trot), GALLOP[k], gal);
+  const three = !!(keys.M && q.spineJ);
+  const jc = three ? q.spineJ![0] : 0, jp = three ? q.spineJ![1] : 0;
+  const toes = !!(keys.toeF && keys.toeH && q.toeF && q.toeH);
+  const padH = toes ? q.padH ?? 0 : 0;
+  const sc = q.scap;
 
-  // ---- Body: height, pitch, roll and spine flex from the gait and the posture weights ----
+  // Rest shoulder (the lower end of the blade) and hip positions in body space, and the paws under them.
+  let shY = L * q.frontK - q.spineY, shZ = q.zF;
+  if (sc) {
+    const ct = Math.cos(sc[5]);
+    shY = sc[1] - sc[3] * ct * Math.cos(sc[4]);
+    shZ = sc[2] - sc[3] * ct * Math.sin(sc[4]);
+  }
+  const hpY = L * q.hindK - q.spineY;
+  const nzF = shZ + q.footF * L, nzH = q.zR + q.footH * L;
+  const splay = L * 0.04;
+
+  // ---- Gait targets for each paw (heading frame): stance sweeps back with the ground, swing lifts and reaches ----
+  const clear = q.clear * L * (1 + 0.4 * trot + 0.6 * gal) * (1 + 0.3 * crouch);
+  for (let k = 0; k < 4; k++) {
+    const isF = k < 2, side = k % 2 === 0 ? 1 : -1;
+    const l4 = toes ? L * (isF ? q.toeF! : q.toeH!) : 0;
+    const nx = side * (q.x + splay), nz = isF ? nzF : nzH;
+    // A planted paw moves against the body's motion: back at ground speed, and round when turning.
+    const dx = -w * nz * s * kD, dz = (w * nx * s - v) * kD;
+    const tp0 = isF ? q.pawF : q.pawH;
+    const push = isF ? 0.95 : 0.75, roll = (isF ? 0.9 : 0.75) * (1 + 0.3 * gal);
+    let tx = nx, ty = padH, tz = nz + l4, tp = tp0, tt = 0, ld = 0;
+    const ph = frac(g + _off[k]);
+    if (ph < beta) {
+      // Stance: the toe tip stays put; the wrist / fetlock gives under load, then the heel rolls up to push off.
+      const u = ph / beta;
+      tx += dx * (u - 0.5);
+      tz += dz * (u - 0.5);
+      ld = mv * Math.sin(Math.PI * u);
+      tp += mv * ((isF ? -0.12 : -0.05) * Math.sin(Math.PI * u) + push * smooth(0.5, 1, u) - (isF ? 0.1 : 0.15) * (1 - smooth(0, 0.3, u)));
+      if (toes) tt = mv * roll * smooth(0.6, 1, u);
+    } else {
+      // Swing: lift early, fold the wrist (the paw flips up behind) or trail the hind paw, reach, set down flat.
+      const u = (ph - beta) / (1 - beta);
+      const e = u - Math.sin(TAU * u) / TAU;
+      tx += dx * (0.5 - e);
+      tz += dz * (0.5 - e);
+      ty += mv * clear * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.85)), 0.8);
+      const tpEnd = tp0 + push;
+      let sw: number;
+      if (isF) {
+        sw = mix(mix(tpEnd, 1.45 + 0.25 * gal, smooth(0, 0.3, u)), tp0 - 0.3, smooth(0.35, 0.8, u));
+        sw = mix(sw, tp0 - 0.1, smooth(0.82, 1, u));
+      } else {
+        sw = mix(mix(tpEnd, 0.5 + 0.2 * gal, smooth(0, 0.3, u)), tp0 - 0.25, smooth(0.4, 0.85, u));
+        sw = mix(sw, tp0 - 0.15, smooth(0.85, 1, u));
+      }
+      tp = mix(tp0, sw, mv);
+      if (toes) {
+        // Toes curl through the swing, then open flat for touchdown.
+        const a4 = mix(roll - tpEnd, -tp0 + (isF ? 0.7 : 0.5), smooth(0, 0.3, u));
+        tt = mv * mix(sw + a4, 0, smooth(0.55, 0.92, u));
+      }
+    }
+    _tx[k] = tx;
+    _ty[k] = ty;
+    _tz[k] = tz;
+    _tp[k] = tp;
+    _tt[k] = tt;
+    _ld[k] = ld;
+  }
+
+  // ---- Body: height, pitch, roll, sway and spine flex from the gait and the posture weights ----
+  const meanLd = (4 * beta) / Math.PI;
+  const ldF = _ld[0] + _ld[1];
+  const Sn = Math.max(S, 1e-3);
+  const lF = toes ? L * q.toeF! : 0, lH = toes ? L * q.toeH! : 0;
+  // Gathered (+: hind paws forward, fore paws back) or stretched out (−), from where the paws actually are.
+  const gather = clamp((_tz[2] + _tz[3] - 2 * (nzH + lH) - (_tz[0] + _tz[1] - 2 * (nzF + lF))) / (2 * Sn), -1.2, 1.2);
   const bob =
     walkW * L * 0.016 * Math.cos(2 * (G - TAU * 0.32)) -
     trotW * L * 0.028 * Math.cos(2 * (G - TAU * 0.98)) +
     galW * L * (0.04 * Math.cos(G - TAU * 0.6) + 0.012 * Math.cos(2 * (G - TAU * 0.1)));
-  const bodyH = q.spineY - lie * (q.spineY - q.lieY * L) - crouch * q.crouchDrop * L - sit * L * 0.35 + lunge * L * 0.14 + bob;
-  const pitch = -0.62 * sit - 0.22 * lunge + crouch * 0.03 - galW * 0.07 * Math.cos(G - TAU * 0.37) + trotW * 0.015 * Math.sin(2 * G);
+  const bodyH = q.spineY - lie * (q.spineY - q.lieY * L) - crouch * q.crouchDrop * L - sit * L * 0.35 + lunge * L * 0.14 - bow * L * 0.32 + bob - (p.shake || 0) * L * 0.05 - flat * L * 0.16;
+  const pitch = -0.62 * sit - 0.22 * lunge + crouch * 0.03 + bow * 0.45 - galW * 0.07 * Math.cos(G - TAU * 0.37) + trotW * 0.015 * Math.sin(2 * G);
   const lean = -p.bend * Math.min(1, v * 0.5) * 0.6;
-  const roll = lean + lie * 0.06 + curl * 0.3 + flat * 1.4;
-  const flex = galW * 0.2 * Math.cos(G - TAU * 0.1) + p.spine - crouch * 0.04 - lunge * 0.22;
-  // Shoulders and hips roll and swing with their own legs.
-  const phF = (g + _off[0]) * TAU, phR = (g + _off[2]) * TAU;
-  const rollF = (walkW * 0.05 + trotW * 0.03) * Math.sin(phF), rollR = -(walkW * 0.06 + trotW * 0.035) * Math.sin(phR);
-  const yawF = p.bend * 0.5 + walkW * 0.06 * Math.cos(phF) + curl * 0.5;
-  const yawR = -p.bend * 0.5 - walkW * 0.07 * Math.cos(phR) - curl * 0.55 + p.wiggle;
-  compose(_M, p.x, p.y + bodyH * s + p.bob, p.z, pitch, p.heading, roll, s);
-  _F.multiplyMatrices(_M, compose(_T, 0, 0, 0, flex, yawF, rollF));
-  _R.multiplyMatrices(_M, compose(_T, 0, 0, 0, -flex, yawR, rollR));
+  const roll = lean + lie * 0.06 + curl * 0.35 + flat * 1.4;
+  const flex = p.spine + (galW * (q.flexK ?? 0.2) + trotW * 0.03) * gather - crouch * 0.04 - lunge * 0.22 - bow * 0.12;
+  // Weight shift toward the supporting legs; shoulders and hips roll and swing with their own legs.
+  const sway = (walkW + 0.35 * trotW) * L * (q.swayK ?? 0) * (_ld[0] + _ld[2] - _ld[1] - _ld[3]);
+  const rollF = (walkW * 0.05 + trotW * 0.03) * (_ld[0] - _ld[1]), rollR = (walkW * 0.06 + trotW * 0.035) * (_ld[2] - _ld[3]);
+  const yawF = -(walkW * 0.07 + trotW * 0.025) * (_tz[0] - _tz[1]) / Sn, yawR = -(walkW * 0.08 + trotW * 0.03) * (_tz[2] - _tz[3]) / Sn;
+  // Looking round while standing curves the whole spine a little.
+  const look = p.headYaw * (1 - mv) * (three ? 0.14 : 0);
+  const kf = three ? 0.6 : 1;
+  const flexC = flex * kf, flexP = flex * kf;
+  const yawC = p.bend * 0.5 + yawF + curl * (three ? 0.62 : 0.5) + look;
+  const yawP = -p.bend * 0.5 + yawR - curl * (three ? 0.62 : 0.55) + p.wiggle - look * 0.5;
+  compose(_W, p.x, p.y + p.bob, p.z, 0, p.heading, 0, s);
+  compose(_Mid, sway, bodyH, 0, pitch, 0, roll + 0.35 * shk(p, 1.8));
+  _F.multiplyMatrices(_Mid, compose(_T, 0, 0, jc, flexC, yawC, rollF + 0.45 * shk(p, 1.2)));
+  _R.multiplyMatrices(_Mid, compose(_T, 0, 0, jp, -flexP, yawP, rollR + 0.3 * shk(p, 2.4)));
   const br = p.breath;
-  out.put(keys.F, _D.multiplyMatrices(_F, compose(_T, 0, 0, 0, 0, 0, 0, 1 + br * 0.5, 1 + br, 1)), col, mark);
-  out.put(keys.R, _R, col, mark);
+  out.put(keys.F, _O.multiplyMatrices(_W, _L.multiplyMatrices(_F, compose(_T, 0, 0, 0, 0, 0, 0, 1 + br * 0.5, 1 + br, 1))), col, mark);
+  if (three) out.put(keys.M!, _O.multiplyMatrices(_W, _Mid), col, mark);
+  out.put(keys.R, _O.multiplyMatrices(_W, _R), col, mark);
 
-  // ---- Neck and head: the head nods with the forefeet and stays level against the body ----
-  const nod = walkW * 0.05 * Math.cos(2 * (G - TAU * 0.3)) + trotW * 0.02 * Math.cos(2 * G) + p.limp * mv * 0.1 * Math.sin(phF + 1);
-  const neckRel = q.neckPitch + p.neck + 0.35 * sit + 0.15 * crouch - 0.2 * lunge + galW * (0.12 + 0.05 * Math.cos(G - TAU * 0.37)) + nod * 0.4 + lie * 0.25 + curl * 0.3;
-  const neckAbs = pitch + flex + neckRel;
-  _N.multiplyMatrices(_F, compose(_T, q.neck[0], q.neck[1], q.neck[2], neckRel, p.headYaw * 0.45 + p.bend * 0.3 + curl * 0.6, 0));
-  out.put(keys.neck, _N, col, mark);
-  _H.multiplyMatrices(_N, compose(_T, 0, 0, q.neckLen, p.headPitch + nod - neckAbs, p.headYaw * 0.55 + p.bend * 0.2 + curl * 0.4, p.headRoll - curl * 0.3, headScale));
-  out.put(keys.head, _H, col, mark);
-  if (keys.jaw) out.put(keys.jaw, _J.multiplyMatrices(_H, compose(_T, 0, q.jaw[0], q.jaw[1], p.jaw, 0, 0)), col, mark);
+  // ---- Neck and head: the head nods as each forefoot takes the weight and stays level against the body ----
+  const nod = (walkW * 0.07 + trotW * 0.05 + galW * 0.05) * (ldF - meanLd) + p.limp * mv * 0.12 * (_ld[0] - 0.4);
+  const dN = p.neck + 0.35 * sit + 0.15 * crouch - 0.2 * lunge + galW * (0.12 + 0.05 * Math.cos(G - TAU * 0.37)) + nod * 0.4 + lie * 0.25 + curl * 0.3 - bow * 0.55;
+  const two = !!(keys.neck2 && q.neckLen2);
+  const hy = p.headYaw;
+  const n1 = q.neckPitch + dN * (two ? 0.62 : 1);
+  _N.multiplyMatrices(_F, compose(_T, q.neck[0], q.neck[1], q.neck[2] - jc, n1, hy * (two ? 0.3 : 0.45) + p.bend * 0.3 + curl * (two ? 0.5 : 0.6), two ? 0.3 * shk(p, 0.7) : 0));
+  out.put(keys.neck, _O.multiplyMatrices(_W, _N), col, mark);
+  let absP = pitch + flexC + n1, headLen = q.neckLen;
+  let hpar = _N;
+  if (two) {
+    const n2 = q.neckPitch2! + dN * 0.5;
+    _N2.multiplyMatrices(_N, compose(_T, 0, 0, q.neckLen, n2, hy * 0.3 + p.bend * 0.1 + curl * 0.45, 0.3 * shk(p, 0.35)));
+    out.put(keys.neck2!, _O.multiplyMatrices(_W, _N2), col, mark);
+    absP += n2;
+    headLen = q.neckLen2!;
+    hpar = _N2;
+  }
+  const headPAbs = p.headPitch + nod;
+  const hRoll = p.headRoll - curl * 0.3 + 0.9 * shk(p, 0);
+  _H.multiplyMatrices(hpar, compose(_T, 0, 0, headLen, headPAbs - absP, hy * (two ? 0.3 : 0.55) + p.bend * 0.2 + curl * (two ? 0.3 : 0.4), hRoll, headScale));
+  out.put(keys.head, _O.multiplyMatrices(_W, _H), col, mark);
+
+  // ---- Secondary motion (tail, ears, jaw, tongue) ----
+  const soft = keys.earSoft ?? 0;
+  const nT = Math.min(keys.tail.length, TAIL_MAX);
+  const shT = 0.7 * shk(p, 3.2);
+  const baseP = pitch - flexP + p.tailP[0], baseY = yawP + p.tailY[0] + shT;
+  if (dyn && p.dt > 0) stepDyn(dyn, p, keys, q, nT, baseP, baseY, _O.elements[13], headPAbs, hRoll + roll, soft);
+  _rp[0] = p.tailP[0];
+  _ry[0] = p.tailY[0] + shT;
+  for (let i = 1; i < nT; i++) {
+    if (dyn && dyn.ready) {
+      _rp[i] = dyn.tP[i] - dyn.tP[i - 1];
+      _ry[i] = dyn.tY[i] - dyn.tY[i - 1];
+    } else {
+      _rp[i] = p.tailP[i];
+      _ry[i] = p.tailY[i];
+    }
+  }
+
+  if (keys.jaw) {
+    const jaw = Math.max(-0.02, p.jaw + (dyn && dyn.ready ? dyn.jaw : 0));
+    _J.multiplyMatrices(_H, compose(_T, 0, q.jaw[0], q.jaw[1], jaw, 0, 0));
+    out.put(keys.jaw, _O.multiplyMatrices(_W, _J), col, mark);
+    const t = p.tongue || 0;
+    if (keys.tongue && t > 0.02) {
+      const tb = dyn && dyn.ready ? dyn.tng : 0;
+      _L.multiplyMatrices(_J, compose(_T, 0, 0.0015, 0.024 + 0.02 * t, 0.15 + 0.4 * t + tb, 0, 0, 1, 1, 0.45 + 0.75 * t));
+      out.put(keys.tongue, _O.multiplyMatrices(_W, _L), col, mark);
+    }
+  }
   if (keys.ear && keys.earPos && keys.earRest) {
     const ep = keys.earPos, er = keys.earRest;
     for (let si = 0; si < 2; si++) {
       const side = si ? -1 : 1;
-      _J.multiplyMatrices(_H, compose(_T, side * ep[0], ep[1], ep[2], er[0] + (side > 0 ? p.earL : p.earR), side * p.earYaw, -side * er[1]));
-      out.put(keys.ear, _J, col, mark);
+      let pit = er[0] + (side > 0 ? p.earL : p.earR), fl = 0;
+      if (dyn && dyn.ready) {
+        pit = dyn.ear[si];
+        fl = dyn.ear[2 + si];
+      }
+      _J.multiplyMatrices(_H, compose(_T, side * ep[0], ep[1], ep[2], pit, side * p.earYaw, side * (fl - er[1])));
+      out.put(keys.ear, _O.multiplyMatrices(_W, _J), col, mark);
     }
   }
 
   // ---- Tail ----
-  _J.multiplyMatrices(_R, compose(_T, q.tail[0], q.tail[1], q.tail[2], p.tailP[0], p.tailY[0], 0));
-  for (let i = 0; i < keys.tail.length; i++) {
-    if (i > 0) _J.multiply(compose(_T, 0, 0, -q.tailLen[i - 1], p.tailP[i], p.tailY[i], 0));
-    out.put(keys.tail[i], _J, col, mark);
+  _J.multiplyMatrices(_R, compose(_T, q.tail[0], q.tail[1], q.tail[2] - jp, _rp[0], _ry[0], 0));
+  for (let i = 0; i < nT; i++) {
+    if (i > 0) _J.multiply(compose(_T, 0, 0, -q.tailLen[i - 1], _rp[i], _ry[i], 0));
+    out.put(keys.tail[i], _O.multiplyMatrices(_W, _J), col, mark);
   }
 
-  // ---- Legs: paw targets from the gait, two-bone IK, then posture blends ----
-  const clear = q.clear * L * (1 + 0.4 * trot + 0.6 * gal) * (1 + 0.3 * crouch);
+  // ---- Legs: posture targets blended over the gait targets, then IK from the shoulder / hip ----
   for (let k = 0; k < 4; k++) {
-    const isFront = k < 2, side = k % 2 === 0 ? 1 : -1;
-    const seg = isFront ? q.segF : q.segH;
-    const l1 = L * seg[0], l2 = L * seg[1], l3 = L * seg[2];
-    const yA = L * (isFront ? q.frontK : q.hindK) - q.spineY, zA = isFront ? q.zF : q.zR;
-    const phi = pitch + (isFront ? flex : -flex);
-    const cph = Math.cos(phi), sph = Math.sin(phi);
-    const hy = bodyH + yA * cph - zA * sph, hz = yA * sph + zA * cph;
-    // Paw target in the heading frame (ground at y = 0).
-    let fz = zA + (isFront ? q.footF : q.footH) * L, fy = 0;
-    let tp = isFront ? q.pawF : q.pawH;
-    const ph = (((g + _off[k]) % 1) + 1) % 1;
-    if (ph < beta) {
-      // Stance: the paw sweeps back at exactly ground speed; heel lifts toward push-off.
-      const u = ph / beta;
-      fz += mv * S * (0.5 - u);
-      tp += mv * 0.7 * smooth(0.65, 1, u);
-    } else {
-      // Swing: lift with clearance, fold the paw back, reach forward and set down gently.
-      const u = (ph - beta) / (1 - beta);
-      const e = u - Math.sin(TAU * u) / TAU;
-      fz += mv * S * (e - 0.5);
-      fy = mv * clear * Math.pow(Math.sin(Math.PI * u), 0.8);
-      tp = mix(tp, isFront ? 1.7 : 0.8, mv * Math.sin(Math.PI * Math.min(1, u * 1.15)));
-    }
-    if (!isFront) {
-      // Sitting: hocks under the hips, hind paws flat on the ground ahead of them.
-      fz = mix(fz, hz + 0.27 * L, sit);
-      fy *= 1 - sit;
-      tp = mix(tp, -1.42, sit);
-      // Lunging: hind paws drive back.
-      fz -= lunge * 0.55 * L;
-      tp += lunge * 0.7;
-    } else fz += sit * 0.05 * L;
-    const wy = fy + l3 * Math.cos(tp), wz = fz + l3 * Math.sin(tp);
-    ik2(hy, hz, wy, wz, l1, l2, isFront ? 1 : -1);
-    let a1 = _ik[0] - phi, a2 = _ik[1] - _ik[0], a3 = tp - _ik[1];
-    if (isFront) {
-      // Lunging: forelegs reach out, paws spread.
-      a1 = mix(a1, -1.35 - phi, lunge);
-      a2 = mix(a2, -0.25, lunge);
-      a3 = mix(a3, 0.3, lunge);
-      if (k === 1 && p.limp > 0) {
-        // Injured: the right foreleg is held up off the ground, paw dangling.
-        a1 = mix(a1, -0.1, p.limp);
-        a2 = mix(a2, -0.9, p.limp);
-        a3 = mix(a3, 1.7, p.limp);
+    const isF = k < 2, side = k % 2 === 0 ? 1 : -1;
+    const seg = isF ? q.segF : q.segH;
+    const l1 = L * seg[0], l2 = L * seg[1], l3 = L * seg[2], l4 = toes ? L * (isF ? q.toeF! : q.toeH!) : 0;
+    const tp0 = isF ? q.pawF : q.pawH;
+    const tzN = (isF ? nzF : nzH) + l4;
+    let tx = _tx[k], ty = _ty[k], tz = _tz[k], tp = _tp[k], tt = _tt[k];
+    // Joint frame: the lower end of the shoulder blade (which rocks with the leg), or the hip.
+    if (isF) {
+      if (sc) {
+        const sig = sc[4] - 0.6 * clamp((tz - tzN) / L, -0.75, 0.75) - 0.25 * bow - 0.15 * lie + 0.1 * sit - 0.3 * lunge;
+        _A.multiplyMatrices(_F, compose(_T, side * sc[0], sc[1], sc[2] - jc, sig, 0, side * sc[5]));
+        if (keys.scap) out.put(keys.scap, _O.multiplyMatrices(_W, _A), col, mark);
+        _Hp.multiplyMatrices(_A, compose(_T, 0, -sc[3], 0, 0, 0, 0));
+      } else _Hp.multiplyMatrices(_F, compose(_T, side * q.x, L * q.frontK - q.spineY, q.zF - jc, 0, 0, 0));
+    } else _Hp.multiplyMatrices(_R, compose(_T, side * q.x, hpY, q.zR - jp, 0, 0, 0));
+    const he = _Hp.elements;
+    const Sz = he[14], phi = Math.atan2(he[6], he[5]);
+    if (sit > 0) {
+      if (isF) {
+        tz = mix(tz, tzN + 0.1 * L, sit);
+        ty = mix(ty, padH, sit);
+        tp = mix(tp, tp0, sit);
+        tt = mix(tt, 0, sit);
+      } else {
+        // Sitting: hocks down on the ground under the hips, hind feet flat ahead of them.
+        tx = mix(tx, side * (q.x + splay + 0.012), sit);
+        tz = mix(tz, Sz - 0.08 * L + l3 + l4, sit);
+        ty = mix(ty, padH, sit);
+        tp = mix(tp, -HALF_PI + 0.04, sit);
+        tt = mix(tt, 0, sit);
       }
     }
-    if (lie > 0) {
-      const Lp = isFront ? LIE_F : LIE_H, Fp = isFront ? FLAT_F : FLAT_H;
-      const lf = flat / Math.max(lie, 1e-3);
-      a1 = mix(a1, mix(Lp[0], Fp[0], lf), lie);
-      a2 = mix(a2, mix(Lp[1], Fp[1], lf), lie);
-      a3 = mix(a3, mix(Lp[2], Fp[2], lf), lie);
+    const lw = lie * (1 - flat);
+    const down = isF ? Math.max(lw, bow) : lw;
+    if (down > 0) {
+      // Lying (sphinx) and the play bow: elbows on the ground, forearms and paws flat out in front;
+      // hind legs folded beside the belly, hocks and feet flat.
+      let X: number, Z: number, Tp: number, Tt: number;
+      if (isF) {
+        X = side * (q.x + splay * 0.5);
+        Z = Sz - 0.2 * l1 + l2 + l3 + l4;
+        Tp = -HALF_PI;
+        Tt = 0;
+      } else {
+        X = side * (q.x + splay + L * 0.18);
+        Z = Sz - 0.09 * L + l3 + l4;
+        Tp = -HALF_PI;
+        Tt = 0;
+      }
+      tx = mix(tx, X, down);
+      tz = mix(tz, Z, down);
+      ty = mix(ty, padH, down);
+      tp = mix(tp, Tp, down);
+      tt = mix(tt, Tt, down);
+    }
+    if (lunge > 0) {
+      if (isF) {
+        // Lunging: forelegs reach out, paws spread.
+        tz = mix(tz, Sz + 0.95 * L, lunge);
+        ty = mix(ty, 0.3 * L, lunge);
+        tp = mix(tp, -0.3, lunge);
+        tt = mix(tt, 0.3, lunge);
+      } else {
+        // Hind paws drive back.
+        tz -= lunge * 0.55 * L;
+        tp += lunge * 0.7;
+        tt += lunge * 0.6;
+      }
+    }
+    if (k === 1 && p.limp > 0) {
+      // Injured: the right foreleg is held up off the ground, paw dangling.
+      ty = mix(ty, 0.36 * L + padH, p.limp);
+      tz = mix(tz, tzN + 0.04 * L, p.limp);
+      tp = mix(tp, 1.45, p.limp);
+      tt = mix(tt, 2.0, p.limp);
+    }
+    tx += side * crouch * L * 0.07;
+    // From the toe tip back up the paw: ball of the foot, then the wrist / hock.
+    const by = ty + l4 * Math.sin(tt), bz = tz - l4 * Math.cos(tt);
+    const wy = by + l3 * Math.cos(tp), wz = bz + l3 * Math.sin(tp);
+    _v.set(tx, wy, wz).applyMatrix4(_Inv.copy(_Hp).invert());
+    let r = clamp(Math.atan2(_v.x, Math.max(-_v.y, 0.02)), -0.6, 0.6);
+    const yr = -_v.x * Math.sin(r) + _v.y * Math.cos(r);
+    ik2(0, 0, yr, _v.z, l1, l2, isF ? 1 : -1);
+    let a1 = _ik[0], a2 = _ik[1] - _ik[0], a3 = tp - phi - _ik[1], a4 = tt - tp, ovYaw = 0;
+    if (flat > 0) {
+      const Fp = isF ? FLAT_F : FLAT_H;
+      a1 = mix(a1, Fp[0], flat);
+      a2 = mix(a2, Fp[1], flat);
+      a3 = mix(a3, Fp[2], flat);
+      a4 = mix(a4, Fp[3], flat);
+      r = mix(r, side * 0.1, flat);
     }
     if (k === p.ovLeg && p.ovW > 0) {
-      a1 = mix(a1, p.ov[0], p.ovW);
-      a2 = mix(a2, p.ov[1], p.ovW);
-      a3 = mix(a3, p.ov[2], p.ovW);
+      const ov = p.ov;
+      a1 = mix(a1, ov[0], p.ovW);
+      a2 = mix(a2, ov[1], p.ovW);
+      a3 = mix(a3, ov[2], p.ovW);
+      a4 = mix(a4, ov[3] ?? 0, p.ovW);
+      ovYaw = side * (ov[4] ?? 0) * p.ovW;
     }
-    const half = isFront ? _F : _R;
-    _L.multiplyMatrices(half, compose(_T, side * q.x, yA, zA, a1, 0, side * (0.03 + lie * 0.08)));
-    out.put(isFront ? keys.legUF : keys.legUH, _L, col, mark);
+    _L.multiplyMatrices(_Hp, compose(_T, 0, 0, 0, 0, ovYaw, r));
+    _L.multiply(compose(_T, 0, 0, 0, a1, 0, 0));
+    out.put(isF ? keys.legUF : keys.legUH, _O.multiplyMatrices(_W, _L), col, mark);
     _L.multiply(compose(_T, 0, -l1, 0, a2, 0, 0));
-    out.put(isFront ? keys.legLF : keys.legLH, _L, col, mark);
+    out.put(isF ? keys.legLF : keys.legLH, _O.multiplyMatrices(_W, _L), col, mark);
     _L.multiply(compose(_T, 0, -l2, 0, a3, 0, 0));
-    out.put(isFront ? keys.pawF : keys.pawH, _L, col, mark);
+    out.put(isF ? keys.pawF : keys.pawH, _O.multiplyMatrices(_W, _L), col, mark);
+    if (toes) {
+      _L.multiply(compose(_T, 0, -l3, 0, a4, 0, 0));
+      out.put(isF ? keys.toeF! : keys.toeH!, _O.multiplyMatrices(_W, _L), col, mark);
+    }
   }
 }
 
-/** Advance a gait cycle by distance travelled so paws don't skate (stride grows with speed and size). */
-export function stepGait(gait: number, speed: number, dt: number, q: QuadDims, scale = 1): number {
-  return (gait + (speed * dt) / (cycleLen(q, speed) * scale)) % 1;
+/**
+ * Advance the springs: head motion is differentiated to drive the ears (which also hang with
+ * gravity when soft), a loose jaw and tongue; each tail piece chases its target angle relative to
+ * the piece before, with damping against that piece's motion, so wags and turns whip down the tail.
+ */
+function stepDyn(d: QuadDyn, p: QuadPose, keys: QuadKeys, q: QuadDims, nT: number, baseP: number, baseY: number, headY: number, headP: number, headR: number, soft: number): void {
+  const dt = Math.min(p.dt, 0.1), s = p.scale;
+  const er = keys.earRest;
+  const e0 = er ? er[0] : 0;
+  if (!d.ready) {
+    d.lastHeading = p.heading;
+    d.yaw = p.heading;
+    d.hy = headY;
+    d.hp = headP;
+    d.hr = headR;
+    d.v = p.speed;
+    d.hvy = d.hay = d.hvp = d.hap = d.hvr = d.har = d.av = 0;
+    let ap = baseP, ay = d.yaw + baseY;
+    d.tP[0] = ap;
+    d.tY[0] = ay;
+    for (let i = 1; i < nT; i++) {
+      ap += p.tailP[i];
+      ay += p.tailY[i];
+      d.tP[i] = ap;
+      d.tY[i] = ay;
+      d.tPv[i] = d.tYv[i] = 0;
+    }
+    d.p0 = baseP;
+    d.y0 = d.yaw + baseY;
+    d.ear[0] = e0 + p.earL - soft * 0.7 * headP;
+    d.ear[1] = e0 + p.earR - soft * 0.7 * headP;
+    d.ear[2] = -soft * 0.7 * headR;
+    d.ear[3] = soft * 0.7 * headR;
+    d.earV.fill(0);
+    d.jaw = d.jawV = d.tng = d.tngV = 0;
+    d.ready = true;
+    return;
+  }
+  d.yaw += wrapPi(p.heading - d.lastHeading);
+  d.lastHeading = p.heading;
+  // Head kinematics (lightly smoothed rates and accelerations; world heights over scale).
+  const vy = (headY - d.hy) / dt / s, vp = (headP - d.hp) / dt, vr = (headR - d.hr) / dt;
+  d.hay = mix(d.hay, clamp((vy - d.hvy) / dt, -40, 40), 0.5);
+  d.hap = mix(d.hap, clamp((vp - d.hvp) / dt, -200, 200), 0.5);
+  d.har = mix(d.har, clamp((vr - d.hvr) / dt, -300, 300), 0.5);
+  d.av = mix(d.av, clamp((p.speed - d.v) / dt / s, -30, 30), 0.3);
+  d.hvy = vy;
+  d.hvp = vp;
+  d.hvr = clamp(vr, -30, 30);
+  d.hy = headY;
+  d.hp = headP;
+  d.hr = headR;
+  d.v = p.speed;
+  const n = Math.min(14, Math.max(1, Math.ceil(dt / 0.007))), h = dt / n;
+  // Tail.
+  const A0p = baseP, A0y = d.yaw + baseY;
+  const v0p = (A0p - d.p0) / dt, v0y = (A0y - d.y0) / dt;
+  // Ears: stiff pricked ears barely wobble; soft ears swing back with speed-ups, flap with the
+  // stride (vertical head bounce), fling out in a shake and hang with gravity.
+  const wE = mix(38, 11, soft), zE = mix(0.6, 0.18, soft);
+  const tp0 = e0 + p.earL - soft * 0.7 * headP, tp1 = e0 + p.earR - soft * 0.7 * headP;
+  const fBase = soft * (-12 * d.hay + 0.25 * d.hvr * d.hvr);
+  const pBase = soft * (1.5 * d.av - 0.8 * d.hap);
+  const open = clamp(p.jaw * 2.5, 0, 1);
+  for (let j = 0; j < n; j++) {
+    const f = (j + 1) / n;
+    const pp = mix(d.p0, A0p, f), py = mix(d.y0, A0y, f);
+    for (let i = 1; i < nT; i++) {
+      const w = TAIL_W - 4 * (i - 1), z = TAIL_Z;
+      const parP = i === 1 ? pp : d.tP[i - 1], parY = i === 1 ? py : d.tY[i - 1];
+      const parVp = i === 1 ? v0p : d.tPv[i - 1], parVy = i === 1 ? v0y : d.tYv[i - 1];
+      d.tPv[i] += (w * w * (parP + p.tailP[i] - d.tP[i]) - 2 * z * w * (d.tPv[i] - parVp)) * h;
+      d.tYv[i] += (w * w * (parY + p.tailY[i] - d.tY[i]) - 2 * z * w * (d.tYv[i] - parVy)) * h;
+      d.tP[i] += d.tPv[i] * h;
+      d.tY[i] += d.tYv[i] * h;
+      d.tP[i] = parP + p.tailP[i] + clamp(d.tP[i] - parP - p.tailP[i], -0.7, 0.7);
+      d.tY[i] = parY + p.tailY[i] + clamp(d.tY[i] - parY - p.tailY[i], -0.7, 0.7);
+    }
+    for (let si = 0; si < 2; si++) {
+      const side = si ? -1 : 1;
+      const tgtP = si ? tp1 : tp0, tgtF = -side * soft * 0.7 * headR;
+      d.earV[si] += (wE * wE * (tgtP - d.ear[si]) - 2 * zE * wE * d.earV[si] + pBase) * h;
+      d.earV[2 + si] += (wE * wE * (tgtF - d.ear[2 + si]) - 2 * zE * wE * d.earV[2 + si] + fBase - side * soft * 0.8 * d.har) * h;
+      d.ear[si] = tgtP + clamp(d.ear[si] + d.earV[si] * h - tgtP, -1.1, 1.1);
+      d.ear[2 + si] = clamp(d.ear[2 + si] + d.earV[2 + si] * h, -0.7, 1.3);
+    }
+    d.jawV += (-784 * d.jaw - 19.6 * d.jawV + 3 * open * d.hay) * h;
+    d.jaw = clamp(d.jaw + d.jawV * h, -0.1, 0.3);
+    d.tngV += (-256 * d.tng - 7 * d.tngV + 7 * d.hay - 0.5 * d.hap) * h;
+    d.tng = clamp(d.tng + d.tngV * h, -0.6, 0.6);
+  }
+  d.tP[0] = A0p;
+  d.tY[0] = A0y;
+  d.p0 = A0p;
+  d.y0 = A0y;
+  void q;
+}
+
+/** Tail spring stiffness (rad/s, base piece; each piece after is a little softer) and damping ratio. */
+const TAIL_W = 46, TAIL_Z = 0.5;
+
+/** Advance a gait cycle by distance travelled (and turning steps) so paws don't skate (stride grows with speed and size). */
+export function stepGait(gait: number, speed: number, dt: number, q: QuadDims, scale = 1, yaw = 0): number {
+  const v = gaitSpeed(q, speed, yaw, scale);
+  return (gait + (v * dt) / (cycleLen(q, v) * scale)) % 1;
 }
 
 /** Smooth 0→1→0 envelope over [a, b] with ramps of length r. */

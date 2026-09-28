@@ -1,80 +1,55 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { Skeleton } from './PeopleModels';
 
 /**
  * Islander bodies from the rigged character models (public/models/islander_male.glb and
- * islander_female.glb). Each skinned model is cut into the rigid parts the islander rig poses
- * (pelvis, chest, head, and per side upper arm, forearm, thigh, shin), every part moved into its
- * joint's local space (limbs hanging down -y from the joint, facing +z), so all the rig's
- * animations, tools, headdresses and carried loads work unchanged. The skeleton offsets come
- * from the models' own joints.
+ * islander_female.glb), kept as smooth skinned meshes: one merged geometry per model with its
+ * skin weights, remapped onto the rig's own 19-bone skeleton (hips, spine, chest, neck, head,
+ * shoulders, upper arms, forearms, hands, thighs, shins, feet). The islander rig poses those
+ * bones every frame and skins all islanders of a model in one instanced draw.
+ *
+ * Each bone has a bind frame: at its joint, with limbs turned so -y runs down the bone (the rig's
+ * convention for limbs) and the torso bones upright. Skin matrix = posed frame × bind frame⁻¹.
  *
  * Skin materials become per-person skin tone (aMat 1) and the gold trims the per-person accent
  * colour (aMat 2); everything else keeps its model colour. Replace the .glb files to restyle the
- * islanders: the loader only needs the same 20 bone names.
+ * islanders: the loader only needs the same bone names.
  */
 
-export type GlbPart = 'pelvis' | 'chest' | 'head' | 'uarm' | 'farm' | 'thigh' | 'shin';
-/** Limb parts come in two sides: L on +x (the character's left, facing +z), R on -x. */
-export const GLB_SIDED = new Set<GlbPart>(['uarm', 'farm', 'thigh', 'shin']);
+export const BONES = [
+  'hips', 'spine', 'chest', 'neck', 'head',
+  'shoulderL', 'upper_armL', 'forearmL', 'handL',
+  'shoulderR', 'upper_armR', 'forearmR', 'handR',
+  'thighL', 'shinL', 'footL', 'thighR', 'shinR', 'footR',
+] as const;
+export type BoneName = (typeof BONES)[number];
+export const BONE_COUNT = BONES.length;
+export const BI = Object.fromEntries(BONES.map((b, i) => [b, i])) as Record<BoneName, number>;
 
-export interface GlbPeople {
-  /** Part geometries keyed `${part}_${g}` (body) or `${part}_${g}${side}` (limbs). */
-  parts: Map<string, THREE.BufferGeometry>;
-  skel: Record<'m' | 'f', Skeleton>;
+export interface GlbModel {
+  /** Bind-pose geometry (metres, facing +z) with aSkinI / aSkinW (4 influences). */
+  geometry: THREE.BufferGeometry;
+  /** Joint positions in the bind pose. */
+  joint: Record<BoneName, THREE.Vector3>;
+  /** Inverse bind frames, one per bone. */
+  bindInv: THREE.Matrix4[];
+  /** Limb lengths (joint to joint). */
+  len: { upper: number; fore: number; thigh: number; shin: number };
 }
+
+export type GlbPeople = Record<'m' | 'f', GlbModel>;
 
 const FILES: Record<'m' | 'f', string> = { m: 'models/islander_male.glb', f: 'models/islander_female.glb' };
 
-/** Mesh names that ride rigidly on one part whatever their skin weights say. */
-const ON_PELVIS = /skirt|hem|sash|belt/i;
-const ON_HEAD = /head|hair|ear|beard|sideburn|knot|bun|lock/i;
-const ON_ARM = /arm|hand|wrist/i;
-
-function boneKey(name: string): { bone: string; side: '' | 'L' | 'R' } {
-  // GLTFLoader strips the dots from node names ("upper_arm.L" becomes "upper_armL").
-  const m = /^(root|hips|spine|chest|neck|head|shoulder|upper_arm|forearm|hand|thigh|shin|foot)\.?([LR])?$/.exec(name);
-  return m ? { bone: m[1], side: (m[2] as 'L' | 'R') ?? '' } : { bone: 'root', side: '' };
-}
-
-function partFor(bone: string, meshName: string): GlbPart {
-  if (ON_PELVIS.test(meshName)) return 'pelvis';
-  if (ON_HEAD.test(meshName)) return 'head';
-  switch (bone) {
-    case 'root':
-    case 'hips':
-      return 'pelvis';
-    case 'spine':
-    case 'chest':
-    case 'neck':
-      return 'chest';
-    case 'head':
-      return 'head';
-    case 'shoulder':
-      return ON_ARM.test(meshName) ? 'uarm' : 'chest';
-    case 'upper_arm':
-      return 'uarm';
-    case 'forearm':
-    case 'hand':
-      return 'farm';
-    case 'thigh':
-      return 'thigh';
-    default:
-      return 'shin';
-  }
+/** GLTFLoader strips the dots from node names ("upper_arm.L" becomes "upper_armL"). */
+function boneIndex(name: string): number {
+  const n = name.replace('.', '');
+  return n in BI ? BI[n as BoneName] : 0; // root → hips
 }
 
 const lum = (c: THREE.Color) => c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
 
-interface Acc {
-  pos: number[];
-  nor: number[];
-  col: number[];
-  mat: number[];
-}
-
-async function loadOne(loader: GLTFLoader, g: 'm' | 'f', url: string, out: GlbPeople): Promise<void> {
+async function loadOne(loader: GLTFLoader, url: string): Promise<GlbModel> {
   const gltf = await loader.loadAsync(url);
   gltf.scene.updateMatrixWorld(true);
   const skinned: THREE.SkinnedMesh[] = [];
@@ -83,44 +58,34 @@ async function loadOne(loader: GLTFLoader, g: 'm' | 'f', url: string, out: GlbPe
   });
   if (!skinned.length) throw new Error(`${url}: no skinned meshes`);
 
-  // Joint rest positions (bind pose, world space).
   const joints = new Map<string, THREE.Vector3>();
   const sk0 = skinned[0].skeleton;
-  sk0.bones.forEach((b, i) => {
-    const k = boneKey(b.name);
-    joints.set(k.bone + k.side, new THREE.Vector3().setFromMatrixPosition(sk0.boneInverses[i].clone().invert()));
-  });
-  const J = (n: string) => {
-    const v = joints.get(n);
-    if (!v) throw new Error(`${url}: missing bone ${n}`);
-    return v;
-  };
-
-  // Rest frame of each part: its joint, with the limb's bone direction turned to -y.
-  const down = new THREE.Vector3(0, -1, 0);
-  const frames = new Map<string, THREE.Matrix4>();
-  const at = (p: THREE.Vector3) => new THREE.Matrix4().makeTranslation(p.x, p.y, p.z);
-  frames.set('pelvis', at(new THREE.Vector3(0, J('hips').y, 0)));
-  frames.set('chest', at(new THREE.Vector3(0, J('spine').y, 0)));
-  frames.set('head', at(new THREE.Vector3(0, J('head').y, 0)));
-  const limb = (part: GlbPart, from: string, to: string) => {
-    for (const s of ['L', 'R']) {
-      const a = J(from + s), b = J(to + s);
-      const q = new THREE.Quaternion().setFromUnitVectors(down, b.clone().sub(a).normalize());
-      frames.set(part + s, new THREE.Matrix4().compose(a, q, new THREE.Vector3(1, 1, 1)));
-    }
-  };
-  limb('uarm', 'upper_arm', 'forearm');
-  limb('farm', 'forearm', 'hand');
-  limb('thigh', 'thigh', 'shin');
-  limb('shin', 'shin', 'foot');
-  const inv = new Map<string, { m: THREE.Matrix4; n: THREE.Matrix3 }>();
-  for (const [k, f] of frames) {
-    const m = f.clone().invert();
-    inv.set(k, { m, n: new THREE.Matrix3().getNormalMatrix(m) });
+  sk0.bones.forEach((b, i) => joints.set(b.name.replace('.', ''), new THREE.Vector3().setFromMatrixPosition(sk0.boneInverses[i].clone().invert())));
+  const joint = {} as Record<BoneName, THREE.Vector3>;
+  for (const b of BONES) {
+    const v = joints.get(b);
+    if (!v) throw new Error(`${url}: missing bone ${b}`);
+    joint[b] = v;
   }
 
-  // Reference colours for the per-person tints.
+  // Bind frames.
+  const down = new THREE.Vector3(0, -1, 0);
+  const one = new THREE.Vector3(1, 1, 1);
+  const frame = (at: THREE.Vector3, to?: THREE.Vector3) => {
+    const q = to ? new THREE.Quaternion().setFromUnitVectors(down, to.clone().sub(at).normalize()) : new THREE.Quaternion();
+    return new THREE.Matrix4().compose(at, q, one);
+  };
+  const bind: THREE.Matrix4[] = BONES.map((b) => {
+    const s = b.slice(-1);
+    if (b.startsWith('upper_arm')) return frame(joint[b], joint[`forearm${s}` as BoneName]);
+    if (b.startsWith('forearm')) return frame(joint[b], joint[`hand${s}` as BoneName]);
+    // The hand carries on in the forearm's direction.
+    if (b.startsWith('hand')) return frame(joint[b], joint[b].clone().multiplyScalar(2).sub(joint[`forearm${s}` as BoneName]));
+    if (b.startsWith('thigh')) return frame(joint[b], joint[`shin${s}` as BoneName]);
+    if (b.startsWith('shin')) return frame(joint[b], joint[`foot${s}` as BoneName]);
+    return frame(joint[b]);
+  });
+
   let skinRef = 0, goldRef = 0;
   for (const mesh of skinned) {
     const mat = mesh.material as THREE.MeshStandardMaterial;
@@ -128,92 +93,78 @@ async function loadOne(loader: GLTFLoader, g: 'm' | 'f', url: string, out: GlbPe
     if (/^golden border$/i.test(mat.name)) goldRef = lum(mat.color);
   }
 
-  const acc = new Map<string, Acc>();
-  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], tag: number[] = [], si: number[] = [], sw: number[] = [];
+  const idx: number[] = [];
+  const p = new THREE.Vector3(), n = new THREE.Vector3(), nm = new THREE.Matrix3();
   for (const mesh of skinned) {
     const geo = mesh.geometry;
     const P = geo.getAttribute('position'), N = geo.getAttribute('normal');
     const SI = geo.getAttribute('skinIndex'), SW = geo.getAttribute('skinWeight');
     const bones = mesh.skeleton.bones;
-    // Multi-primitive meshes load as a group of meshes: the group carries the model's mesh name.
-    const meshName = `${mesh.name} ${mesh.parent?.name ?? ''}`;
+    const map = bones.map((b) => boneIndex(b.name));
     const mat = mesh.material as THREE.MeshStandardMaterial;
     const isSkin = /skin/i.test(mat.name), isGold = /gold/i.test(mat.name);
-    const tag = isSkin ? 1 : isGold ? 2 : 0;
-    const col = mat.color.clone();
-    if (isSkin && skinRef) col.setScalar(lum(mat.color) / skinRef);
-    if (isGold && goldRef) col.setScalar(lum(mat.color) / goldRef);
-    // Each vertex goes with the bone that moves it most.
-    const vPart: string[] = [];
+    const t = isSkin ? 1 : isGold ? 2 : 0;
+    const c = mat.color.clone();
+    if (isSkin && skinRef) c.setScalar(lum(mat.color) / skinRef);
+    if (isGold && goldRef) c.setScalar(lum(mat.color) / goldRef);
+    nm.getNormalMatrix(mesh.bindMatrix);
+    const base = pos.length / 3;
     for (let i = 0; i < P.count; i++) {
-      let best = 0, bw = -1;
-      for (let c = 0; c < 4; c++) {
-        const w = SW.getComponent(i, c);
-        if (w > bw) (bw = w), (best = SI.getComponent(i, c));
+      p.fromBufferAttribute(P, i).applyMatrix4(mesh.bindMatrix);
+      n.fromBufferAttribute(N, i).applyMatrix3(nm).normalize();
+      pos.push(p.x, p.y, p.z);
+      nor.push(n.x, n.y, n.z);
+      col.push(c.r, c.g, c.b);
+      tag.push(t);
+      // Merge influences that land on the same rig bone (root folds into hips).
+      const w = new Map<number, number>();
+      for (let k = 0; k < 4; k++) {
+        const wt = SW.getComponent(i, k);
+        if (wt <= 0) continue;
+        const b = map[SI.getComponent(i, k)] ?? 0;
+        w.set(b, (w.get(b) ?? 0) + wt);
       }
-      const k = boneKey(bones[best]?.name ?? 'root');
-      const part = partFor(k.bone, meshName);
-      // Limbs take their side from the bone, or from which side of the body they sit.
-      const side = k.side || (P.getX(i) >= 0 ? 'L' : 'R');
-      vPart.push(GLB_SIDED.has(part) ? part + side : part);
-    }
-    const index = geo.index;
-    const tris = index ? index.count / 3 : P.count / 3;
-    for (let t = 0; t < tris; t++) {
-      const ids = [0, 1, 2].map((c) => (index ? index.getX(t * 3 + c) : t * 3 + c));
-      // A triangle stays whole on one part (the majority of its corners).
-      const [a, b, c] = ids.map((i) => vPart[i]);
-      const key = a === b || a === c ? a : b === c ? b : a;
-      const T = inv.get(key)!;
-      let dst = acc.get(key);
-      if (!dst) acc.set(key, (dst = { pos: [], nor: [], col: [], mat: [] }));
-      for (const i of ids) {
-        p.fromBufferAttribute(P, i).applyMatrix4(mesh.bindMatrix).applyMatrix4(T.m);
-        n.fromBufferAttribute(N, i).applyMatrix3(T.n).normalize();
-        dst.pos.push(p.x, p.y, p.z);
-        dst.nor.push(n.x, n.y, n.z);
-        dst.col.push(col.r, col.g, col.b);
-        dst.mat.push(tag);
+      const top = [...w.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+      const tot = top.reduce((s, e) => s + e[1], 0) || 1;
+      for (let k = 0; k < 4; k++) {
+        si.push(top[k]?.[0] ?? 0);
+        sw.push(top[k] ? top[k][1] / tot : 0);
       }
     }
+    if (geo.index) for (let i = 0; i < geo.index.count; i++) idx.push(base + geo.index.getX(i));
+    else for (let i = 0; i < P.count; i++) idx.push(base + i);
   }
-  for (const [key, a] of acc) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(a.pos, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(a.nor, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(a.col, 3));
-    geo.setAttribute('aVeg', new THREE.Float32BufferAttribute(new Float32Array((a.pos.length / 3) * 2), 2));
-    geo.setAttribute('aMat', new THREE.Float32BufferAttribute(a.mat, 1));
-    geo.computeBoundingSphere();
-    const part = key.replace(/[LR]$/, '') as GlbPart;
-    const side = GLB_SIDED.has(part) ? key.slice(-1) : '';
-    out.parts.set(`${part}_${g}${side}`, geo);
-  }
-
-  const hips = J('hips'), spine = J('spine'), thighL = J('thighL'), shinL = J('shinL'), footL = J('footL');
-  const uaL = J('upper_armL'), faL = J('forearmL'), handL = J('handL');
-  out.skel[g] = {
-    hipY: hips.y,
-    hipX: Math.abs(thighL.x),
-    hipDY: thighL.y - hips.y,
-    thigh: thighL.distanceTo(shinL),
-    shin: shinL.distanceTo(footL) + footL.y,
-    chestY: spine.y - hips.y,
-    neckY: J('head').y - spine.y,
-    shoulderX: Math.abs(uaL.x),
-    shoulderY: uaL.y - spine.y,
-    upper: uaL.distanceTo(faL),
-    fore: faL.distanceTo(handL),
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geometry.setAttribute('aVeg', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2));
+  geometry.setAttribute('aMat', new THREE.Float32BufferAttribute(tag, 1));
+  geometry.setAttribute('aSkinI', new THREE.Float32BufferAttribute(si, 4));
+  geometry.setAttribute('aSkinW', new THREE.Float32BufferAttribute(sw, 4));
+  geometry.setIndex(idx);
+  geometry.computeBoundingSphere();
+  return {
+    geometry,
+    joint,
+    bindInv: bind.map((m) => m.clone().invert()),
+    len: {
+      upper: joint.upper_armL.distanceTo(joint.forearmL),
+      fore: joint.forearmL.distanceTo(joint.handL),
+      thigh: joint.thighL.distanceTo(joint.shinL),
+      shin: joint.shinL.distanceTo(joint.footL),
+    },
   };
 }
 
 let pending: Promise<GlbPeople> | null = null;
 
-/** Load (once) and cut up both character models. */
+/** Load (once) both character models. */
 export function loadGlbPeople(): Promise<GlbPeople> {
   if (pending) return pending;
   const loader = new GLTFLoader();
-  const out: GlbPeople = { parts: new Map(), skel: {} as GlbPeople['skel'] };
-  pending = Promise.all((['m', 'f'] as const).map((g) => loadOne(loader, g, new URL(FILES[g], document.baseURI).href, out))).then(() => out);
+  const url = (g: 'm' | 'f') => new URL(FILES[g], document.baseURI).href;
+  pending = Promise.all([loadOne(loader, url('m')), loadOne(loader, url('f'))]).then(([m, f]) => ({ m, f }));
   return pending;
 }
