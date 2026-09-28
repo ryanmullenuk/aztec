@@ -801,12 +801,12 @@ export class Colony {
     }
   }
 
-  /** The pen a captured animal should go to (butcher pens for livestock, farm pens for chickens). */
+  /** The pen a captured animal should go to (pig pen, then butcher or farm for livestock; chicken pen, then farm or butcher for chickens). */
   private penFor(mode: 'carry' | 'lead', x: number, z: number): Building | null {
-    const order = mode === 'carry' ? ['farm', 'butcher'] : ['butcher', 'farm'];
+    const order: Building['key'][] = mode === 'carry' ? ['chickenpen', 'farm', 'butcher'] : ['pigpen', 'butcher', 'farm'];
     for (const key of order) {
       let best: Building | null = null, bd = Infinity;
-      for (const b of this.bld.of(key as 'farm', true)) {
+      for (const b of this.bld.of(key, true)) {
         const d = Math.hypot(b.x - x, b.z - z);
         if (d < bd) {
           bd = d;
@@ -840,7 +840,7 @@ export class Colony {
     if (!this.hooks.canCapture?.(animalId)) return { ok: false, msg: `That ${info.name.toLowerCase()} is already being dealt with.` };
     const pos = this.hooks.animalPos?.(animalId);
     if (!pos) return { ok: false, msg: 'That animal cannot be found.' };
-    if (info.needsPen && !this.penFor('lead', pos.x, pos.z)) return { ok: false, msg: `Build a Butcher or Farm first: a ${info.name.toLowerCase()} needs a pen.` };
+    if (info.needsPen && !this.penFor('lead', pos.x, pos.z)) return { ok: false, msg: `Build a Pig Pen (or a Butcher or Farm) first: a ${info.name.toLowerCase()} needs a pen.` };
     const who = isl ?? this.nearestHunter(pos.x, pos.z);
     if (!who) return { ok: false, msg: this.list.some((i) => !i.child && i.sleeping) ? 'Everyone is asleep. Try again in the morning.' : 'Nobody is free to go hunting.' };
     if (who.child) return { ok: false, msg: `${who.name} is too young to hunt.` };
@@ -1867,9 +1867,9 @@ export class Colony {
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
       case 'bonfire': return 'Singing and telling stories at the bonfire';
-      case 'flee': return isl.hidden ? 'Sheltering indoors from a jaguar' : 'Running for shelter: jaguar!';
+      case 'flee': return isl.hidden ? 'Sheltering indoors' : 'Running for shelter';
       case 'hall':
-        if (isl.task!.phase === 1) return isl.task!.stage === 3 ? 'Sheltering in the Great Hall' : 'Running to the Great Hall: jaguar!';
+        if (isl.task!.phase === 1) return isl.task!.stage === 3 ? 'Sheltering in the Great Hall' : 'Running to the Great Hall for shelter';
         return isl.task!.stage === 3 ? 'Resting in the Great Hall' : isl.task!.stage === 4 ? 'Leaving the Great Hall' : 'Going to rest in the Great Hall';
       case 'sleep': return 'Going to bed';
       case 'wander': return 'Strolling';
