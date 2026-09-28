@@ -17,6 +17,7 @@ import { PAINT_TOOLS, TOOLS, ToolId } from './ui/tools';
 import { Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { PeakClouds } from './render/PeakClouds';
+import { DriftClouds } from './render/DriftClouds';
 import { Economy } from './economy/Economy';
 import { BuildingSystem, Building } from './buildings/Buildings';
 import { Pathfinder } from './ai/Pathfinder';
@@ -29,6 +30,7 @@ import { Powers } from './economy/Powers';
 import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { finishSwamps, generateSwamps } from './world/swamp';
+import { growIslets } from './world/islets';
 import { Bridges } from './buildings/Bridges';
 import { TradeFleet } from './entities/Trade';
 import { GOD_NAME, randomIslandName } from './world/names';
@@ -111,6 +113,8 @@ export class Game {
   veg: Vegetation;
   tufts: GrassTufts;
   clouds: PeakClouds;
+  /** High clouds passing below the camera when zoomed out. */
+  driftClouds: DriftClouds;
   buildings: BuildingSystem;
   pathfinder: Pathfinder;
   colony: Colony;
@@ -191,6 +195,9 @@ export class Game {
     // Swamps come from the seed and the untouched island too; their pools are dug afterwards,
     // so the trees standing there end up half-drowned in dark water.
     generateSwamps(this.world, opts.seed);
+    // Then the outer islets grow into their current shape, with plants of their own.
+    this.veg.growIslets(growIslets(this.world));
+    this.veg.build();
     const save = readSave(opts.seed);
     if (save) applyWorld(this.world, save);
     finishSwamps(this.world);
@@ -208,6 +215,8 @@ export class Game {
     this.scene.add(this.tufts.group);
     this.clouds = new PeakClouds(this.world);
     this.scene.add(this.clouds.group);
+    this.driftClouds = new DriftClouds(opts.seed);
+    this.scene.add(this.driftClouds.group);
     this.water = new Water(this.world);
     this.bridges = new Bridges(this.world);
     this.scene.add(this.bridges.mesh);
@@ -1405,6 +1414,7 @@ export class Game {
     this.sculptor.update(realDt);
     this.tufts.update(realDt);
     this.clouds.update(realDt, ls.day, this.rig.cur.dist);
+    this.driftClouds.update(realDt, ls.day, this.rig.cur.dist, this.rig.camera.position);
     for (const s of this.systems) s(realDt, dt);
     this.rig3d.update(this.colony.list, this.selectedIslander, realDt);
 
