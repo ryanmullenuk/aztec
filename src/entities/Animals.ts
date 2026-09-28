@@ -10,6 +10,11 @@ import { Islander } from './Islander';
 import * as models from './animalModels';
 import { CHICKEN_WING, FOLDED, flapPose, mixPose, pose, wingMatrices, wingParts } from './birdWings';
 
+/** Roaming radius of penned animals per pen building (anything else: 0.9, the butcher's pen). */
+const PEN_RADIUS: Partial<Record<string, number>> = { farm: 0.36, butcher: 0.9, pigpen: 1.8, chickenpen: 1.7 };
+/** A butcher also takes livestock from pig pens within this distance. */
+const BUTCHER_REACH = 24;
+
 const _fp = pose();
 const _wp = pose();
 const _wm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()];
@@ -319,7 +324,7 @@ export class Animals {
   private groups: Group[] = [];
   private rng: RNG;
   private meshes = new Map<string, { mesh: THREE.InstancedMesh; acc: THREE.InstancedBufferAttribute; n: number }>();
-  private pens = new Map<number, { x: number; z: number; r: number }>();
+  private pens = new Map<number, { x: number; z: number; r: number; key: string }>();
   private leash: THREE.LineSegments;
   private time = 0;
   /** Counts draw calls so each animal can tell whether it was posed last frame. */
@@ -519,8 +524,8 @@ export class Animals {
   // ---------------- Pens & capture API ----------------
 
   registerPen(b: Building): void {
-    // A farm's chicken run is small; the butcher's pen is roomier.
-    const p = { x: b.penX, z: b.penZ, r: b.key === 'farm' ? 0.36 : 0.9 };
+    // A farm's chicken run is small, the butcher's pen roomier; the pig and chicken pens have a whole yard.
+    const p = { x: b.penX, z: b.penZ, r: PEN_RADIUS[b.key] ?? 0.9, key: b.key as string };
     this.pens.set(b.id, p);
     // Animals already penned here (e.g. from a save made before the pen had a place) move into it.
     for (const a of this.list) {
@@ -551,14 +556,31 @@ export class Animals {
     }
     this.pens.delete(id);
   }
+  /** Pens a building's worker can take animals from: its own, and for a butcher any pig pen within reach (nearest first). */
+  private sourcePens(b: Building): number[] {
+    const ids = [b.id];
+    if (b.key !== 'butcher') return ids;
+    const near: [number, number][] = [];
+    for (const [id, p] of this.pens) {
+      if (p.key !== 'pigpen') continue;
+      const d = Math.hypot(p.x - b.x, p.z - b.z);
+      if (d <= BUTCHER_REACH) near.push([id, d]);
+    }
+    near.sort((a, c) => a[1] - c[1]);
+    return ids.concat(near.map((n) => n[0]));
+  }
   penCount(b: Building): number {
-    return this.list.filter((a) => a.alive && a.pen === b.id).length;
+    const ids = this.sourcePens(b);
+    return this.list.filter((a) => a.alive && ids.includes(a.pen)).length;
   }
   takeFromPen(b: Building): boolean {
-    const a = this.list.find((x) => x.alive && x.pen === b.id);
-    if (!a) return false;
-    this.consume(a.id);
-    return true;
+    for (const id of this.sourcePens(b)) {
+      const a = this.list.find((x) => x.alive && x.pen === id);
+      if (!a) continue;
+      this.consume(a.id);
+      return true;
+    }
+    return false;
   }
 
   get(id: number): Animal | undefined {
