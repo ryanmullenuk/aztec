@@ -299,7 +299,7 @@ export class AudioEngine {
     if (!this.ready) return;
     const ctx = this.ctx!;
     const now = ctx.currentTime;
-    const minGap: Record<string, number> = { chop: 0.12, mine: 0.12, build: 0.1, sculpt: 0.09, drop: 0.1, flap: 0.15, mark: 0.05, splash: 0.2 };
+    const minGap: Record<string, number> = { chop: 0.12, mine: 0.12, build: 0.1, sculpt: 0.09, drop: 0.1, flap: 0.15, mark: 0.05, splash: 0.2, bark: 0.12, growl: 0.5, yelp: 0.3 };
     const lastT = this.last.get(name) ?? 0;
     if (now - lastT < (minGap[name] ?? 0.03)) return;
     this.last.set(name, now);
@@ -385,6 +385,11 @@ export class AudioEngine {
         break;
       }
       case 'thunder': burst('lowpass', 300, 0.7, 3.2, 0.9, 60); tone('sine', 55, 30, 2.5, 0.5); break;
+      // A dog's short "ruff": a rasping bandpassed burst over a quick falling tone.
+      case 'bark': tone('square', 480 + Math.random() * 120, 260, 0.09, 0.08); burst('bandpass', 950, 2.5, 0.09, 0.3); break;
+      // Jaguar: a low rasping rumble.
+      case 'growl': burst('lowpass', 280, 3, 0.75, 0.3, 160); tone('sawtooth', 82, 64, 0.7, 0.05); break;
+      case 'yelp': tone('triangle', 1450, 650, 0.2, 0.12); break;
     }
   }
 
