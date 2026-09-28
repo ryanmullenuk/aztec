@@ -239,7 +239,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -275,6 +275,7 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   bonfire: { key: 'bonfire', name: 'Bonfire', description: 'A great fire ringed with log benches. In the evenings villagers gather here to sing and tell stories: they grow happier and the tribe gains Belief.', size: [3, 3], cost: { wood: 20, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   firepit: { key: 'firepit', name: 'Firepit', description: 'A roasting pit with a pig turning on a spit. Meat meals become more filling and put villagers in a good mood.', size: [2, 2], cost: { wood: 12, stone: 8, belief: 0 }, buildTime: 18, builders: 1, workers: 0, placeable: true },
   well: { key: 'well', name: 'Well', description: 'A stone well of fresh, cool water with a little tiled roof. Villagers living nearby are happier.', size: [2, 2], cost: { wood: 6, stone: 20, belief: 0 }, buildTime: 25, builders: 2, workers: 0, placeable: true },
+  greathall: { key: 'greathall', name: 'Great Hall', description: 'A raised stone hall under a striped canopy, with fire braziers and a bronze bell. Idle villagers come to rest on its benches; when a jaguar is spotted the bell rings and everyone runs to the hall or home for sanctuary.', size: [7, 7], cost: { wood: 70, stone: 60, belief: 20 }, buildTime: 110, builders: 5, workers: 0, placeable: true },
   kennel: { key: 'kennel', name: 'Kennel', description: 'A timber-and-adobe dog house with a shaded run. Village dogs sleep here, raise puppies and bark the alarm when a jaguar comes near. Each kennel holds up to 3 dogs.', size: [2, 2], cost: { wood: 18, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
@@ -520,6 +521,22 @@ export const COMFORTS = {
   /** Villagers answering a call to help build: how many and from how far. */
   helpersMax: 6,
   helpersRadius: 45,
+};
+
+/** The Great Hall: resting place for idle villagers and sanctuary when danger comes. */
+export const GREAT_HALL = {
+  /** Idle villagers within this distance may come to rest here (chance per idle decision). */
+  restRadius: 45,
+  restChance: 0.45,
+  restSeconds: [20, 45] as [number, number],
+  /** Rest and happiness regained per second sitting in the hall. */
+  restGain: 0.012,
+  happyGain: 0.004,
+  /** Sanctuary: the bell calls everyone within this distance; they stay at least this long. */
+  callRadius: 80,
+  shelterMin: 18,
+  /** A jaguar still counts as a threat while hunting within this distance of the village. */
+  threatRadius: 45,
 };
 
 /** Smokehouse batches: raw fish or meat in, more (preserved) food out. */

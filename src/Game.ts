@@ -38,7 +38,7 @@ import { shapeWaterfall } from './world/waterfallSite';
 import { Bridges } from './buildings/Bridges';
 import { TradeFleet } from './entities/Trade';
 import { GOD_NAME, randomIslandName } from './world/names';
-import { FAUNA, SPECIES, TIME } from './config';
+import { FAUNA, GREAT_HALL, SPECIES, TIME } from './config';
 import { MONKEY_BASE } from './entities/Monkeys';
 import { DOG_BASE, Dogs } from './entities/Dogs';
 import { JAG_BASE, Jaguar, Jaguars } from './entities/Jaguars';
@@ -142,6 +142,9 @@ export class Game {
   swampView!: SwampView;
   jaguars!: Jaguars;
   private lastDanger = -999;
+  /** The Great Hall bell has called the village to sanctuary; seconds the coast has been clear. */
+  private hallAlert = false;
+  private hallClear = 0;
   boats: Boats;
   marine: Marine;
   powers: Powers;
@@ -406,6 +409,20 @@ export class Game {
     // Dogs and jaguars.
     const alarm = (x: number, z: number, r: number) => void this.colony.alarm(x, z, r);
     const danger = (j: Jaguar, by: 'dogs' | 'villagers') => {
+      // With a Great Hall, its bell rings and the whole village makes for sanctuary.
+      const halls = this.buildings.list.filter((b) => b.key === 'greathall' && b.complete);
+      if (halls.length) {
+        this.colony.sanctuary(j.x, j.z);
+        this.hallClear = 0;
+        if (!this.hallAlert) {
+          this.hallAlert = true;
+          this.lastDanger = this.time.elapsed;
+          for (const h of halls) this.buildings.ringBell(h);
+          this.audio?.sfx('bell');
+          this.ui?.toast('The Great Hall bell is ringing: a jaguar! Everyone is running to the hall or home for sanctuary.', 'warn');
+          return;
+        }
+      }
       if (this.time.elapsed - this.lastDanger < 50) return;
       this.lastDanger = this.time.elapsed;
       this.ui?.toast(by === 'dogs' ? 'The dogs are barking: a jaguar is prowling near the village!' : 'A jaguar! Villagers are running for shelter.', 'warn');
@@ -422,6 +439,7 @@ export class Game {
       path: (x, z, tx, tz) => this.pathfinder.find(x, z, tx, tz, { goalRadius: 1 }),
       birdNear: (x, z, r) => this.waterBirds.groundedNear(x, z, r),
     };
+    this.colony.hooks.threat = () => this.hallAlert || this.jaguarThreat();
     this.jaguars.hooks = {
       villagers: () => this.colony.list,
       byId: (id) => this.colony.byId(id),
@@ -1284,6 +1302,24 @@ export class Game {
 
   private ray = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
+  /** The player rings a Great Hall's bell: a sanctuary drill (everyone goes in for a little while). */
+  ringHallBell(b: Building): void {
+    if (b.key !== 'greathall' || !b.complete) return;
+    this.buildings.ringBell(b);
+    this.audio?.sfx('bell');
+    const n = this.colony.sanctuary(b.x, b.z, true);
+    this.ui?.toast(n ? `The bell rings: ${n} villager${n === 1 ? '' : 's'} hurry to sanctuary (a drill).` : 'The bell rings, but nobody is near enough to answer it.');
+  }
+
+  /** A jaguar is hunting near the village (its fire, or any villager out in the open). */
+  private jaguarThreat(): boolean {
+    const fire = this.buildings.list.find((b) => b.key === 'campfire');
+    const R = GREAT_HALL.threatRadius;
+    return this.jaguars.hunting.some(
+      (j) => (fire && Math.hypot(j.x - fire.x, j.z - fire.z) < R) || this.colony.list.some((v) => !v.hidden && !v.safe && Math.hypot(v.x - j.x, v.z - j.z) < 18)
+    );
+  }
+
   /** Cursor / touch point on the ground (wildlife flees from it). */
   readonly cursorWorld = new THREE.Vector3();
   cursorActive = false;
@@ -1418,6 +1454,14 @@ export class Game {
     this.colony.update(dt);
     const fire = this.buildings.list.find((b) => b.key === 'campfire');
     this.jaguars.update(dt, this.time.isNight, fire ? { x: fire.x, z: fire.z } : null);
+    // Sanctuary: once no jaguar has prowled near for a few seconds, sound the all clear.
+    if (this.hallAlert) {
+      this.hallClear = this.jaguarThreat() ? 0 : this.hallClear + dt;
+      if (this.hallClear > 4) {
+        this.hallAlert = false;
+        this.ui?.toast('All clear: the jaguar has gone. Villagers are coming out of sanctuary.');
+      }
+    }
     this.dogs.update(dt, this.time.isNight);
     this.waterBirds.update(dt, this.time.hour);
     this.turtles.people = this.colony.grid;
