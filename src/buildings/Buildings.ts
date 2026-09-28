@@ -344,7 +344,7 @@ export class BuildingSystem {
       if (farm) w.soil[i] = 1;
     }
     this.eco.add('wood', this.veg.clearArea(cx, cz, b.w, b.d));
-    if (b.key === 'butcher') [b.penX, b.penZ] = b.local(sw / 4 + 0.15, 0.1);
+    this.setPen(b);
     b.group.position.set(b.x, b.y, b.z);
     b.group.rotation.y = (rot * Math.PI) / 2;
     const e = new THREE.Euler(0, (rot * Math.PI) / 2, 0);
@@ -383,10 +383,7 @@ export class BuildingSystem {
       const [rx, rz] = b.local(0.5, 0.4);
       b.door = { x: rx, z: rz };
     }
-    if (key === 'butcher') {
-      // The pen is on the local +x half.
-      [b.penX, b.penZ] = b.local(def.size[0] / 4 + 0.15, 0.1);
-    }
+    this.setPen(b);
     this.buildVisuals(b);
     this.list.push(b);
     this.group.add(b.group);
@@ -485,6 +482,13 @@ export class BuildingSystem {
 
   private sharedGeo(g: THREE.BufferGeometry): boolean {
     return g === this.flameGeo || g === this.bellGeo || this.logGeos.includes(g) || this.stoneGeos.includes(g) || this.basketGeos.includes(g) || [...this.cropGeos.values()].includes(g);
+  }
+
+  /** Where a building's animal pen is: the butcher's on its +x half, the vegetable farm's chicken run in its front corner. */
+  private setPen(b: Building): void {
+    const [sw, sd] = b.def.size;
+    if (b.key === 'butcher') [b.penX, b.penZ] = b.local(sw / 4 + 0.15, 0.1);
+    else if (b.key === 'farm') [b.penX, b.penZ] = b.local(...models.FARM_PEN.centre(sw, sd));
   }
 
   private modelFor(b: Building): models.BuildingModel {

@@ -484,6 +484,24 @@ export function farmModel(w: number, d: number, kind: 'veg' | 'maize' = 'veg'): 
     b.add(P.cone(0.46, 0.38, 10), { color: thatchColor, leaf: 0.2 }, M.t(gx, 1.0, gz));
     for (let k = 0; k < 5; k++) b.add(P.cyl(0.035, 0.03, 0.12, 5), { color: k % 2 ? K.gold : c(0xd88a2a) }, M.t(gx + 0.36 + (k % 3) * 0.07, 0.07, gz + 0.1 + Math.floor(k / 3) * 0.08, Math.PI / 2, k, 0));
   }
+  if (kind === 'veg') {
+    // Chicken run: straw on the ground, a low inner fence, and a little thatched coop on stilts.
+    const S = FARM_PEN.size, [px, pz] = FARM_PEN.centre(w, d);
+    const x0 = px - S / 2, z0 = pz - S / 2;
+    b.add(P.box(S - 0.06, 0.02, S - 0.06), { color: c(0xc9a45c) }, M.t(px, 0.01, pz));
+    for (const [ax, az, bx, bz] of [[x0, z0, x0 + S, z0], [x0, z0, x0, z0 + S]] as const) {
+      const len = Math.hypot(bx - ax, bz - az), a = Math.atan2(bx - ax, bz - az);
+      for (const y of [0.1, 0.2]) b.add(P.box(0.022, 0.022, len), { color: K.timberDark }, M.t((ax + bx) / 2, y, (az + bz) / 2, 0, a, 0));
+      for (let k = 0; k <= 3; k++) b.add(P.cyl(0.02, 0.024, 0.26, 4), { color: K.timber }, M.t(ax + ((bx - ax) * k) / 3, 0.13, az + ((bz - az) * k) / 3));
+    }
+    const hx = px + S / 2 - 0.26, hz = pz - S / 2 + 0.24;
+    for (const [ox, oz] of [[-0.14, -0.12], [0.14, -0.12], [-0.14, 0.12], [0.14, 0.12]]) b.add(P.cyl(0.018, 0.018, 0.14, 4), { color: K.timberDark }, M.t(hx + ox, 0.07, hz + oz));
+    b.add(P.box(0.34, 0.2, 0.3), { color: K.adobe }, M.t(hx, 0.24, hz));
+    b.add(P.box(0.1, 0.1, 0.02), { color: K.door }, M.t(hx - 0.05, 0.21, hz + 0.155));
+    b.add(P.cone(0.3, 0.2, 4), { color: thatchColor, leaf: 0.2 }, M.t(hx, 0.44, hz, 0, Math.PI / 4, 0));
+    b.add(P.box(0.05, 0.015, 0.18), { color: K.timber }, M.t(hx - 0.05, 0.1, hz + 0.24, -0.5, 0, 0));
+    b.add(P.cyl(0.07, 0.06, 0.04, 8), { color: K.terracotta }, M.t(px - 0.2, 0.03, pz + 0.25));
+  }
   // Shelter in a corner.
   const sx = kind === 'maize' ? hw - 0.45 : -hw + 0.45, sz = -hd + 0.45;
   for (const [ox, oz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) b.add(P.cyl(0.03, 0.03, 0.75, 5), { color: K.timber }, M.t(sx + ox, 0.37, sz + oz));
@@ -516,6 +534,14 @@ interface CropRow {
 const VEG_ORDER: VegKind[] = ['bean', 'squash', 'chilli', 'bean', 'tomato', 'amaranth'];
 const VEG_SPACING: Record<VegKind, number> = { bean: 0.46, squash: 0.56, chilli: 0.34, tomato: 0.4, amaranth: 0.3 };
 
+/** The vegetable farm's chicken run: a square this size in the front right corner (local), and its centre. */
+export const FARM_PEN = {
+  size: 1.05,
+  centre(w: number, d: number): [number, number] {
+    return [w / 2 - 0.1 - FARM_PEN.size / 2, d / 2 - 0.1 - FARM_PEN.size / 2];
+  },
+};
+
 /** Vegetable rows, shared by the farm's soil ridges and its crops. Keeps the shelter and scarecrow corners clear. */
 function vegLayout(w: number, d: number): CropRow[] {
   const rows = Math.max(3, Math.floor(w * 1.5));
@@ -529,6 +555,8 @@ function vegLayout(w: number, d: number): CropRow[] {
     for (let k = 0; k <= n; k++) {
       const z = -(n * sp) / 2 + k * sp;
       if (z < -d / 2 + 1.1 && (x < -w / 2 + 1.1 || x > w / 2 - 0.9)) continue;
+      // The chicken run in the front right corner.
+      if (z > d / 2 - FARM_PEN.size - 0.15 && x > w / 2 - FARM_PEN.size - 0.15) continue;
       zs.push(z);
     }
     out.push({ x, zs, kind });
