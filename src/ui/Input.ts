@@ -35,6 +35,8 @@ interface PointerInfo {
  * Mobile: one finger pan (or sculpt with a sculpt tool), pinch zoom, two-finger twist rotate, tap.
  */
 export class Input {
+  enabled = true;
+  clear(): void { this.keys.clear(); this.pointers.clear(); this.gesture = null; this.dragging = 'none'; this.hover.active = false; }
   private pointers = new Map<number, PointerInfo>();
   private keys = new Set<string>();
   private dragging: 'none' | 'pan' | 'tool' | 'rotate' | 'orbit' = 'none';
@@ -58,6 +60,7 @@ export class Input {
     el.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
     el.addEventListener('pointerleave', () => (this.hover.active = false));
     window.addEventListener('keydown', (e) => {
+      if (!this.enabled) return;
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       this.keys.add(e.key.toLowerCase());
       this.h.onKey(e);
@@ -67,6 +70,7 @@ export class Input {
   }
 
   private down = (e: PointerEvent) => {
+    if (!this.enabled) return;
     this.h.onInteract();
     try {
       this.el.setPointerCapture?.(e.pointerId);
@@ -103,6 +107,7 @@ export class Input {
   }
 
   private move = (e: PointerEvent) => {
+    if (!this.enabled) return;
     if (e.pointerType === 'mouse' || this.pointers.size === 0) {
       this.hover = { x: e.clientX, y: e.clientY, active: true };
       this.h.onHover(e.clientX, e.clientY);
@@ -139,6 +144,7 @@ export class Input {
   };
 
   private up = (e: PointerEvent) => {
+    if (!this.enabled) return;
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     this.pointers.delete(e.pointerId);
@@ -160,6 +166,7 @@ export class Input {
   };
 
   private wheel = (e: WheelEvent) => {
+    if (!this.enabled) return;
     e.preventDefault();
     this.h.onInteract();
     const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
@@ -169,6 +176,7 @@ export class Input {
 
   /** Continuous keyboard input (WASD / arrows / Q E). */
   update(dt: number): void {
+    if (!this.enabled) return;
     const k = this.keys;
     let f = 0, r = 0;
     if (k.has('w') || k.has('arrowup')) f += 1;

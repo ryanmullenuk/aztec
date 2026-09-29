@@ -174,7 +174,11 @@ export class UI {
     const eye = el('button', 'ib', ICONS.eye);
     eye.title = 'Hide the interface: just the island (V)';
     eye.onclick = () => this.toggleZen(true);
-    tr.append(over, this.muteBtn, gear, eye);
+    const explore = el('button', 'ib', ICONS.people);
+    explore.title = 'Explore at islander eye level';
+    explore.setAttribute('aria-label', 'Explore island');
+    explore.onclick = () => this.game.toggleExplore();
+    tr.append(over, this.muteBtn, gear, eye, explore);
     this.root.appendChild(tr);
     // Shown on its own while the interface is hidden: brings everything back.
     this.zenBtn = el('button', 'ib zen-eye', ICONS.eye);
@@ -905,7 +909,7 @@ export class UI {
         ${this.bar('Rest', isl.rest, isl.rest < 0.25 ? 'low' : '')}
         ${this.bar('Happiness', isl.happy, isl.happy > 0.6 ? 'good' : '')}
         <div class="actions">
-          <button class="btn small" data-a="follow">${ICONS.follow} ${g.followId === isl.id ? 'Stop following' : 'Follow'}</button>
+          <button class="btn small" data-a="explore">Explore POV</button><button class="btn small" data-a="follow">${ICONS.follow} ${g.followId === isl.id ? 'Stop following' : 'Follow'}</button>
           ${isl.manualRole ? '<button class="btn small" data-a="auto">Auto job</button>' : ''}
         </div>
         ${isl.child ? '' : '<p class="muted small">Tip: click a building, tree, rock or fruit bush to give them that job.</p>'}`;
@@ -1054,6 +1058,7 @@ export class UI {
     if (islId !== undefined) {
       const isl = g.colony.byId(islId);
       if (!isl) return;
+      if (a === 'explore') g.toggleExplore();
       if (a === 'follow') g.followId = g.followId === isl.id ? -1 : isl.id;
       if (a === 'auto') {
         isl.manualRole = false;

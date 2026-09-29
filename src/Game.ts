@@ -1,3 +1,4 @@
+import { Explore } from './render/Explore';
 import * as THREE from 'three';
 import type { Where } from './ui/where';
 import { PATHS, BUILDINGS, BuildingKey, CAMERA, ISLANDER, MILESTONES, POWERS, PresetName, RENDER, SAVE, isFarm, SETTLERS } from './config';
@@ -148,6 +149,7 @@ export class Game {
   tool: ToolId = 'select';
   placing: BuildingKey | null = null;
   private placeRot = 0;
+  explorer?: Explore;
   selectedIslander = -1;
   selectedBuilding = -1;
   /** Selected land animal (index into wildlife.animals.list), or -1. */
@@ -697,7 +699,7 @@ export class Game {
     this.powers.randomWeather = s.weather;
     if (!s.weather && was.weather) this.powers.clearWeather();
     this.applied = { ...s };
-    this.post.dofEnabled = s.dof;
+    this.post.dofEnabled = s.dof && !this.explorer?.active;
     this.post.dofStrength = s.dofStrength;
     this.onSettingsChanged?.(s);
     try {
@@ -744,6 +746,21 @@ export class Game {
   toggleMute(): void {
     this.settings.muted = !this.settings.muted;
     this.applySettings();
+  }
+
+  toggleExplore(): void {
+    this.explorer ??= new Explore(this.rig, this.world, () => this.toggleExplore());
+    if (this.explorer.active) {
+      this.explorer.exit(); this.input.clear(); this.input.enabled = true;
+      this.post.dofEnabled = this.settings.dof;
+      return;
+    }
+    const person = this.colony.byId(this.selectedIslander) ?? this.colony.list.find(i => !i.child && !i.hidden);
+    if (!person) { this.ui.toast('Wait for an islander to arrive before exploring.'); return; }
+    if (!this.explorer.enter(person.x, person.z)) { this.ui.toast('No open ground nearby to start exploring.'); return; }
+    this.setTool('select'); this.select(null); this.followId = -1; this.introFollow = false; this.rotateHold = 0;
+    this.input.clear(); this.input.enabled = false; this.cursorActive = false;
+    this.post.dofEnabled = false;
   }
 
   // ---------------- Tools & selection ----------------
@@ -1545,7 +1562,8 @@ export class Game {
         this.rig.goal.z = f.z;
       } else if (!f) this.followId = -1;
     }
-    this.rig.update(realDt);
+    if (this.explorer?.active) this.explorer.update(realDt);
+    else this.rig.update(realDt);
     // What the camera sees this frame: off-screen entities skip posing and drawing.
     View.update(this.rig.camera);
     this.breeze.update(realDt, this.rig.target, this.rig.viewRadius);

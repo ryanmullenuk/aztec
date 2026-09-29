@@ -527,3 +527,16 @@ button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-high
 }
 .obtn.sm { padding: 6px 10px; font-size: 11px; }
 .obtn.sm svg { width: 15px; height: 15px; }
+
+/* Exploration is navigation only: the normal action HUD is unavailable. */
+body.exploring #hud { visibility: hidden; pointer-events: none; }
+body.exploring #hud * { pointer-events: none !important; }
+.explore-ui { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+.explore-ui button { pointer-events: auto; touch-action: none; user-select: none; }
+.explore-heading { position: absolute; top: calc(12px + var(--safe-t)); left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; color: #ffe08a; text-shadow: 0 2px 4px #000; }
+.explore-pad { position: absolute; bottom: calc(20px + var(--safe-b)); left: 20px; display: grid; grid-template-columns: repeat(3, 56px); gap: 8px; }
+.explore-pad button, .explore-look button { min-height: 52px; border: 1px solid #e8b84a; border-radius: 12px; background: rgba(22,20,28,0.85); color: #ffe08a; font-size: 22px; }
+.explore-pad [data-dir="up"] { grid-column: 2; }
+.explore-pad [data-dir="left"] { grid-column: 1; }
+.explore-look { position: absolute; bottom: calc(20px + var(--safe-b)); right: 20px; display: grid; gap: 8px; }
+.explore-look button { font-size: 13px; padding: 8px; }
