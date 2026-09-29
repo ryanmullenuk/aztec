@@ -63,35 +63,24 @@ html, body {
 }
 #hud > * { pointer-events: auto; }
 
+/* Colour the entire launch surface, including any iOS area outside the visual viewport. */
+html.splash-open, html.splash-open body { background: #007d83; }
 #loading {
-  cursor: pointer;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  cursor: pointer; position: fixed; inset: 0;
   height: 100dvh;
-  height: var(--app-h, 100dvh);
-  display: grid;
-  place-items: center;
-  background: #007d83;
-  z-index: 50;
-  transition: opacity 0.9s ease;
-  overflow: hidden;
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  background: #007d83; z-index: 50; overflow: hidden;
+  padding-top: var(--safe-t);
 }
-/* No blurred duplicate: keep all of the poster inside the phone's safe area. */
+/* Contain preserves the source ratio. The controls occupy their own row, never the art. */
 .splash-art {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  padding: var(--safe-t) env(safe-area-inset-right, 0px) var(--safe-b) env(safe-area-inset-left, 0px);
-  object-fit: fill; object-position: center;
+  display: block; min-height: 0; width: 100%; height: 100%;
+  object-fit: contain; object-position: center bottom;
 }
 .splash-ui {
-  position: absolute; left: 0; right: 0;
-  bottom: calc(6% + var(--safe-b));
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-}
-/* Preserve the portrait composition on tablets and landscape displays. */
-@media (min-aspect-ratio: 3/4) {
-  .splash-art { object-fit: contain; }
+  padding: 10px 16px max(16px, var(--safe-b));
+  background: #007d83;
 }
 .splash-ui .loading-sub { margin: 0; color: #ffe08a; font-size: clamp(11px, 2.8vw, 14px); text-shadow: 0 1px 4px #004e53; }
 .splash-hint {
@@ -109,7 +98,7 @@ html, body {
 .play:focus-visible { outline: 2px solid #fff4c2; outline-offset: 5px; }
 .play:active { transform: translateY(2px); }
 @media (max-height: 500px) and (orientation: landscape) {
-  .splash-ui { bottom: max(4%, var(--safe-b)); gap: 4px; }
+  .splash-ui { gap: 4px; padding-top: 6px; padding-bottom: max(8px, var(--safe-b)); }
   .play { min-height: 40px; padding: 5px 30px; font-size: 18px; }
   .splash-hint { margin-top: 0; font-size: 9px; width: 200px; }
 }

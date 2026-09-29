@@ -50,6 +50,7 @@ async function boot(): Promise<void> {
     enterFullscreen();
     game.audio.unlock();
     loading?.classList.add('hidden');
+    document.documentElement.classList.remove('splash-open');
   };
   if (btn) {
     btn.classList.remove('hidden');
