@@ -405,8 +405,9 @@ export class Colony {
   // ---------------- Housing & births ----------------
 
   private assignHousing(): void {
-    for (const b of this.bld.list) b.residents = b.residents.filter((id) => this.byId(id)?.home === b.id);
-    const homeless = () => this.list.filter((i) => i.home < 0 || !this.bld.byId(i.home)?.complete);
+    // Beds are for adults; each house's one child lives there too without taking a bed.
+    for (const b of this.bld.list) b.residents = b.residents.filter((id) => { const r = this.byId(id); return !!r && r.home === b.id && !r.child; });
+    const homeless = () => this.list.filter((i) => !i.child && (i.home < 0 || !this.bld.byId(i.home)?.complete));
     for (const i of homeless()) i.home = -1;
     const move = (isl: Islander, b: Building) => {
       isl.home = b.id;
@@ -472,21 +473,37 @@ export class Colony {
       }
       if (best) move(isl, best);
     }
+    // 3) Children: one per house. A child whose house is gone moves to the nearest house without one.
+    const isHouse = (b: Building | undefined) => !!b && b.complete && (b.key === 'hut' || b.key === 'home');
+    for (const kid of this.list) {
+      if (!kid.child || isHouse(this.bld.byId(kid.home))) continue;
+      let best: Building | null = null, bd = Infinity;
+      for (const b of this.bld.list) {
+        if (!isHouse(b) || this.list.some((i) => i.child && i.home === b.id)) continue;
+        const d = (b.x - kid.x) ** 2 + (b.z - kid.z) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = b;
+        }
+      }
+      kid.home = best ? best.id : -1;
+    }
   }
 
+  /** Dawn: a couple in a house without a child may have one (one child per house, huts too). */
   private dawn(): void {
-    for (const b of this.bld.of('home')) {
+    for (const b of this.bld.list) {
+      if (!b.complete || (b.key !== 'hut' && b.key !== 'home')) continue;
       if (this.list.length >= ISLANDER.max) return;
-      const res = b.residents.map((id) => this.byId(id)).filter((i): i is Islander => !!i);
-      const adults = res.filter((i) => !i.child);
-      if (res.length >= b.housing) continue;
+      if (this.list.some((i) => i.child && i.home === b.id)) continue;
+      const adults = b.residents.map((id) => this.byId(id)).filter((i): i is Islander => !!i && !i.child);
       if (!adults.some((i) => i.gender === 'm') || !adults.some((i) => i.gender === 'f')) continue;
       if (this.eco.food < ISLANDER.birthFoodMin) continue;
       if (this.rnd() > ISLANDER.birthChancePerDay) continue;
       const g = this.rnd() < 0.5 ? 'm' : 'f';
       const kid = this.spawn(g, b.door.x, b.door.z, true);
+      // The child lives here but takes no bed.
       kid.home = b.id;
-      b.residents.push(kid.id);
       const parent = adults.find((a) => a.gender === 'f')!;
       kid.skin = parent.skin;
       this.hooks.notify?.(`${kid.name} was born to ${parent.name}!`, () => (kid.hidden ? null : { x: kid.x, z: kid.z }));
@@ -526,7 +543,8 @@ export class Colony {
           return;
         }
       }
-      return this.wander(isl, home ? home.door.x : isl.x, home ? home.door.z : isl.z, 5);
+      // Children never work: they play around the village, a little further from home.
+      return this.wander(isl, home ? home.door.x : isl.x, home ? home.door.z : isl.z, 9);
     }
     if (isl.hunger < ISLANDER.eatThreshold && this.eco.food >= 1) {
       const store = this.bld.nearestStore(isl.x, isl.z, true);
@@ -1821,11 +1839,6 @@ export class Colony {
           isl.sleeping = false;
           isl.hidden = false;
         }
-      }
-      if (isl.child && isl.age > ISLANDER.childGrowDays * 600) {
-        isl.child = false;
-        isl.role = 'idle';
-        this.hooks.notify?.(`${isl.name} has grown up.`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
       }
       if (isl.happy > ISLANDER.happyThreshold) happy++;
       if (!isl.task) {
