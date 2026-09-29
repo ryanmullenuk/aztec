@@ -97,7 +97,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Islanders decide for themselves when their own job has nothing to do: they pick fruit, spear fish from the shore, cut wood or quarry stone, whichever the tribe needs most.
 - Walking and running swing the hips and drop them on the stepping side, with the shoulders counter-rotating.
 - A* pathfinding that climbs terraces and prefers worn paths.
-- Couples in Homes have children, who grow up after a few days. Islanders have Nahuatl-style names.
+- A couple in any hut or home may have one child (one per house); children play around the village and never work. Up to 100 adults live on the island. About one adult in five has the elder look (grey hair; white hair and beard on the men); nobody ages. Islanders have Nahuatl-style names.
 
 **Buildings**
 - Hut, Home, Temple (three tiers up to the Great Pyramid), Farm, Butcher, Wood Store, Grain Store, War Room and Jetty.
