@@ -83,6 +83,20 @@ const waterFrag = /* glsl */ `
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hsh(i), hsh(i + vec2(1.0, 0.0)), u.x), mix(hsh(i + vec2(0.0, 1.0)), hsh(i + vec2(1.0, 1.0)), u.x), u.y);
   }
+  /** Tiny plankton lights: irregular positions, soft halos and independently pulsing cores.
+   * Analytic pixel coverage fades specks at distance rather than letting them shimmer. */
+  float plankton(vec2 p, float t, float pixelWidth) {
+    vec2 cell = floor(p);
+    vec2 centre = 0.25 + 0.5 * vec2(hsh(cell), hsh(cell + 37.4));
+    float d = length(fract(p) - centre);
+    float phase = hsh(cell + 81.7) * 6.2831853;
+    float pulse = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(t * 1.3 + phase), 3.0);
+    float aa = max(0.012, pixelWidth);
+    float core = 1.0 - smoothstep(max(0.0, 0.065 - aa), 0.065 + aa, d);
+    core *= 1.0 - smoothstep(0.08, 0.32, pixelWidth);
+    float halo = (1.0 - smoothstep(0.05, 0.23, d)) * 0.12;
+    return (core + halo) * pulse * step(0.32, hsh(cell + 19.2));
+  }
   vec2 warpC(vec2 p, float t) {
     return vec2(vnoise(p * 0.35 + vec2(t * 0.18, 0.0)), vnoise(p * 0.35 + vec2(2.7, t * 0.15))) * 1.6;
   }
@@ -308,6 +322,26 @@ const waterFrag = /* glsl */ `
     foam *= smoothstep(0.2, 0.5, vnoise(p * 2.6 + vec2(t * 0.3, -t * 0.2)) + shore * 0.8 + rock * 0.4 + surfFoam * 1.6);
     foam *= inside;
     lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
+
+    // Living blue light in the sea only. Reuse the live seabed/shore texture so sculpting
+    // terrain also moves the habitat; wet sand, rivers and waterfall pools never glow.
+    // uDay retains a 0.25 moonlight floor, even at midnight.
+    float bioNight = 1.0 - smoothstep(0.28, 0.58, uDay);
+    if (uSwash > 0.5 && bioNight > 0.001) {
+      vec2 drift = p + vec2(t * 0.045, -t * 0.032);
+      vec2 curl = vec2(vnoise(drift * 0.09), vnoise(drift * 0.09 + 17.0)) - 0.5;
+      vec2 life = drift + curl * 3.5;
+      float patches = smoothstep(0.48, 0.72, vnoise(life * 0.15));
+      float habitat = smoothstep(0.12, 0.65, depth)
+        * (1.0 - smoothstep(14.0, 36.0, sd)) * inside;
+      float specks = plankton(life * 2.8, t, fw * 2.8);
+      float flecks = plankton(life * vec2(1.1, 2.4) + 41.0, t * 0.7, fw * 2.4);
+      // Waves excite the algae in short glowing trails within each patch.
+      float excited = 0.55 + 0.45 * pow(0.5 + 0.5 * sin(surfP - sd * 1.8), 4.0);
+      float glow = patches * habitat * bioNight;
+      lit += vec3(0.015, 0.42, 1.1) * glow * (0.13 + excited * (specks * 2.8 + flecks));
+      lit += vec3(0.02, 0.32, 0.7) * glow * foam * 0.65;
+    }
 
     // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
     float alpha = mix(0.22, 0.6, smoothstep(0.0, 0.9, cdepth));
