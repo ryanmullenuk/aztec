@@ -206,7 +206,14 @@ export function applyRest(g: Game, d: SaveData): void {
   if (g.powers && d.weather.state === 'storm') g.powers.startStorm();
 }
 
+/** Set when the game failed to start: a half-loaded island must never overwrite the real save. */
+let savesBlocked = false;
+export function blockSaves(): void {
+  savesBlocked = true;
+}
+
 export function writeSave(g: Game): boolean {
+  if (savesBlocked) return false;
   try {
     localStorage.setItem(SAVE.key, JSON.stringify(serialize(g)));
     return true;
