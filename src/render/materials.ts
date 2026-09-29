@@ -385,15 +385,61 @@ function peopleColours(shader: THREE.WebGLProgramParametersWithUniforms): void {
         vColor.rgb *= mix(vec3(1.0), iAccent, isAccent);`);
 }
 
-export function peopleMaterial(): THREE.MeshStandardMaterial {
-  if (people) return people;
+function makePeopleMaterial(): THREE.MeshStandardMaterial {
   const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }), 0.45);
   const base = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
     base.call(mat, shader, r);
     peopleColours(shader);
   };
-  people = mat;
+  return mat;
+}
+
+export function peopleMaterial(): THREE.MeshStandardMaterial {
+  if (people) return people;
+  people = makePeopleMaterial();
+  return people;
+}
+
+/** The instanced-animal material with a night glow, for sea creatures (land animals share peopleMaterial). */
+let seaLife: THREE.MeshStandardMaterial | null = null;
+export function seaLifeMaterial(): THREE.MeshStandardMaterial {
+  seaLife ??= patchBioGlow(makePeopleMaterial(), 'sealife', BIO_GLOW.turtle);
+  return seaLife;
+}
+
+/**
+ * Night-time bioluminescence on sea life: after dark a creature gives off a soft blue light, its
+ * outline brightest (a Fresnel rim), so fish, rays and turtles read as glowing shapes under the
+ * water and the bloom haloes them. Nothing shows by day.
+ */
+export const BIO_GLOW = {
+  fish: { color: 0x2fa8ff, body: 0.65, rim: 1.8 },
+  ray: { color: 0x3aa2ff, body: 0.45, rim: 5.0 },
+  turtle: { color: 0x3fb4ff, body: 0.4, rim: 4.0 },
+};
+export function patchBioGlow<T extends THREE.MeshStandardMaterial>(mat: T, key: string, g: { color: number; body: number; rim: number }): T {
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey.bind(mat);
+  const col = { value: new THREE.Color(g.color) };
+  const k = { value: new THREE.Vector2(g.body, g.rim) };
+  mat.onBeforeCompile = (shader, r) => {
+    prev.call(mat, shader, r);
+    shader.uniforms.uBioNight = FX.uNight;
+    shader.uniforms.uBioTime = FX.uTime;
+    shader.uniforms.uBioCol = col;
+    shader.uniforms.uBioK = k;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uBioNight;\nuniform float uBioTime;\nuniform vec3 uBioCol;\nuniform vec2 uBioK;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          float bioRim = pow(clamp(1.0 - abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 2.2);
+          // A slow breathing shimmer so the glow feels alive.
+          float bioPulse = 0.85 + 0.15 * sin(uBioTime * 1.7 + vViewPosition.x * 3.0 + vViewPosition.y * 2.0);
+          totalEmissiveRadiance += uBioCol * smoothstep(0.35, 0.85, uBioNight) * (uBioK.x + uBioK.y * bioRim) * bioPulse;
+        }`);
+  };
+  mat.customProgramCacheKey = () => prevKey() + '|bio-' + key;
   return mat;
 }
 
@@ -503,5 +549,5 @@ export function fishMaterial(rate: number, params: THREE.MeshStandardMaterialPar
     }
   };
   mat.customProgramCacheKey = () => (surfaceY !== undefined ? 'fish-surface' : 'fish');
-  return mat;
+  return patchBioGlow(mat, 'fish', BIO_GLOW.fish);
 }
