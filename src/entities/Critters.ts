@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CRITTERS } from '../config';
 import { ColorFn, GeoBuilder, M, P, facet, tube } from '../render/GeoBuilder';
-import { FX } from '../render/materials';
+import { BIO_GLOW, FX, patchBioGlow } from '../render/materials';
 import { View } from '../render/View';
 import { RNG } from '../world/rng';
 import { SpatialHash } from '../world/SpatialHash';
@@ -277,6 +277,7 @@ export class Critters {
     this.rayAnim = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, this.rays.length) * 3), 3);
     this.rayAnim.setUsage(THREE.DynamicDrawUsage);
     rg.setAttribute('iRay', this.rayAnim);
+    patchBioGlow(rayMat, 'ray', BIO_GLOW.ray);
     this.rayMesh = new THREE.InstancedMesh(rg, rayMat, Math.max(1, this.rays.length));
     this.rayMesh.frustumCulled = false;
     this.rayMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

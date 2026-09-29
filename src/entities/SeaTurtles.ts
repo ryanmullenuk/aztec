@@ -7,6 +7,7 @@ import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
 import { Islander } from './Islander';
 import { QuadMeshes } from './quadRig';
+import { seaLifeMaterial } from '../render/materials';
 
 type TState = 'rest' | 'crawl' | 'enter' | 'swim' | 'breathe' | 'approach' | 'exit';
 
@@ -243,6 +244,8 @@ export class SeaTurtles {
     this.meshes.add('flipL', mirrorX(bladeF), n);
     this.meshes.add('rearR', bladeR, n);
     this.meshes.add('rearL', mirrorX(bladeR), n);
+    // Turtles glow softly at night (their own material: land animals share the plain one).
+    for (const c of this.meshes.group.children) (c as THREE.Mesh).material = seaLifeMaterial();
   }
 
   private findBeaches(): void {
