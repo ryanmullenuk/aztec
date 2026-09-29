@@ -590,7 +590,7 @@ export class UI {
       <h4>Tips</h4><ul>
         <li>Buildings need flat land. Flatten terraces with the sculpt tools.</li>
         <li>Select an islander, then click a building, tree, rock or fruit bush to give them that job.</li>
-        <li>Homes let couples raise children. Temples upgrade twice into the Great Pyramid.</li>
+        <li>A couple in any house may have one child, who plays around the village (children never work). The island holds up to 100 adults. Temples upgrade twice into the Great Pyramid.</li>
         <li>A Jetty builds fishing boats. Fish stocks regrow slowly, so spread your fishing.</li>
         <li>Across the strait to the east lies a wild island with thick jungle, more fruit and most of the game. Build a <b>Rope bridge</b> (Build menu) across the shallows to reach it.</li>
         <li>New settlers arrive by canoe when you have spare beds and food.</li>
@@ -981,7 +981,11 @@ export class UI {
     let body = '';
     if (!b.complete) body += `${this.bar(`Building ${Math.round(b.progress * 100)}%`, b.progress, 'good')}<div class="kv"><span>Builders</span><b>${b.builders.size} / ${b.def.builders}</b></div>`;
     else if (b.upgrading) body += `${this.bar(`Upgrading ${Math.round(b.progress * 100)}%`, b.progress, 'good')}`;
-    if (b.complete && b.def.housing) body += `<div class="kv"><span>Residents</span><b>${b.residents.map((id) => g.colony.byId(id)?.name).filter(Boolean).join(', ') || 'Empty'} (${b.residents.length}/${b.housing})</b></div>`;
+    if (b.complete && b.def.housing) {
+      body += `<div class="kv"><span>Residents</span><b>${b.residents.map((id) => g.colony.byId(id)?.name).filter(Boolean).join(', ') || 'Empty'} (${b.residents.length}/${b.housing})</b></div>`;
+      const kid = g.colony.list.find((i) => i.child && i.home === b.id);
+      body += `<div class="kv"><span>Child</span><b>${kid ? kid.name : 'None yet'}</b></div>`;
+    }
     const workers = g.colony.list.filter((i) => i.workplace === b.id && b.complete);
     if (b.complete && b.def.workers) body += `<div class="kv"><span>Workers</span><b>${workers.map((w) => w.name).join(', ') || 'None yet'}</b></div>`;
     if (b.key === 'smokehouse' && b.complete) body += `<div class="kv"><span>Smoking</span><b>${b.tendTimer > 0 ? 'Fire lit, racks full' : g.eco.res.fish >= SMOKE.input || g.eco.res.meat >= SMOKE.input ? 'Waiting for a keeper' : 'Needs raw fish or meat'}</b></div><p class="muted small">${SMOKE.input} raw fish or meat + ${SMOKE.wood} wood → ${SMOKE.output} smoked.</p>`;
