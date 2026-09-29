@@ -331,16 +331,26 @@ const waterFrag = /* glsl */ `
       vec2 drift = p + vec2(t * 0.045, -t * 0.032);
       vec2 curl = vec2(vnoise(drift * 0.09), vnoise(drift * 0.09 + 17.0)) - 0.5;
       vec2 life = drift + curl * 3.5;
-      float patches = smoothstep(0.48, 0.72, vnoise(life * 0.15));
+      // Smaller, scattered colonies rather than a solid luminous blanket.
+      float patches = smoothstep(0.57, 0.8, vnoise(life * 0.28));
+      patches *= smoothstep(0.28, 0.65, vnoise(life * 0.65 + 9.3));
       float habitat = smoothstep(0.12, 0.65, depth)
         * (1.0 - smoothstep(14.0, 36.0, sd)) * inside;
       float specks = plankton(life * 2.8, t, fw * 2.8);
       float flecks = plankton(life * vec2(1.1, 2.4) + 41.0, t * 0.7, fw * 2.4);
-      // Waves excite the algae in short glowing trails within each patch.
-      float excited = 0.55 + 0.45 * pow(0.5 + 0.5 * sin(surfP - sd * 1.8), 4.0);
+      // Narrow moving wave crests carry the bright light; the colony itself is barely visible.
+      float bioPhase = surfP - sd * 2.1 + vnoise(p * 0.32) * 1.4;
+      float crestDistance = abs(sin(bioPhase * 0.5));
+      float crestAA = max(0.012, fwidth(bioPhase) * 0.5);
+      float waveCore = 1.0 - smoothstep(max(0.0, 0.065 - crestAA), 0.065 + crestAA, crestDistance);
+      waveCore *= 1.0 - smoothstep(0.15, 0.65, crestAA);
+      float waveHalo = (1.0 - smoothstep(0.055, 0.26, crestDistance)) * 0.28;
+      float brokenTrail = smoothstep(0.22, 0.65, vnoise(life * 1.15 + vec2(t * 0.12, 0.0)));
       float glow = patches * habitat * bioNight;
-      lit += vec3(0.015, 0.42, 1.1) * glow * (0.13 + excited * (specks * 2.8 + flecks));
-      lit += vec3(0.02, 0.32, 0.7) * glow * foam * 0.65;
+      float waveLight = (waveCore * 3.8 + waveHalo) * brokenTrail;
+      lit += vec3(0.015, 0.42, 1.1) * glow * (0.012 + specks * 0.55 + flecks * 0.18);
+      lit += vec3(0.08, 0.95, 2.4) * glow * waveLight;
+      lit += vec3(0.015, 0.4, 1.0) * glow * foam * waveCore * 0.45;
     }
 
     // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
