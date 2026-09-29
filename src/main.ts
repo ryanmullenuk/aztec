@@ -40,7 +40,7 @@ async function boot(): Promise<void> {
   game.start();
   document.addEventListener('fullscreenchange', () => game.resize());
   window.visualViewport?.addEventListener('resize', () => game.resize());
-  text('The island awaits');
+  document.getElementById('loading-text')?.classList.add('hidden');
   const btn = document.getElementById('play-btn');
   const loading = document.getElementById('loading');
   let entered = false;
