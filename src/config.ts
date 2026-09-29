@@ -192,7 +192,12 @@ export const VEG = {
 export const ISLANDER = {
   startMale: 1,
   startFemale: 1,
-  max: 160,
+  /** Everyone on the island (adults plus one child per house), for drawing and safety. */
+  max: 200,
+  /** Adults: new settlers stop coming at this many, however many houses are built. */
+  maxAdults: 100,
+  /** Share of adults who wear the elder look (grey hair; beards on the men). A look only: nobody ages. */
+  elderShare: 0.2,
   walkSpeed: 1.25,
   /** Walking speed multiplier on stone paths. */
   pathSpeed: 1.3,
@@ -265,7 +270,7 @@ export interface BuildingDef {
 export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   campfire: { key: 'campfire', name: 'Tribal Fire', description: 'The heart of the tribe. Stores a little of everything.', size: [2, 2], cost: { wood: 0, stone: 0, belief: 0 }, buildTime: 1, builders: 1, workers: 0, placeable: false },
   hut: { key: 'hut', name: 'Hut', description: 'Level 1 house: a small adobe home for 2 islanders.', size: [2, 2], cost: { wood: 12, stone: 0, belief: 0 }, buildTime: 22, builders: 2, workers: 0, housing: 2, upgradeTo: 'home', placeable: true },
-  home: { key: 'home', name: 'Home', description: 'Adobe family house (level 2, 4 people). Upgrade it up to level 5 for 16. Couples living here have children.', size: [3, 3], cost: { wood: 26, stone: 14, belief: 0 }, buildTime: 45, builders: 3, workers: 0, housing: 4, maxTier: 4, placeable: true },
+  home: { key: 'home', name: 'Home', description: 'Adobe family house (level 2, 4 people). Upgrade it up to level 5 for 16. A couple in any house may have one child, who plays around the village.', size: [3, 3], cost: { wood: 26, stone: 14, belief: 0 }, buildTime: 45, builders: 3, workers: 0, housing: 4, maxTier: 4, placeable: true },
   temple: { key: 'temple', name: 'Temple', description: 'Stepped pyramid that generates Belief. Upgrade twice to raise the Great Pyramid.', size: [4, 4], cost: { wood: 20, stone: 36, belief: 20 }, buildTime: 70, builders: 4, workers: 2, maxTier: 3, placeable: true },
   farm: { key: 'farm', name: 'Vegetable Farm', description: 'Beans climbing poles, squash and chillies. Quick to grow; farmers also catch wild chickens for the pen.', size: [4, 4], cost: { wood: 16, stone: 0, belief: 0 }, buildTime: 25, builders: 2, workers: 2, placeable: true },
   maizefarm: { key: 'maizefarm', name: 'Maize Farm', description: 'A big field of tall maize with a granary crib. Slower to ripen but the richest grain harvest.', size: [5, 5], cost: { wood: 26, stone: 4, belief: 0 }, buildTime: 35, builders: 2, workers: 3, placeable: true },

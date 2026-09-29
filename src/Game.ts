@@ -646,8 +646,9 @@ export class Game {
     this.settlerTimer -= dt;
     if (this.settlerTimer > 0) return;
     this.settlerTimer = SETTLERS.interval[0] + this.rng.next() * (SETTLERS.interval[1] - SETTLERS.interval[0]);
-    const pop = this.colony.list.length + this.boats.arriving;
-    if (pop >= ISLANDER.max) return;
+    // Up to 100 adults (children don't count), however many houses there are.
+    const adults = this.colony.list.filter((i) => !i.child).length + this.boats.arriving;
+    if (adults >= ISLANDER.maxAdults || this.colony.list.length + this.boats.arriving >= ISLANDER.max) return;
     if (this.buildings.freeBeds - this.boats.arriving < SETTLERS.minFreeBeds || this.eco.food < SETTLERS.minFood) return;
     const fire = this.buildings.of('campfire')[0];
     const genders: ('m' | 'f')[] = this.rng.next() < 0.6 ? ['m', 'f'] : this.rng.next() < 0.5 ? ['m', 'm'] : ['f', 'f'];
