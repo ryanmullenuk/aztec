@@ -26,6 +26,7 @@ export const ICONS: Record<string, string> = {
   play: svg('<path d="M8 5.5v13l10.5-6.5z" stroke="currentColor" stroke-width="1.9"/>'),
   speed: svg('<path d="M3.5 6.5v11l8-5.5zM12.5 6.5v11l8-5.5z" stroke="#ffd257" stroke-width="1.8"/>'),
   gear: svg(`<path d="${gearPath()}" stroke="#e7ecf1" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="#ffd257" stroke-width="1.7"/>`),
+  person: svg('<circle cx="12" cy="5" r="3" stroke="#e7ecf1" stroke-width="1.8"/><path d="M8 21v-6H5.5v-2a6.5 6.5 0 0 1 13 0v2H16v6z" stroke="#ffd257" stroke-width="1.8"/>'),
   eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" stroke="#e7ecf1" stroke-width="1.8"/><circle cx="12" cy="12" r="3.2" stroke="#5fd4f2" stroke-width="1.8"/>'),
   sound: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" stroke="#e7ecf1" stroke-width="1.8"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke="#5fd4f2" stroke-width="1.8"/>'),
   mute: svg('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" stroke="#e7ecf1" stroke-width="1.8"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="#ff7a6b" stroke-width="1.8"/>'),

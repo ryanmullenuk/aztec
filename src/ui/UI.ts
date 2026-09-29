@@ -174,11 +174,13 @@ export class UI {
     const eye = el('button', 'ib', ICONS.eye);
     eye.title = 'Hide the interface: just the island (V)';
     eye.onclick = () => this.toggleZen(true);
-    const explore = el('button', 'ib', ICONS.people);
+    const explore = el('button', 'ib', ICONS.person);
     explore.title = 'Explore at islander eye level';
     explore.setAttribute('aria-label', 'Explore island');
     explore.onclick = () => this.game.toggleExplore();
-    tr.append(over, this.muteBtn, gear, eye, explore);
+    const views = el('div', 'view-controls');
+    views.append(eye, explore);
+    tr.append(over, this.muteBtn, gear, views);
     this.root.appendChild(tr);
     // Shown on its own while the interface is hidden: brings everything back.
     this.zenBtn = el('button', 'ib zen-eye', ICONS.eye);

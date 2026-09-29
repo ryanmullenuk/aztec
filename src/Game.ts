@@ -756,8 +756,7 @@ export class Game {
       return;
     }
     const person = this.colony.byId(this.selectedIslander) ?? this.colony.list.find(i => !i.child && !i.hidden);
-    if (!person) { this.ui.toast('Wait for an islander to arrive before exploring.'); return; }
-    if (!this.explorer.enter(person.x, person.z)) { this.ui.toast('No open ground nearby to start exploring.'); return; }
+    this.explorer.enter(person?.x ?? this.rig.cur.x, person?.z ?? this.rig.cur.z);
     this.setTool('select'); this.select(null); this.followId = -1; this.introFollow = false; this.rotateHold = 0;
     this.input.clear(); this.input.enabled = false; this.cursorActive = false;
     this.post.dofEnabled = false;
