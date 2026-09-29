@@ -16,6 +16,42 @@
     <meta name="apple-mobile-web-app-title" content="Aztlan Isle" />
     <meta name="application-name" content="Aztlan Isle" />
     <link rel="manifest" href="./manifest.webmanifest" />
+    <script>
+      // Each release replaces the game files, so a cached copy of this page (browsers keep it for a
+      // while, home-screen apps longer) can point at files that no longer exist. If one fails to
+      // load, or the game hasn't started after a while, fetch the page afresh once rather than hang
+      // on the splash; after that, offer a retry.
+      (function () {
+        var KEY = 'aztlan-isle-reloaded';
+        function fresh() {
+          try {
+            if (sessionStorage.getItem(KEY)) return false;
+            sessionStorage.setItem(KEY, '1');
+          } catch (e) {
+            /* no session storage: still try once */
+          }
+          var u = new URL(location.href);
+          u.searchParams.set('r', Date.now().toString(36));
+          location.replace(u.href);
+          return true;
+        }
+        function stuck() {
+          if (window.aztlanBooted || window.aztlanBootError || fresh()) return;
+          var t = document.getElementById('loading-text');
+          if (t) {
+            t.classList.remove('hidden');
+            t.textContent = 'The island could not load. Tap to try again.';
+            t.style.cursor = 'pointer';
+            t.onclick = function () { location.reload(); };
+          }
+        }
+        window.addEventListener('error', function (e) {
+          var el = e.target;
+          if (el && (el.tagName === 'SCRIPT' || el.tagName === 'LINK') && /\/assets\//.test(el.src || el.href || '')) stuck();
+        }, true);
+        setTimeout(stuck, 30000);
+      })();
+    </script>
   </head>
   <body>
     <canvas id="game"></canvas>
