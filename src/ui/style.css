@@ -97,6 +97,8 @@ html.splash-open, html.splash-open body { background: #007d83; }
 .play:hover { background: #006d73; }
 .play:focus-visible { outline: 2px solid #fff4c2; outline-offset: 5px; }
 .play:active { transform: translateY(2px); }
+.boot-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.play.small { font-size: clamp(13px, 2.2vh, 16px); min-height: 40px; padding: 8px 20px; letter-spacing: 0.06em; }
 @media (max-height: 500px) and (orientation: landscape) {
   .splash-ui { gap: 4px; padding-top: 6px; padding-bottom: max(8px, var(--safe-b)); }
   .play { min-height: 40px; padding: 5px 30px; font-size: 18px; }
