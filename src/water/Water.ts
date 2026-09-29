@@ -204,6 +204,15 @@ const waterFrag = /* glsl */ `
     float setK = 0.72 + 0.28 * sin(surfP * 0.34 + along * 1.7);
     // Distance to the nearest land (blue channel): surf lines run parallel to the coast.
     float sd = hr.b;
+    // ---- Open ocean ----
+    // The reef shelf gives way to deep open sea far from any land, and near the map's edge inside a
+    // rounded, wobbly outline, so the turquoise hugs the islands and the sea never shows the square
+    // map. Beyond the map it is the same deep sea (the distance-to-land field tops out at 20).
+    float wob = (vnoise(p * 0.03 + 1.7) - 0.5) * 9.0 + (vnoise(p * 0.1 + 8.3) - 0.5) * 3.0;
+    vec2 ep = abs(vW.xz) / (uWorld * 0.5);
+    float rr = pow(pow(ep.x, 5.0) + pow(ep.y, 5.0), 0.2) + wob / (uWorld * 0.5);
+    float edgeFade = max(smoothstep(0.8, 0.97, rr) * smoothstep(1.0, 5.0, sd), 1.0 - inside);
+    float openK = max(smoothstep(11.0, 19.0, sd + wob * 0.6), edgeFade);
     float surfZone = (1.0 - smoothstep(2.6, 5.5, sd)) * inside * uSwash;
     float fSw = fract((surfP - 1.5708) / TAU);
     float runup = smoothstep(0.0, 0.16, fSw) * (1.0 - smoothstep(0.28, 0.92, fSw));
@@ -244,9 +253,7 @@ const waterFrag = /* glsl */ `
     col = mix(col, cDeep2, smoothstep(2.0, 5.2, cdepth));
     float far = smoothstep(uWorld * 0.42, uWorld * 1.4, length(vW.xz));
     // Blend toward open-ocean colour approaching the map edge so its square outline never shows.
-    float edgeD = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    float edgeK = (1.0 - smoothstep(0.0, 0.22, edgeD)) * inside + (1.0 - inside);
-    col = mix(col, cDeep, clamp(max(max(smoothstep(4.5, 8.0, cdepth), far), edgeK), 0.0, 1.0));
+    col = mix(col, cDeep, clamp(max(max(smoothstep(4.5, 8.0, cdepth), far), openK), 0.0, 1.0));
     // Very soft, very large colour drift (like light and shade from passing clouds) — no visible tiling.
     float drift = vnoise(p * 0.018 + vec2(t * 0.006, -t * 0.004)) * 0.6 + vnoise(p * 0.05 - vec2(t * 0.01, 0.0)) * 0.4;
     col *= 0.93 + 0.14 * drift;
@@ -288,7 +295,8 @@ const waterFrag = /* glsl */ `
     vec2 fc = fract(gp) - 0.5 - (vec2(hsh(cell + 11.3), hsh(cell + 5.9)) - 0.5) * 0.55;
     float dot1 = smoothstep(0.16, 0.0, length(fc));
     float spark = step(0.86, hsh(cell + 9.1)) * twinkle * dot1 * pow(nh, 40.0) * 3.0 * (1.0 - smoothstep(0.04, 0.14, fw));
-    float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y);
+    // At night the moon path is softened so the living light reads over it.
+    float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y) * (1.0 - 0.75 * (1.0 - smoothstep(0.28, 0.58, uDay)));
     lit += uSunCol * (glare + spark) * uSunI * 0.3 * sunVis;
 
     // Whitecaps only in storms.
@@ -323,54 +331,86 @@ const waterFrag = /* glsl */ `
     foam *= inside;
     lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
 
-    // Living blue light in the sea only. Reuse the live seabed/shore texture so sculpting
-    // terrain also moves the habitat; wet sand, rivers and waterfall pools never glow.
-    // uDay retains a 0.25 moonlight floor, even at midnight.
+    // Night bioluminescence (sea only; rivers, pools and wet sand never glow). Reuses the live
+    // seabed/shore texture, so sculpting the coast moves it too. uDay keeps a 0.25 moonlit floor.
+    //  - a gentle living blue over the whole sea, the shallows round the islands glowing turquoise
+    //    from within;
+    //  - drifting streams of plankton: long winding ribbons of tiny twinkling specks that follow
+    //    the currents between the islands (a soft haze from afar, sparkles close up);
+    //  - stirred water lights up: breaking surf, the swash line and the backwash glow cyan.
+    // Fish, rays and turtles carry their own glow (see patchBioGlow).
     float bioNight = 1.0 - smoothstep(0.28, 0.58, uDay);
+    float bioA = 0.0;
     if (uSwash > 0.5 && bioNight > 0.001) {
-      vec2 drift = p + vec2(t * 0.045, -t * 0.032);
-      vec2 curl = vec2(vnoise(drift * 0.09), vnoise(drift * 0.09 + 17.0)) - 0.5;
-      vec2 life = drift + curl * 3.5;
-      // Smaller, scattered colonies rather than a solid luminous blanket.
-      float patches = smoothstep(0.57, 0.8, vnoise(life * 0.28));
-      patches *= smoothstep(0.28, 0.65, vnoise(life * 0.65 + 9.3));
-      float habitat = smoothstep(0.12, 0.65, depth)
-        * (1.0 - smoothstep(14.0, 36.0, sd)) * inside;
-      float specks = plankton(life * 2.8, t, fw * 2.8);
-      float flecks = plankton(life * vec2(1.1, 2.4) + 41.0, t * 0.7, fw * 2.4);
-      // Narrow moving wave crests carry the bright light; the colony itself is barely visible.
-      float bioPhase = surfP - sd * 2.1 + vnoise(p * 0.32) * 1.4;
-      float crestDistance = abs(sin(bioPhase * 0.5));
-      float crestAA = max(0.012, fwidth(bioPhase) * 0.5);
-      float waveCore = 1.0 - smoothstep(max(0.0, 0.065 - crestAA), 0.065 + crestAA, crestDistance);
-      waveCore *= 1.0 - smoothstep(0.15, 0.65, crestAA);
-      float waveHalo = (1.0 - smoothstep(0.055, 0.26, crestDistance)) * 0.28;
-      float brokenTrail = smoothstep(0.22, 0.65, vnoise(life * 1.15 + vec2(t * 0.12, 0.0)));
-      float glow = patches * habitat * bioNight;
-      float waveLight = (waveCore * 3.8 + waveHalo) * brokenTrail;
-      lit += vec3(0.015, 0.42, 1.1) * glow * (0.012 + specks * 0.55 + flecks * 0.18);
-      lit += vec3(0.08, 0.95, 2.4) * glow * waveLight;
-      lit += vec3(0.015, 0.4, 1.0) * glow * foam * waveCore * 0.45;
+      float shallowK = (1.0 - smoothstep(0.35, 3.4, cdepth)) * smoothstep(0.02, 0.3, depth) * inside * (1.0 - edgeFade);
+      float midK = smoothstep(0.5, 1.8, cdepth) * (1.0 - smoothstep(5.5, 10.0, cdepth));
+      float nearIsle = 1.0 - openK;
+      // Gentle base glow: slow breathing patches so the lagoon light is never flat.
+      float breathe = 0.75 + 0.25 * vnoise(p * 0.07 + vec2(t * 0.02, -t * 0.015));
+      // Tint rather than brighten: deep water sinks to ink-navy, the channels near the islands to a
+      // rich blue, and the shallows glow saturated turquoise, as if lit from beneath.
+      vec3 nightSea = mix(vec3(0.004, 0.022, 0.085), vec3(0.008, 0.07, 0.2), midK * nearIsle);
+      nightSea = mix(nightSea, vec3(0.0, 0.26, 0.36) * breathe, shallowK);
+      lit = mix(lit, nightSea, bioNight * 0.78);
+      // Currents: domain-warped ridge noise makes long, winding ribbons.
+      vec2 flow = p + vec2(t * 0.05, -t * 0.035);
+      vec2 warp = vec2(vnoise(flow * 0.045), vnoise(flow * 0.045 + 7.3)) - 0.5;
+      vec2 q = flow + warp * 9.0;
+      float ridge = 1.0 - abs(vnoise(q * 0.06) * 2.0 - 1.0);
+      float ribbon = smoothstep(0.38, 0.9, ridge) * smoothstep(0.25, 0.65, vnoise(q * 0.15 + 3.0));
+      // A second, narrower set of drifts between the main streams.
+      float ridge2 = 1.0 - abs(vnoise(q * 0.16 + 11.0) * 2.0 - 1.0);
+      ribbon = max(ribbon, smoothstep(0.78, 0.97, ridge2) * 0.5);
+      // Rich near the islands; a thinner scatter carries on across the open sea, past the map.
+      float habitat = (midK * 0.85 + shallowK * 0.55) * nearIsle + 0.12 * openK;
+      float stream = ribbon * habitat * bioNight;
+      // Specks drift along the stream a little faster than the water.
+      vec2 sq = q + vec2(t * 0.12, 0.0);
+      float specks = plankton(sq * 5.5, t, fw * 5.5) * 0.75 + plankton(sq * 2.7 + 19.0, t * 0.8, fw * 2.7);
+      // Plankton gathers in clouds within the stream rather than spreading evenly.
+      specks *= 0.35 + 1.3 * smoothstep(0.3, 0.8, vnoise(sq * 0.7 + 23.0));
+      // The soft haze of a drift belongs to the rich water near the islands; out at sea only a few specks.
+      lit += vec3(0.01, 0.2, 0.62) * stream * 0.3 * nearIsle;
+      lit += vec3(0.05, 0.5, 1.7) * stream * specks * 1.2;
+      // Far off, the specks shrink below a pixel: their average light keeps the drifts visible.
+      float farK = smoothstep(0.06, 0.3, fw * 5.5);
+      lit += vec3(0.02, 0.32, 1.05) * stream * farK * nearIsle * (0.35 + 0.65 * smoothstep(0.3, 0.8, vnoise(sq * 0.7 + 23.0))) * 0.8;
+      // Lone sparks scattered through the shallows and channels.
+      vec2 lp = p * 1.6 + vec2(t * 0.03, 0.0) + 5.0;
+      float lone = plankton(lp, t * 1.3, fw * 1.6) * step(0.82, hsh(floor(lp) + 3.3));
+      lit += vec3(0.06, 0.55, 1.6) * lone * habitat * bioNight * 0.45;
+      // Stirred water: the surf, swash and backwash light up where they churn.
+      float churn = 0.4 + 0.6 * smoothstep(0.3, 0.75, vnoise(p * 1.4 + vec2(t * 0.25, -t * 0.18)));
+      float stir = clamp(surfFoam * 0.8 + shore * 0.55 + backwash * 0.6, 0.0, 1.0) * inside;
+      lit += vec3(0.08, 0.7, 1.45) * stir * churn * bioNight;
+      // Glowing water is seen, not seen through.
+      bioA = clamp(shallowK * 0.5 + stream * 0.5 + stir * 0.6, 0.0, 0.85) * bioNight;
     }
 
     // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
     float alpha = mix(0.22, 0.6, smoothstep(0.0, 0.9, cdepth));
     alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
     alpha = max(alpha, foam);
+    alpha = max(alpha, bioA);
     // Wet sand just above the water line: a thin dark gloss, no water colour.
     if (wet > 0.0) {
       lit = mix(vec3(0.3, 0.27, 0.2), skyR * 0.6, 0.25) * dayK;
       alpha = 0.3 * wet;
     }
     // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
-    alpha = mix(1.0, alpha, inside * smoothstep(0.0, 0.16, edgeD));
+    // Toward the map's edge (and beyond it) there is no seabed to see: fully opaque open sea.
+    alpha = mix(alpha, 1.0, edgeFade);
     gl_FragColor = vec4(lit, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     // Sea mist ring: the far ocean melts into the haze, hiding the edge of the water plane.
     #ifdef USE_FOG
-      float rim = smoothstep(uWorld * 1.35, uWorld * 3.2, length(vW.xz)) * 0.92;
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, rim);
+      // A round horizon: well beyond the islands the sea melts into the haze, so the edge of the
+      // water plane (and any hint of the square map) never shows, even zoomed right out.
+      float rim = smoothstep(uWorld * 0.85, uWorld * 2.2, length(vW.xz)) * 0.92;
+      // A sea-blue haze rather than flat grey, so it reads as distance, not a wall of mist.
+      vec3 hazeCol = mix(fogColor, cDeep * 1.5 + vec3(0.02, 0.05, 0.08) * uDay, 0.5);
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeCol, rim);
       gl_FragColor.a = mix(gl_FragColor.a, 1.0, rim);
     #endif
     #include <fog_fragment>
