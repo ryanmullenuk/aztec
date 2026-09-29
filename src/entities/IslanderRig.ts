@@ -384,6 +384,15 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
 }
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+/**
+ * About one adult in five wears the elder look. Taken from the islander's id, so it needs no saving
+ * and never changes; it is only a look (nobody ages).
+ */
+export function isElder(isl: { id: number; child: boolean }): boolean {
+  if (isl.child) return false;
+  const h = Math.sin(isl.id * 127.1 + 311.7) * 43758.5453;
+  return h - Math.floor(h) < ISLANDER.elderShare;
+}
 /** Built-in body parts, no longer drawn (the character models are the bodies). */
 const BODY = new Set<string>(['pelvis', 'chest', 'head', 'uarm', 'farm', 'thigh', 'shin'].flatMap((b) => [`${b}_m`, `${b}_f`]));
 const TOOLS = ['axe', 'pick', 'hoe', 'spear', 'hammer'] as const;
@@ -397,6 +406,8 @@ interface SkinSet {
   model: GlbModel;
   mesh: THREE.InstancedMesh;
   accent: THREE.InstancedBufferAttribute;
+  /** Per islander: elder hair (0 or 1), its tone, and whether to hide the beard (boys). */
+  look: THREE.InstancedBufferAttribute;
   tex: THREE.DataTexture;
   data: Float32Array;
   /** Rows (islanders) the bone texture holds: grown by doubling, so each frame uploads little. */
@@ -482,11 +493,14 @@ export class IslanderRig {
     const data = new Float32Array(BONE_COUNT * 16 * rows);
     const tex = new THREE.DataTexture(data, BONE_COUNT * 4, rows, THREE.RGBAFormat, THREE.FloatType);
     tex.needsUpdate = true;
-    const { mat, depth } = peopleSkinnedMaterial(tex, model.map);
+    const { mat, depth } = peopleSkinnedMaterial(tex, model.map, model.skinUv);
     const geo = model.geometry;
     const accent = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
     accent.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('iAccent', accent);
+    const look = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+    look.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('iLook', look);
     const mesh = new THREE.InstancedMesh(geo, mat, cap);
     mesh.customDepthMaterial = depth;
     mesh.castShadow = true;
@@ -496,7 +510,7 @@ export class IslanderRig {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.setColorAt(0, new THREE.Color(1, 1, 1));
     this.group.add(mesh);
-    return { model, mesh, accent, tex, data, rows, n: 0 };
+    return { model, mesh, accent, look, tex, data, rows, n: 0 };
   }
 
   private rot(out: THREE.Matrix4, x: number, y: number, z: number, rx: number, ry: number, rz: number, order: THREE.EulerOrder = 'XYZ', s = 1): THREE.Matrix4 {
@@ -610,6 +624,7 @@ export class IslanderRig {
         s.mesh.instanceMatrix.needsUpdate = true;
         if (s.mesh.instanceColor) s.mesh.instanceColor.needsUpdate = true;
         s.accent.needsUpdate = true;
+        s.look.needsUpdate = true;
         s.tex.needsUpdate = true;
       }
     }
@@ -648,6 +663,9 @@ export class IslanderRig {
     set.mesh.setMatrixAt(i, M.base);
     set.mesh.setColorAt(i, this.skin);
     set.accent.setXYZ(i, this.accent.r, this.accent.g, this.accent.b);
+    // Elders: grey hair for women, white hair and beard for men (linear tones). Boys: no beard.
+    const elder = isElder(isl);
+    set.look.setXYZ(i, elder ? 1 : 0, isl.gender === 'f' ? 0.46 : 0.7, isl.child && isl.gender === 'm' ? 1 : 0);
     set.n = i + 1;
     // Headdress: warriors wear jaguar or eagle helms, priests the grand feather fan.
     const hd = isl.warrior ? isl.warrior : isl.role === 'priest' && !isl.child ? 'hd_fan' : null;

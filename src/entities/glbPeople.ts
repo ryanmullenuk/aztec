@@ -31,6 +31,8 @@ export interface GlbModel {
   bindInv: THREE.Matrix4[];
   /** Colour texture. */
   map: THREE.Texture;
+  /** A texture coordinate on the bare face, to paint over a hidden beard. */
+  skinUv: THREE.Vector2;
   /** How headdresses sit on this head (offset from the head joint, metres, and scale). */
   hat: { y: number; z: number; s: number };
   /** Limb lengths (joint to joint; hand = wrist to finger tips). */
@@ -374,6 +376,28 @@ async function loadOne(loader: GLTFLoader, g: 'm' | 'f'): Promise<GlbModel> {
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(P.count * 3).fill(1), 3));
   geometry.setAttribute('aVeg', new THREE.Float32BufferAttribute(new Float32Array(P.count * 2), 2));
   geometry.setAttribute('aMat', new THREE.Float32BufferAttribute(new Float32Array(P.count), 1));
+  // Hair vertices, so elders' hair can be drawn grey or white; and the beard (hair on the front of
+  // the face, below the eyes), which boys don't have.
+  const UV = src.getAttribute('uv') as THREE.BufferAttribute;
+  const beardTop = joint.head.y + 0.09;
+  const beard = new Float32Array(P.count);
+  let skinUv = new THREE.Vector2(0.5, 0.5), best = Infinity;
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+    if (g === 'm' && hair[i] && z > joint.head.z + 0.03 && y < beardTop) beard[i] = 1;
+    // The bare face: front of the head, between the eyes and the mouth.
+    if (!hair[i] && z > joint.head.z + 0.06) {
+      const d = Math.abs(x) + Math.abs(y - (joint.head.y + 0.1)) * 2;
+      if (d < best) {
+        best = d;
+        skinUv = new THREE.Vector2(UV.getX(i), UV.getY(i));
+      }
+    }
+  }
+  // One attribute for both (0 skin/cloth, 1 hair, 2 beard): WebGL allows only 16 vertex inputs.
+  const hb = new Float32Array(P.count);
+  for (let i = 0; i < P.count; i++) hb[i] = beard[i] ? 2 : hair[i] ? 1 : 0;
+  geometry.setAttribute('aHairB', new THREE.Float32BufferAttribute(hb, 1));
   geometry.setAttribute('aSkinI', new THREE.Float32BufferAttribute(si, 4));
   geometry.setAttribute('aSkinW', new THREE.Float32BufferAttribute(sw, 4));
   geometry.setIndex(cutBridges(P, kept, si, sw, armpit));
@@ -382,6 +406,7 @@ async function loadOne(loader: GLTFLoader, g: 'm' | 'f'): Promise<GlbModel> {
   return {
     geometry,
     map,
+    skinUv,
     hat: rig.hat,
     joint,
     bindInv: bind.map((mm) => mm.clone().invert()),
