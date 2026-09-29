@@ -462,20 +462,48 @@ const SKIN_COMMON = `
   }`;
 
 /** The people material with instanced GPU skinning (and the model's colour texture), and a matching shadow depth material. */
-export function peopleSkinnedMaterial(bones: THREE.DataTexture, map: THREE.Texture | null = null): { mat: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
+export function peopleSkinnedMaterial(bones: THREE.DataTexture, map: THREE.Texture | null = null, skinUv = new THREE.Vector2(0.5, 0.5)): { mat: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
   const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, map, roughness: 0.78, metalness: 0 }), 0.45);
   const base = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
     base.call(mat, shader, r);
     peopleColours(shader);
     shader.uniforms.uBones = { value: bones };
+    shader.uniforms.uSkinUv = { value: skinUv };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>${SKIN_COMMON}`)
+      .replace('#include <common>', `#include <common>${SKIN_COMMON}
+        attribute float aHairB;
+        attribute vec3 iLook;
+        varying float vHairK;
+        varying float vHairTone;
+        varying float vBeardK;`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
         mat4 skinM = skinMatrix();
         objectNormal = normalize(mat3(skinM) * objectNormal);`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        transformed = (skinM * vec4(transformed, 1.0)).xyz;`);
+        // Boys: the beard is slimmed a little and painted as skin (below), so it reads as a chin.
+        float aBeard = step(1.5, aHairB), aHair = step(0.5, aHairB);
+        vBeardK = aBeard * iLook.z;
+        if (vBeardK > 0.5) transformed = mix(transformed, vec3(0.0, 1.6, 0.0), 0.12);
+        transformed = (skinM * vec4(transformed, 1.0)).xyz;
+        vHairK = aHair * iLook.x * (1.0 - vBeardK);
+        vHairTone = iLook.y;`);
+    // Elders: the hair is redrawn grey (women) or white (men), keeping the texture's facet shading.
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform vec2 uSkinUv;
+        varying float vHairK;
+        varying float vHairTone;
+        varying float vBeardK;`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        if (vHairK > 0.01) {
+          float hl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+          float hg = vHairTone * (0.74 + 0.26 * smoothstep(0.0, 0.05, hl));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(hg, hg * 0.985, hg * 0.955), vHairK);
+        }
+        #ifdef USE_MAP
+          if (vBeardK > 0.5) diffuseColor.rgb = texture2D(map, uSkinUv).rgb;
+        #endif`);
   };
   mat.customProgramCacheKey = () => 'people-skinned';
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
