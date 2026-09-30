@@ -39,9 +39,18 @@ export type Tool = 'none' | 'axe' | 'pick' | 'hoe' | 'spear' | 'hammer';
 
 export type CarryKind = ResourceKey | 'log' | 'chicken';
 
+/** Health: well, fallen sick, or mauled by a jaguar or alligator (the last two need curing). */
+export type Condition = 'well' | 'sick' | 'mauled';
+
+export const CONDITION_LABEL: Record<Condition, string> = {
+  well: 'Well',
+  sick: 'Sick',
+  mauled: 'Mauled — badly hurt',
+};
+
 /** A task is a small state machine the AI steps through. */
 export interface Task {
-  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire' | 'flee' | 'hall';
+  kind: 'chop' | 'mine' | 'gather' | 'deliver' | 'build' | 'farm' | 'pray' | 'eat' | 'sleep' | 'wander' | 'patrol' | 'butcher' | 'fish' | 'train' | 'goto' | 'follow' | 'capture' | 'spearfish' | 'smoke' | 'bonfire' | 'flee' | 'hall' | 'heal';
   stage: number;
   /** Plant id, building id or islander id depending on kind. */
   target: number;
@@ -104,6 +113,10 @@ export interface Islander {
   waveCool: number;
   /** Seconds left limping from a wild-animal attack. */
   injured: number;
+  /** Sick or mauled: off work until cured at a Healing Centre. */
+  condition: Condition;
+  /** Game seconds left to live while sick or mauled and untreated. */
+  conditionT: number;
   hidden: boolean;
   /** On the Great Hall's platform: height of the floor they stand on (else they follow the ground). */
   floorY: number | null;
@@ -167,6 +180,8 @@ export function makeIslander(id: number, name: string, gender: Gender, x: number
     lastBonfire: -1,
     waveT: 0,
     injured: 0,
+    condition: 'well',
+    conditionT: 0,
     waveCool: 3 + Math.random() * 12,
     think: rnd(),
     stuck: 0,
