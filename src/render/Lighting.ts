@@ -3,7 +3,11 @@ import { COLORS, DAY_KEYS, RENDER } from '../config';
 import { clamp } from '../world/noise';
 
 export interface LightState {
+  /** Where the light comes from: the sun, handing over to the moon at night (kept a little above the horizon). */
   sunDir: THREE.Vector3;
+  /** Where the sun and the moon really are in the sky (the sun sets below the horizon). */
+  sunSky: THREE.Vector3;
+  moonSky: THREE.Vector3;
   sunColor: THREE.Color;
   sunIntensity: number;
   night: number;
@@ -37,6 +41,8 @@ export class Lighting {
   readonly ambient: THREE.AmbientLight;
   readonly state: LightState = {
     sunDir: new THREE.Vector3(),
+    sunSky: new THREE.Vector3(0, 1, 0),
+    moonSky: new THREE.Vector3(0, 1, 0),
     sunColor: new THREE.Color(),
     sunIntensity: 3,
     night: 0,
@@ -103,6 +109,7 @@ export class Lighting {
     // Sun sweeps across the sky; in the evening it is upper-right of the default view.
     const az = this.eveningAzimuth + (0.66 - dayT) * 3.4;
     let el = (elev * Math.PI) / 180;
+    s.sunSky.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
     el = Math.max(el, (6 * Math.PI) / 180);
     _sun.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
     // At night the light hands over smoothly to a high, silvery moon that drifts slowly across the sky
@@ -110,6 +117,7 @@ export class Lighting {
     const mAz = this.eveningAzimuth + 0.35 + (dayT < 0.5 ? dayT + 1 : dayT) * 0.5 - 0.5;
     const mEl = (40 * Math.PI) / 180;
     _moon.set(Math.cos(mAz) * Math.cos(mEl), Math.sin(mEl), Math.sin(mAz) * Math.cos(mEl));
+    s.moonSky.copy(_moon);
     const m = clamp((night - 0.3) / 0.5, 0, 1);
     s.sunDir.copy(_sun).lerp(_moon, m * m * (3 - 2 * m)).normalize();
 
