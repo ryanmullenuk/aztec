@@ -51,13 +51,16 @@ export function parseIslandFile(raw: string): SaveData {
     for (const k of ['breed', 'cool', 'guard']) if (b[k] !== undefined && !number(b[k])) return fail();
     ids.add(b.id);
   }
-  const islanderKeys = ['id', 'name', 'gender', 'child', 'age', 'x', 'z', 'hunger', 'rest', 'happy', 'role', 'manualRole', 'workplace', 'home', 'skin', 'cloth', 'cloth2', 'headdress', 'jewel', 'warrior', 'heading'];
+  const islanderKeys = ['id', 'name', 'gender', 'child', 'age', 'x', 'z', 'hunger', 'rest', 'happy', 'role', 'manualRole', 'workplace', 'home', 'skin', 'cloth', 'cloth2', 'headdress', 'jewel', 'warrior', 'heading', 'condition', 'conditionT'];
   ids.clear();
   for (const i of d.islanders) {
     if (!fields(i, ['id', 'age', 'x', 'z', 'hunger', 'rest', 'happy', 'workplace', 'home', 'skin', 'cloth', 'cloth2', 'headdress', 'heading']) ||
         !Number.isInteger(i.id) || ids.has(i.id) || !label(i.name) || !['m', 'f'].includes(i.gender) || typeof i.child !== 'boolean' ||
         typeof i.manualRole !== 'boolean' || typeof i.jewel !== 'boolean' || ![null, 'jaguar', 'eagle'].includes(i.warrior) ||
         !['idle', 'builder', 'woodcutter', 'miner', 'gatherer', 'farmer', 'priest', 'fisher', 'butcher', 'smoker', 'warrior'].includes(i.role)) return fail();
+    // Health (optional: older files have none, and the healthy save none).
+    if ((i.condition !== undefined && !['well', 'sick', 'mauled'].includes(i.condition)) ||
+        (i.conditionT !== undefined && (!number(i.conditionT) || i.conditionT < 0))) return fail();
     ids.add(i.id);
     for (const key of Object.keys(i)) if (!islanderKeys.includes(key)) delete i[key];
   }
