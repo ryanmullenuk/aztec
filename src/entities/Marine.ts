@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { MARINE } from '../config';
-import { GeoBuilder, M, P, facet } from '../render/GeoBuilder';
-import { patchStylised, stylisedMaterial } from '../render/materials';
+import { GeoBuilder, M, P } from '../render/GeoBuilder';
+import { patchStylised } from '../render/materials';
 import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { Water } from '../water/Water';
 import { Particles } from './Boats';
-import { rigWhale, poseWhaleSpine, sampleBreach, breachSiteOk, BREACH_T, WHALE_GIRTH } from './WhaleMotion';
+import { poseWhale, sampleBreach, breachSiteOk, BREACH_T, WHALE_GIRTH, type WhaleDrive } from './WhaleMotion';
+import { createWhale, type WhaleRig } from './WhaleModel';
+import { Whitewater, whitewaterTexture } from './Whitewater';
 
 // ---------------- Surfacing to breathe ----------------
 /** Seconds rising from cruising depth until the back breaks the surface. */
@@ -20,278 +22,6 @@ const SURF_DIVE = 3.6;
 const SURF_Y = -0.3;
 
 // ---------------- Models (length 1 along +z, head at +z) ----------------
-
-
-/** Radius profile along the body: t = 0 tail stock → 1 snout. */
-function whaleRadius(t: number): number {
-  const k: [number, number][] = [[0, 0.018], [0.12, 0.04], [0.3, 0.085], [0.5, 0.112], [0.68, 0.118], [0.82, 0.1], [0.93, 0.07], [1, 0.022]];
-  for (let i = 0; i < k.length - 1; i++) {
-    if (t <= k[i + 1][0]) {
-      const f = (t - k[i][0]) / (k[i + 1][0] - k[i][0]);
-      const s = f * f * (3 - 2 * f);
-      return k[i][1] + (k[i + 1][1] - k[i][1]) * s;
-    }
-  }
-  return 0.02;
-}
-
-/** Lathe-like faceted body with an elliptical, flat-bellied cross-section. */
-function bodyShell(radius: (t: number) => number, rings: number, seg: number, ySquash: (t: number) => number, color: (t: number, a: number, y: number) => THREE.Color): THREE.BufferGeometry {
-  const pos: number[] = [];
-  const col: number[] = [];
-  const idx: number[] = [];
-  for (let i = 0; i <= rings; i++) {
-    const t = i / rings;
-    const z = t - 0.5;
-    const r = radius(t);
-    for (let j = 0; j < seg; j++) {
-      const a = (j / seg) * Math.PI * 2;
-      const s = Math.sin(a);
-      const x = Math.cos(a) * r;
-      const y = s * r * ySquash(t) * (s < 0 ? 0.82 : 1);
-      pos.push(x, y, z);
-      const c = color(t, a, s);
-      col.push(c.r, c.g, c.b);
-    }
-  }
-  for (let i = 0; i < rings; i++) {
-    for (let j = 0; j < seg; j++) {
-      const a = i * seg + j, b = i * seg + ((j + 1) % seg), c = a + seg, d = b + seg;
-      idx.push(a, b, c, b, d, c);
-    }
-  }
-  // Caps.
-  const tail = pos.length / 3;
-  pos.push(0, 0, -0.5);
-  col.push(col[0], col[1], col[2]);
-  const nose = tail + 1;
-  pos.push(0, 0, 0.5);
-  col.push(col[col.length - 3], col[col.length - 2], col[col.length - 1]);
-  for (let j = 0; j < seg; j++) {
-    idx.push(tail, (j + 1) % seg, j);
-    idx.push(nose, rings * seg + j, rings * seg + ((j + 1) % seg));
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
-/** Concatenate flat-shaded geometries (position, normal, colour) into one. */
-function mergeFlat(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const pos: number[] = [], nor: number[] = [], col: number[] = [];
-  for (const g0 of geos) {
-    const g = facet(g0);
-    const P2 = g.getAttribute('position'), N2 = g.getAttribute('normal'), C2 = g.getAttribute('color');
-    for (let i = 0; i < P2.count; i++) {
-      pos.push(P2.getX(i), P2.getY(i), P2.getZ(i));
-      nor.push(N2.getX(i), N2.getY(i), N2.getZ(i));
-      col.push(C2.getX(i), C2.getY(i), C2.getZ(i));
-    }
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  out.computeBoundingSphere();
-  return out;
-}
-
-// Smooth-shaded humpback: countershaded dark slate back, irregular white belly and flanks,
-// ventral throat pleats, tubercles on the head, barnacled chin, knuckled tail stock.
-const W_TOP = new THREE.Color(0x2b3540);
-const W_FLANK = new THREE.Color(0x4b5866);
-const W_BELLY = new THREE.Color(0xe7ebed);
-const W_PLEAT = new THREE.Color(0x9aa6ae);
-const W_MOUTH = new THREE.Color(0x0e1115);
-const W_BARN = new THREE.Color(0xc9ccc2);
-const W_SPOT = new THREE.Color(0x5d6974);
-
-function h1(x: number, y: number): number {
-  const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-  return v - Math.floor(v);
-}
-/** Smooth value noise for colour patterns. */
-function vn(x: number, y: number): number {
-  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-  const a = h1(xi, yi), b = h1(xi + 1, yi), c = h1(xi, yi + 1), d = h1(xi + 1, yi + 1);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-const PLEATS = 26;
-/** 0..1 closeness to a throat-pleat groove line around the body angle. */
-function pleat(a: number): number {
-  const f = ((a / (Math.PI * 2)) * PLEATS) % 1;
-  return Math.max(0, 1 - Math.abs(f - 0.5) / 0.14);
-}
-
-function whaleShellGeometry(): THREE.BufferGeometry {
-  const RINGS = 60, SEG = 30;
-  const pos: number[] = [];
-  const idx: number[] = [];
-  for (let i = 0; i <= RINGS; i++) {
-    const t = i / RINGS;
-    const z = t - 0.5;
-    const r = whaleRadius(t);
-    // Tail stock is flattened side to side; the head is flat on top with a broad lower jaw.
-    const xs = t < 0.24 ? 0.58 + (t / 0.24) * 0.42 : 1;
-    for (let j = 0; j < SEG; j++) {
-      const a = (j / SEG) * Math.PI * 2;
-      const c = Math.cos(a), sn = Math.sin(a);
-      let ys = (t > 0.8 ? 0.74 : 0.86) * (sn < 0 ? 0.86 : 1);
-      if (t > 0.76 && sn > 0) ys *= 1 - (t - 0.76) * 1.1;
-      let rr = r;
-      if (t > 0.7 && sn < -0.05) rr *= 1 + (t - 0.7) * 0.4 * -sn;
-      if (sn < -0.25 && t > 0.48 && t < 0.97) rr *= 1 - pleat(a) * 0.022 * Math.min(1, (t - 0.48) * 6);
-      rr *= 1 + (vn(t * 11, a * 2.2) - 0.5) * 0.025;
-      pos.push(c * rr * xs, sn * rr * ys, z);
-    }
-  }
-  for (let i = 0; i < RINGS; i++) {
-    for (let j = 0; j < SEG; j++) {
-      const p = i * SEG + j, q = i * SEG + ((j + 1) % SEG), u = p + SEG, v = q + SEG;
-      idx.push(p, q, u, q, v, u);
-    }
-  }
-  const tail = pos.length / 3;
-  pos.push(0, 0, -0.5);
-  const nose = tail + 1;
-  pos.push(0, -0.004, 0.5);
-  for (let j = 0; j < SEG; j++) {
-    idx.push(tail, (j + 1) % SEG, j);
-    idx.push(nose, RINGS * SEG + j, RINGS * SEG + ((j + 1) % SEG));
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
-const _wc = new THREE.Color();
-function whaleColor(p: THREE.Vector3): THREE.Color {
-  const t = p.z + 0.5;
-  const a = Math.atan2(p.y, p.x);
-  const sn = p.y / (Math.hypot(p.x, p.y) || 1);
-  const c = _wc.copy(W_TOP).lerp(W_FLANK, THREE.MathUtils.smoothstep(sn, 0.55, -0.15));
-  // Pale speckles and scars on the dark back.
-  if (sn > -0.1) {
-    const sp = vn(t * 60, a * 9);
-    if (sp > 0.8) c.lerp(W_SPOT, (sp - 0.8) * 3.5);
-    if (Math.abs(vn(t * 7 + 5, a * 3) - 0.5) < 0.02 && sn > 0.3) c.lerp(W_SPOT, 0.5);
-  }
-  // Irregular white belly that reaches up the flanks in patches (humpback pattern).
-  const edge = -0.2 + (vn(t * 7 + 3, a * 1.6) - 0.5) * 0.55 + (t > 0.35 && t < 0.92 ? 0.1 : -0.45);
-  const w = THREE.MathUtils.smoothstep(edge + 0.06 - sn, 0, 0.12);
-  if (w > 0) {
-    _wb.copy(W_BELLY);
-    // Throat pleats: grey grooves from chin to navel.
-    if (sn < -0.25 && t > 0.5 && t < 0.97) _wb.lerp(W_PLEAT, pleat(a) * 0.75);
-    // Mottled grey on the rear belly.
-    if (t < 0.45) _wb.lerp(W_FLANK, (0.45 - t) * 2.2 * vn(t * 20, a * 4));
-    c.lerp(_wb, w);
-  }
-  // Mouth line along the side of the head.
-  if (t > 0.79) {
-    const my = -0.12 - (t - 0.79) * 0.35;
-    if (Math.abs(sn - my) < 0.045) c.lerp(W_MOUTH, 0.85);
-  }
-  // Barnacle clusters on the chin and throat.
-  if (t > 0.9 && sn < -0.1) {
-    const bn = vn(t * 90, a * 14);
-    if (bn > 0.62) c.lerp(W_BARN, Math.min(1, (bn - 0.62) * 4));
-  }
-  return c;
-}
-const _wb = new THREE.Color();
-
-function whaleBody(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.add(whaleShellGeometry(), { color: (p) => whaleColor(p).clone() });
-  // Tubercles: rows of knobs on the rostrum and along the lower jaw.
-  for (let k = 0; k < 26; k++) {
-    const t = 0.83 + (k % 13) * 0.0125;
-    const top = k < 13;
-    const side = (k % 2 ? 1 : -1) * (0.01 + ((k * 7) % 4) * 0.012);
-    const r = whaleRadius(t);
-    const y = top ? r * (0.74 * (1 - (t - 0.76) * 1.1)) * 0.92 : -r * 0.6;
-    const x = top ? side * 0.8 : Math.sign(side) * r * 0.78;
-    b.add(P.sphere(0.0042 + ((k * 13) % 5) * 0.0008, 1), { color: top ? W_TOP : W_BARN }, M.t(x, y * 0.97, t - 0.5, 0, 0, 0, 1, 0.7, 1));
-  }
-  // Small dorsal fin on a hump, then knuckles along the ridge to the tail.
-  b.add(P.cone(0.028, 0.055, 8), { color: W_TOP }, M.t(0, 0.078, -0.17, -0.65, 0, 0, 0.55, 1, 1.6));
-  for (let k = 0; k < 6; k++) {
-    const t = 0.06 + k * 0.045;
-    b.add(P.sphere(0.009, 1), { color: W_TOP }, M.t(0, whaleRadius(t) * 0.84, t - 0.5, 0, 0, 0, 0.7, 0.8, 1.4));
-  }
-  // Eyes with a pale rim.
-  for (const x of [-1, 1]) {
-    const r = whaleRadius(0.79);
-    b.add(P.sphere(0.012, 1), { color: 0xc4ccd0 }, M.t(x * r * 0.99, -0.018, 0.29));
-    b.add(P.sphere(0.0085, 1), { color: 0x07090b }, M.t(x * r * 1.02, -0.018, 0.293));
-  }
-  return b.build();
-}
-
-/** Long humpback flipper: scalloped leading edge, white beneath, mottled white and slate on top. Pivot at the root, along +x. */
-function whaleFin(): THREE.BufferGeometry {
-  const sh = new THREE.Shape();
-  sh.moveTo(0, 0.036);
-  for (let k = 1; k <= 12; k++) {
-    const u = k / 12;
-    // Leading edge knobs (tubercles).
-    sh.lineTo(u * 0.34, 0.036 - u * 0.058 + (k % 2 ? 0.006 : -0.001));
-  }
-  sh.quadraticCurveTo(0.36, -0.03, 0.33, -0.036);
-  sh.lineTo(0.2, -0.048);
-  sh.quadraticCurveTo(0.06, -0.05, 0, -0.032);
-  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.012, bevelEnabled: true, bevelSize: 0.005, bevelThickness: 0.005, bevelSegments: 2, curveSegments: 6 });
-  g.translate(0, 0, -0.006);
-  g.rotateX(Math.PI / 2);
-  g.computeVertexNormals();
-  const top = new THREE.Color(0x2a323b);
-  const b = new GeoBuilder();
-  b.add(g, {
-    color: (p, nn) => {
-      if (nn.y < -0.2) return vn(p.x * 40, p.z * 40) > 0.78 ? W_PLEAT.clone() : W_BELLY.clone();
-      // Top: slate near the root, white toward the tip and along the leading edge, with mottles.
-      const m = THREE.MathUtils.smoothstep(p.x, 0.08, 0.3) * 0.7 + (p.z < -0.018 ? 0.4 : 0) + (vn(p.x * 30, p.z * 30) - 0.5) * 0.5;
-      return top.clone().lerp(W_BELLY, THREE.MathUtils.clamp(m, 0, 1));
-    },
-  });
-  return b.build();
-}
-
-/** Tail fluke: two swept lobes with a serrated trailing edge; black above, white with dark marks beneath. Pivot at the tail stock, along -z. */
-function whaleFluke(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  for (const side of [-1, 1]) {
-    const s = new THREE.Shape();
-    s.moveTo(0, 0);
-    s.quadraticCurveTo(side * 0.1, -0.012, side * 0.19, -0.06);
-    s.lineTo(side * 0.205, -0.098);
-    // Serrated trailing edge back to the notch.
-    for (let k = 1; k <= 10; k++) {
-      const u = k / 10;
-      s.lineTo(side * (0.205 - u * 0.2), -0.098 + u * 0.058 + (k % 2 ? 0.006 : -0.003));
-    }
-    s.lineTo(0, -0.03);
-    const g = new THREE.ExtrudeGeometry(s, { depth: 0.012, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 1, curveSegments: 8 });
-    g.translate(0, 0, -0.006);
-    g.rotateX(Math.PI / 2);
-    g.computeVertexNormals();
-    b.add(g, {
-      color: (p, nn) => {
-        if (nn.y > -0.2) return W_TOP.clone();
-        const n = vn(p.x * 28 + 3, p.z * 28);
-        return n > 0.62 ? W_TOP.clone().lerp(W_BELLY, 0.15) : W_BELLY.clone();
-      },
-    });
-  }
-  return b.build();
-}
 
 /** Smooth bottlenose dolphin: dark cape, pale flank blaze, white belly, beak, swept dorsal fin, flippers and flukes. */
 function dolphinGeometry(): THREE.BufferGeometry {
@@ -515,15 +245,23 @@ function softTexture(): THREE.Texture {
 
 const _ax = new THREE.Vector3();
 const _bh = new THREE.Vector3();
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _t1 = new THREE.Vector3();
+const _t2 = new THREE.Vector3();
+const _drive: WhaleDrive = { phase: 0, stroke: 1, turn: 0, turnLag: 0, arch: 0, fin: 0, flap: 0, flapPhase: 0, twist: 0 };
 
 interface Whale {
   root: THREE.Group;
-  body: THREE.SkinnedMesh;
-  spine: THREE.Bone[];
+  rig: WhaleRig;
   swimPhase: number;
-  finL: THREE.Group;
-  finR: THREE.Group;
-  fluke: THREE.Group;
+  /** Flipper beat phase, and the turn rate as the tail follows it (lagging the head). */
+  flapPhase: number;
+  turnLag: number;
+  /** Last frame's body centre, axis and flipper / fluke tips (world): how fast water leaves them. */
+  track: { c: THREE.Vector3; ax: THREE.Vector3; finL: THREE.Vector3; finR: THREE.Vector3; lobeL: THREE.Vector3; lobeR: THREE.Vector3; ok: boolean };
+  /** The landing: it spreads along the body for a moment, then a jet shoots up where it went in. */
+  slam: { t: number; x: number; z: number; ax: number; az: number; jet: boolean } | null;
   x: number;
   z: number;
   heading: number;
@@ -602,12 +340,12 @@ export class Marine {
   private dolphins: Dolphin[] = [];
   private dolphinMesh: THREE.InstancedMesh;
   private dolphinBend: THREE.InstancedBufferAttribute;
-  private spray = new Particles(1500, 0xf2fcff);
-  private mist = new Particles(420, 0xe8f8ff);
+  private spray = new Particles(3200, 0xf2fcff);
+  /** Heaving clumps of white water, and the mist that hangs after a breach (textured sprites). */
+  private white: Whitewater;
+  private fog: Whitewater;
   /** Fine misty spray of a whale's blow (its own pool, so a breach never steals it). */
   private blowMist = new Particles(1100, 0xf4fbff, 0.32);
-  /** Rising, flaring sheets of water thrown up around a splash. */
-  private crowns: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; t: number; life: number; r0: number; r1: number; h: number }[] = [];
   private rings: { mesh: THREE.Mesh; t: number; life: number; r0: number; r1: number; alpha: number }[] = [];
   private rng: RNG;
   private time = 0;
@@ -615,13 +353,13 @@ export class Marine {
 
   constructor(private world: World, private water: Water) {
     this.rng = new RNG(world.seed * 53 + 17);
-    this.group.add(this.spray.points, this.mist.points, this.blowMist.points);
-    (this.mist.points.material as THREE.ShaderMaterial).blending = THREE.NormalBlending;
+    const wwTex = whitewaterTexture();
+    this.white = new Whitewater(1600, wwTex, 8.5);
+    this.fog = new Whitewater(420, wwTex, 0.25, 0.55);
+    this.fog.points.renderOrder = 18;
+    this.group.add(this.spray.points, this.blowMist.points, this.white.points, this.fog.points);
     (this.blowMist.points.material as THREE.ShaderMaterial).blending = THREE.NormalBlending;
 
-    const mat = stylisedMaterial();
-    const bodyGeo = whaleBody(), finGeo = whaleFin(), flukeGeo = whaleFluke();
-    const finMat = underwater(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0, side: THREE.DoubleSide }), 0.3), 'whale-fin');
     const foamTex = spiralFoamTexture(), soft = softTexture();
     const ringTex = foamRingTexture();
     const ringGeo = new THREE.RingGeometry(0.72, 1, 64, 1).rotateX(-Math.PI / 2);
@@ -633,60 +371,14 @@ export class Marine {
       this.rings.push({ mesh: m, t: 1, life: 1, r0: 1, r1: 2, alpha: 0.6 });
     }
 
-    const crownGeo = new THREE.CylinderGeometry(1, 1, 1, 64, 6, true).translate(0, 0.5, 0);
-    for (let k = 0; k < 8; k++) {
-      const cm = new THREE.ShaderMaterial({
-        uniforms: { uA: { value: 0 }, uFlare: { value: 0.5 }, uSeed: { value: k * 17.3 }, uDay: this.water.shared.uDay },
-        vertexShader: `uniform float uFlare; uniform float uSeed; varying vec2 vUv;
-          void main(){ vUv = uv; vec3 p = position; float ang = atan(p.z, p.x);
-            // Ragged rim: the sheet breaks into tongues of water.
-            float jag = 0.7 + 0.2 * sin(ang * 9.0 + uSeed) + 0.1 * sin(ang * 23.0 + uSeed * 2.0);
-            p.y *= jag; p.xz *= 1.0 + p.y * uFlare;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
-        fragmentShader: `uniform float uA; uniform float uDay; uniform float uSeed; varying vec2 vUv;
-          float hs(float x){ return fract(sin(x * 127.1 + uSeed) * 43758.5453); }
-          void main(){
-            // Irregular tongues of water: each column rises to its own height and breaks up at the top.
-            float cx = vUv.x * 64.0; float c0 = floor(cx); float fx = fract(cx);
-            float r1 = mix(hs(c0), hs(c0 + 1.0), smoothstep(0.0, 1.0, fx));
-            float r2 = mix(hs(c0 * 1.7 + 3.1), hs((c0 + 1.0) * 1.7 + 3.1), smoothstep(0.0, 1.0, fx));
-            float top = 0.3 + 0.7 * r2;
-            float a = uA * (1.0 - smoothstep(top - 0.3, top, vUv.y)) * (0.3 + 0.7 * r1) * smoothstep(0.0, 0.05, vUv.y);
-            vec3 col = mix(vec3(0.55, 0.8, 0.86), vec3(1.0), smoothstep(0.05, 0.6, vUv.y)) * mix(0.35, 1.0, uDay);
-            gl_FragColor = vec4(col, a * 0.9); }`,
-        transparent: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const cmesh = new THREE.Mesh(crownGeo, cm);
-      cmesh.visible = false;
-      cmesh.renderOrder = 17;
-      this.group.add(cmesh);
-      this.crowns.push({ mesh: cmesh, mat: cm, t: 1, life: 1, r0: 1, r1: 1, h: 1 });
-    }
-
     // Whales live out in the open ocean, beyond the reef shelf.
     const spots = this.deepSpots(MARINE.whales, -4.8, 0.78, 1.15);
     spots.forEach((s, k) => {
       const L = MARINE.whaleLength * (0.9 + this.rng.next() * 0.2);
       const root = new THREE.Group();
-      const bodyMat = underwater(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0 }), 0.3), 'whale-body');
-      const { body, spine } = rigWhale(bodyGeo, bodyMat);
-      const finL = new THREE.Group(), finR = new THREE.Group();
-      const fl = new THREE.Mesh(finGeo, finMat), fr = new THREE.Mesh(finGeo, finMat);
-      fl.castShadow = fr.castShadow = true;
-      fl.scale.x = -1; // mirrored for the left side
-      finL.add(fl);
-      finR.add(fr);
-      finL.position.set(-0.09, -0.04, -0.05);
-      finR.position.set(0.09, -0.04, -0.05);
-      const fluke = new THREE.Group();
-      const fm = new THREE.Mesh(flukeGeo, finMat);
-      fm.castShadow = true;
-      fluke.add(fm);
-      spine[2].add(finL, finR);
-      spine[8].add(fluke);
-      root.add(body);
+      const bodyMat = underwater(patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 }), 0.3), 'whale-body');
+      const rig = createWhale(bodyMat);
+      root.add(rig.mesh);
       root.scale.setScalar(L);
       this.group.add(root);
       const mk = (geo: THREE.BufferGeometry, m: THREE.Material) => {
@@ -714,12 +406,13 @@ export class Marine {
       foam.renderOrder = 15;
       const a = this.rng.range(0, Math.PI * 2);
       this.whales.push({
-        root, body, finL, finR, fluke, x: s.x, z: s.z, heading: 0,
+        root, rig, x: s.x, z: s.z, heading: 0, flapPhase: 0, turnLag: 0, slam: null,
+        track: { c: new THREE.Vector3(), ax: new THREE.Vector3(), finL: new THREE.Vector3(), finR: new THREE.Vector3(), lobeL: new THREE.Vector3(), lobeR: new THREE.Vector3(), ok: false },
         route: { x: s.x, z: s.z, r: 10 + this.rng.next() * 10, a, dir: this.rng.chance(0.5) ? 1 : -1 },
         state: 'swim', surf: { y0: -MARINE.swimDepth, glide: 3, fluke: false }, t: 0,
         nextBreach: MARINE.firstBreach + k * 9 + this.rng.next() * 10, nextSpout: MARINE.firstSurface + k * 5 + this.rng.next() * 8, nextPrint: 1 + this.rng.next() * 3,
         landRoll: 170, from: { y: 0, pitch: 0, roll: 0 }, travelled: 0, seek: null, wantBreach: false, afterBreach: false, length: L, flags: new Set(), ring, glow, patch, foam,
-        spine, swimPhase: 0, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
+        swimPhase: 0, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
       });
     });
 
@@ -938,7 +631,9 @@ export class Marine {
       stroke = S.fluke && u > 0.3 && u < 0.62 ? 0.25 : 1.1;
     }
     this.applyPose(w, w.x, P.y, w.z);
-    this.animateBody(w, dt, stroke, arch);
+    // Flippers eased a little out from the flanks while it idles at the surface.
+    const idle = t < SURF_RISE ? sm(t / SURF_RISE) : t < diveAt ? 1 : 1 - sm(u / 0.5);
+    this.animateBody(w, dt, stroke, arch, 0.12 * idle);
     w.glow.visible = w.patch.visible = false;
 
     // White water around the exposed back while it's up.
@@ -975,7 +670,7 @@ export class Marine {
     // The blow: a bushy column of fine mist shooting up a couple of units, then hanging and drifting.
     if (t >= SURF_BLOW && t < SURF_BLOW + SURF_BLOW_LEN) {
       w.root.updateMatrixWorld(true);
-      const bh = _bh.set(0, 0.1, 0.27).applyMatrix4(w.root.matrixWorld);
+      const bh = w.rig.blowhole.getWorldPosition(_bh);
       const by = Math.max(0.08, bh.y);
       once('blow', SURF_BLOW, () => {
         this.sfx('blow', bh.x, bh.z);
@@ -993,11 +688,12 @@ export class Marine {
           sx + 0.3, up, sz + 0.12, 1.6 + this.rng.next() * 1.1, 0.04 + this.rng.next() * 0.05, 0.3 + this.rng.next() * 0.3);
       }
     }
+    if (S.fluke && t > diveAt) this.flukeStream(w, dt);
     if (S.fluke) {
       once('flukeup', diveAt + SURF_DIVE * 0.45, () => {
         // Water pouring off the raised flukes.
         w.root.updateMatrixWorld(true);
-        const tail = w.fluke.getWorldPosition(_bh);
+        const tail = w.rig.fluke.getWorldPosition(_bh);
         for (let k = 0; k < 40; k++) this.spray.spawn(tail.x + (this.rng.next() - 0.5) * L * 0.25, Math.max(0.1, tail.y) + this.rng.next() * 0.3, tail.z + (this.rng.next() - 0.5) * L * 0.25, (this.rng.next() - 0.5) * 0.4, this.rng.next() * 0.4, (this.rng.next() - 0.5) * 0.4, 0.7 + this.rng.next() * 0.6, 0.05 + this.rng.next() * 0.08, 0);
       });
     }
@@ -1030,39 +726,18 @@ export class Marine {
     return best;
   }
 
-  /** A sheet of water that shoots up around a splash, flares out and collapses. */
-  private crown(x: number, z: number, r0: number, r1: number, h: number, life: number): void {
-    const c = this.crowns.find((k) => k.t >= k.life) ?? this.crowns[0];
-    c.t = 0;
-    c.life = life;
-    c.r0 = r0;
-    c.r1 = r1;
-    c.h = h;
-    c.mesh.position.set(x, -0.05, z);
-    c.mesh.rotation.y = this.rng.next() * 6.28;
-    // Droplets flung off the rim.
-    for (let k = 0; k < Math.round(90 * (h / 2)); k++) {
-      const a = this.rng.next() * Math.PI * 2;
-      const out = (1.2 + this.rng.next() * 2.2) * (r1 / 3);
-      this.spray.spawn(x + Math.cos(a) * r0, 0.08, z + Math.sin(a) * r0, Math.cos(a) * out, 2 + this.rng.next() * 4 * (h / 2), Math.sin(a) * out, 0.9 + this.rng.next() * 0.9, 0.04 + this.rng.next() * 0.1, 0.02);
-    }
-  }
-
-  private updateCrowns(dt: number): void {
-    for (const c of this.crowns) {
-      if (c.t >= c.life) {
-        c.mesh.visible = false;
-        continue;
-      }
-      c.t += dt;
-      const f = Math.min(1, c.t / c.life);
-      const r = c.r0 + (c.r1 - c.r0) * (1 - (1 - f) * (1 - f));
-      // A fast impact plume followed by a slower collapse.
-      const rise = f < 0.18 ? Math.sin(f / 0.18 * Math.PI / 2) : Math.pow(Math.max(0, 1 - (f - 0.18) / 0.82), 1.4);
-      c.mesh.visible = true;
-      c.mesh.scale.set(r, Math.max(0.01, c.h * Math.pow(rise, 0.8)), r);
-      c.mat.uniforms.uA.value = Math.pow(1 - f, 1.2) * 0.9;
-      c.mat.uniforms.uFlare.value = 0.3 + f * 0.5;
+  /**
+   * A skirt of white water thrown out low and wide round a splash (drawn out to `stretch` times as
+   * long along `yaw`, the length of a whale), with droplets flung off its rim.
+   */
+  private skirt(x: number, z: number, r: number, speed: number, n: number, yaw: number, stretch: number, size = 1): void {
+    const ax = Math.sin(yaw), az = Math.cos(yaw);
+    for (let m = 0; m < n * 2.5; m++) {
+      const a = this.rng.next() * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const ox = -az * c + ax * s * stretch, oz = ax * c + az * s * stretch;
+      const o = speed * (0.6 + this.rng.next() * 0.6);
+      if (m < n) this.white.spawn(x + ox * r, 0.1, z + oz * r, ox * o, (1.2 + this.rng.next() * 2.2) * size, oz * o, 0.9 + this.rng.next() * 0.7, (0.4 + this.rng.next() * 0.6) * size, 0.5 * size, 0.9, 0.9);
+      else this.spray.spawn(x + ox * r, 0.08, z + oz * r, ox * o * 1.4, 2 + this.rng.next() * 3, oz * o * 1.4, 0.8 + this.rng.next() * 0.6, 0.04 + this.rng.next() * 0.08, 0.02);
     }
   }
 
@@ -1098,13 +773,15 @@ export class Marine {
       r.mesh.scale.set(rad, 1, rad);
       (r.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - f) * (1 - f) * r.alpha;
     }
-    this.updateCrowns(dt);
     this.spray.update(dt, 9);
-    this.mist.update(dt, 0.45);
+    this.white.update(dt);
+    this.fog.update(dt);
     // The blow rises fast, slows and hangs as it drifts; greyer at night.
     this.blowMist.update(dt, 1.5);
     const day = 0.35 + 0.65 * this.water.shared.uDay.value;
     ((this.blowMist.points.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).setRGB(0.95 * day, 0.98 * day, day);
+    this.white.color.setRGB(0.96 * day, 0.985 * day, day);
+    this.fog.color.setRGB(0.93 * day, 0.97 * day, day);
   }
 
   /** Apply a pose (tilt from vertical toward yaw, spin about the body axis) to the whale root. */
@@ -1131,19 +808,38 @@ export class Marine {
     return q;
   }
 
-  /** Swim animation: body wave, fluke following the tail, slow fin strokes. */
-  private animateBody(w: Whale, dt: number, strength: number, arch = 0): void {
+  /**
+   * Swim animation (see poseWhale): the body wave and fluke strokes, faster the harder it swims;
+   * the body curving into turns, head first and the tail following; the flippers (`fin` 0 along
+   * the flanks .. 1 flung wide, beating with `flap`, one up and one down as it twists at `twist`
+   * degrees a second).
+   */
+  private animateBody(w: Whale, dt: number, strength: number, arch = 0, fin = 0, flap = 0, twist = 0): void {
     w.swimPhase += dt * (1.6 + strength * 0.8);
-    const ph = w.swimPhase;
-    // Positive arch hollows the back (the breach bow); negative humps it (rolling into a dive).
-    poseWhaleSpine(w.spine, ph, strength, -w.turnRate, arch);
-    // Fluke inherits the last spine joint, so it never separates from the tail stock.
-    w.fluke.rotation.set(Math.sin(ph - 4.5) * 0.22 * strength, 0, 0);
-    // Flippers swept back and held close along the flanks, with slow small strokes and steering.
-    const st = Math.sin(ph * 0.5);
-    const steer = THREE.MathUtils.clamp(w.turnRate * 0.8, -0.3, 0.3);
-    w.finL.rotation.set(0, -1.2 + steer, 0.4 + st * 0.08 * strength);
-    w.finR.rotation.set(0, 1.2 + steer, -0.4 - st * 0.08 * strength);
+    w.turnLag += (w.turnRate - w.turnLag) * Math.min(1, dt * 1.2);
+    const d = _drive;
+    d.phase = w.swimPhase;
+    d.stroke = strength;
+    d.turn = w.turnRate;
+    d.turnLag = w.turnLag;
+    d.arch = arch;
+    d.fin = fin;
+    d.flap = flap;
+    d.flapPhase = w.flapPhase;
+    d.twist = twist;
+    poseWhale(w.rig, d);
+  }
+
+  /** Remember where the body and the flipper and fluke tips are, for how fast water leaves them next frame. */
+  private track(w: Whale): void {
+    const tr = w.track;
+    tr.c.copy(w.root.position);
+    tr.ax.set(0, 0, 1).applyQuaternion(w.root.quaternion);
+    w.rig.finTipL.getWorldPosition(tr.finL);
+    w.rig.finTipR.getWorldPosition(tr.finR);
+    w.rig.lobeTipL.getWorldPosition(tr.lobeL);
+    w.rig.lobeTipR.getWorldPosition(tr.lobeR);
+    tr.ok = true;
   }
 
   /** Signed smallest angle from a to b. */
@@ -1222,7 +918,10 @@ export class Marine {
           w.nextBreach = Math.max(w.nextBreach, 22);
         } else w.nextSpout = 4;
       }
-      if (w.state !== 'swim') return;
+      if (w.state !== 'swim') {
+        this.track(w);
+        return;
+      }
       w.nextPrint -= dt;
       if (w.nextPrint <= 0) {
         w.nextPrint = 2.6 + this.rng.next() * 2;
@@ -1231,29 +930,34 @@ export class Marine {
       }
       w.ring.visible = w.glow.visible = w.patch.visible = false;
       this.fadeFoam(w, dt);
+      this.track(w);
       return;
     }
     if (w.state === 'surface') {
       this.updateSurfacing(w, dt);
       this.fadeFoam(w, dt);
+      this.track(w);
       return;
     }
     this.updateBreach(w, dt);
     this.fadeFoam(w, dt);
+    this.track(w);
   }
 
   /**
    * The breach, one continuous move from cruising back to cruising (see WhaleMotion): run-up and
-   * J-turn under water, burst out, hang, fall back with a great splash, flukes over, level out.
-   * Splashes are set off by where the body actually meets the water.
+   * J-turn under water, burst out, hang, topple and slam down, flukes over, level out. Splashes
+   * are set off by where the body actually meets the water, and water streams off the body,
+   * flippers and flukes at the speed they're moving.
    */
   private updateBreach(w: Whale, dt: number): void {
-    const L = w.length, P = w.pose, T = BREACH_T;
+    const L = w.length, P = w.pose, T = BREACH_T, Ls = L / MARINE.whaleLength;
     w.t += dt;
     const t = w.t;
     const k = sampleBreach(t, w.landRoll);
     // Ease out of how it was swimming, and let any turn it was making die away.
     const ease = 1 - THREE.MathUtils.smoothstep(t, 0, 1.6);
+    const roll0 = P.roll;
     P.y = k.y * L + w.from.y * ease;
     P.pitch = k.pitch + w.from.pitch * ease;
     P.roll = k.roll + w.from.roll * ease;
@@ -1265,14 +969,10 @@ export class Marine {
     w.z += fz * (k.h - w.travelled) * L;
     w.travelled = k.h;
     const q = this.applyPose(w, w.x, P.y, w.z);
-    this.animateBody(w, dt, k.stroke, k.arch);
-    // Flippers flung out wide (and waving) through the leap, swept back again under water.
-    const fin = THREE.MathUtils.clamp(k.fin, 0, 1);
-    const wave = Math.sin(t * 3.1) * 0.14 * fin;
-    w.finL.rotation.y += (-0.15 - w.finL.rotation.y) * fin;
-    w.finR.rotation.y += (0.15 - w.finR.rotation.y) * fin;
-    w.finL.rotation.z += (-0.12 - w.finL.rotation.z) * fin - wave;
-    w.finR.rotation.z += (0.12 - w.finR.rotation.z) * fin + wave;
+    // Flippers flung out wide and beating through the leap (one up, one down as it twists).
+    w.flapPhase += dt * (2.4 + 2.2 * k.flap);
+    this.animateBody(w, dt, k.stroke, k.arch, k.fin, k.flap, (P.roll - roll0) / dt);
+    w.root.updateMatrixWorld(true);
 
     // Where the body is: centre, axis, head and tail heights, and where it crosses the surface.
     const cx = w.root.position.x, cy = w.root.position.y, cz = w.root.position.z;
@@ -1281,6 +981,11 @@ export class Marine {
     const hx = cx + axis.x * 0.5 * L, hz = cz + axis.z * 0.5 * L;
     const cross = Math.abs(axis.y) > 0.15 ? -cy / axis.y : Infinity;
     const wx = cx + axis.x * cross, wz = cz + axis.z * cross;
+    // How fast the skin is moving: the centre, and the turn of the axis (a point s along it moves at vc + va * s).
+    const tr = w.track;
+    const vc = _v1.set(cx, cy, cz).sub(tr.c).divideScalar(dt);
+    const va = _v2.copy(axis).sub(tr.ax).divideScalar(dt);
+    if (!tr.ok) vc.set(0, 0, 0), va.set(0, 0, 0);
     const once = (id: string, when: boolean, fn: () => void) => {
       if (when && !w.flags.has(id)) {
         w.flags.add(id);
@@ -1305,67 +1010,98 @@ export class Marine {
       (w.patch.material as THREE.MeshBasicMaterial).opacity = rising * 0.9;
     }
 
-    // Breakout: the head bursts through the surface.
+    // Breakout: the head bursts through the surface, heaving up a dome of white water.
     once('break', headY > 0 && t < T.peak, () => {
       this.sfx('splash', hx, hz);
       for (const [r1, life, delay] of [[L * 0.45, 1.6, 0], [L * 0.7, 2.2, 0.35], [L * 0.95, 2.6, 0.8], [L * 1.1, 2.8, 1.3]]) this.ring(hx, hz, 0.3, r1, life, delay);
-      this.burst(hx, hz, 110, 2.8, 0.6);
-      this.crown(hx, hz, L * 0.12, L * 0.32, L * 0.2, 1.5);
+      this.burst(hx, hz, 150, 3.4, 0.6);
+      for (let m = 0; m < 50; m++) {
+        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * 0.15 * L, o = 0.4 + this.rng.next() * 1.6;
+        this.white.spawn(hx + Math.cos(a) * r, 0.05, hz + Math.sin(a) * r, Math.cos(a) * o, (3 + this.rng.next() * 4) * Ls, Math.sin(a) * o, 1 + this.rng.next() * 0.7, (0.45 + this.rng.next() * 0.65) * Ls, 0.4 * Ls, 0.9, 0.6);
+      }
+      this.skirt(hx, hz, L * 0.14, 2.2 * Ls, 36, P.yaw, 1.2, Ls);
     });
 
-    // While it's out: a white collar round the body at the waterline, spray there, and water
-    // streaming off the body back into the sea.
+    // Rising through the surface: a white collar at the waterline, water dragged up round the body
+    // that falls back as a skirt, and sheets of water streaming off the skin.
     let collar = false;
     if (out && !down && Math.abs(cross) < 0.5 * L) {
       collar = true;
-      const r = THREE.MathUtils.clamp(0.13 * L / Math.max(0.35, Math.abs(axis.y)), 0.1 * L, 0.3 * L) + 0.15;
+      const r = THREE.MathUtils.clamp((0.13 * L) / Math.max(0.35, Math.abs(axis.y)), 0.1 * L, 0.3 * L) + 0.15;
       w.ring.position.set(wx, 0.04, wz);
       w.ring.rotation.y = 0;
       w.ring.scale.set(r, 1, r);
       (w.ring.material as THREE.MeshBasicMaterial).opacity = 0.85;
-      if (this.rng.next() < dt * 40) this.spray.spawn(wx + (this.rng.next() - 0.5) * r * 2, 0.05, wz + (this.rng.next() - 0.5) * r * 2, (this.rng.next() - 0.5) * 0.8, 0.8 + this.rng.next() * 1.2, (this.rng.next() - 0.5) * 0.8, 0.6, 0.12);
-      const n = Math.floor(dt * 70 + this.rng.next());
+      const rise = Math.max(0, vc.y + va.y * cross);
+      let n = Math.floor(dt * (25 + rise * 14) + this.rng.next());
       for (let m = 0; m < n; m++) {
-        // A point on the exposed part of the body (between the waterline and the head), on its skin.
+        const a = this.rng.next() * Math.PI * 2, rr = r * (0.75 + this.rng.next() * 0.4), o = 0.4 + this.rng.next() * 1.2;
+        this.white.spawn(wx + Math.cos(a) * rr, 0.06, wz + Math.sin(a) * rr, Math.cos(a) * o, rise * (0.25 + this.rng.next() * 0.5) + this.rng.next(), Math.sin(a) * o, 0.7 + this.rng.next() * 0.5, (0.3 + this.rng.next() * 0.45) * Ls, 0.35 * Ls, 0.85, 0.8);
+      }
+      if (this.rng.next() < dt * 40) this.spray.spawn(wx + (this.rng.next() - 0.5) * r * 2, 0.05, wz + (this.rng.next() - 0.5) * r * 2, (this.rng.next() - 0.5) * 0.8, 0.8 + this.rng.next() * 1.2, (this.rng.next() - 0.5) * 0.8, 0.6, 0.12);
+      n = Math.floor(dt * 80 + this.rng.next());
+      for (let m = 0; m < n; m++) {
+        // A point on the exposed skin (between the waterline and the head), moving with it.
         const s = cross + this.rng.next() * (0.5 * L - cross);
         const a = this.rng.next() * Math.PI * 2, rr = 0.1 * L;
         const x = cx + axis.x * s + Math.cos(a) * rr, y = cy + axis.y * s, z = cz + axis.z * s + Math.sin(a) * rr;
-        if (y > 0.1) this.spray.spawn(x, y, z, (this.rng.next() - 0.5) * 0.5, -0.2 - this.rng.next() * 0.4, (this.rng.next() - 0.5) * 0.5, 0.5 + this.rng.next() * 0.4, 0.05 + this.rng.next() * 0.07, 0.02);
+        if (y < 0.15) continue;
+        const vx = (vc.x + va.x * s) * 0.85, vy = (vc.y + va.y * s) * 0.85, vz = (vc.z + va.z * s) * 0.85;
+        if (this.rng.next() < 0.15) this.white.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.4, vy, vz + (this.rng.next() - 0.5) * 0.4, 0.5 + this.rng.next() * 0.4, (0.1 + this.rng.next() * 0.14) * Ls, 0.12 * Ls, 0.5, 0.3);
+        else this.spray.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.5, vy - 0.2, vz + (this.rng.next() - 0.5) * 0.5, 0.5 + this.rng.next() * 0.4, 0.05 + this.rng.next() * 0.07, 0.02);
       }
     }
     w.ring.visible = collar;
 
-    // Re-entry: one great splash where the upper body slams down.
+    // Water flung off the flippers as they beat, and a slap as each comes down on the sea.
+    this.finSpray(w, dt, out && !down);
+
+    // Re-entry: it slams down along its whole length (see updateSlam).
     once('impact', out && t > T.peak && (headY < 0.35 || t > T.impact + 0.3), () => {
-      const ix = cx + axis.x * 0.15 * L, iz = cz + axis.z * 0.15 * L;
+      const hl = Math.hypot(axis.x, axis.z) || 1;
+      const ax = axis.x / hl, az = axis.z / hl, yaw = Math.atan2(ax, az);
+      const ix = cx + ax * 0.1 * L, iz = cz + az * 0.1 * L;
       this.sfx('bigsplash', ix, iz);
-      this.burst(ix, iz, 600, 7.8, L * 0.42);
-      this.crown(ix, iz, L * 0.24, L * 0.9, L * 0.72, 2.0);
-      this.crown(ix, iz, L * 0.18, L * 0.55, L * 0.44, 1.4);
-      for (let m = 0; m < 60; m++) {
-        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.4;
-        this.mist.spawn(ix + Math.cos(a) * r, this.rng.next() * L * 0.25, iz + Math.sin(a) * r, Math.cos(a) * 1.6, 1.5 + this.rng.next() * 2.5, Math.sin(a) * 1.6, 1.2 + this.rng.next() * 0.8, 1.4 + this.rng.next() * 1.2, 1.2);
+      this.burst(ix, iz, 700, 8.2, L * 0.42);
+      w.slam = { t: 0, x: cx, z: cz, ax, az, jet: false };
+      // A low, ragged skirt of water thrown out round the body.
+      this.skirt(ix, iz, L * 0.2, 4 * Ls, 90, yaw, 1.6, Ls);
+      // The first blast of white water, out and up along both sides of the body.
+      for (let m = 0; m < 130; m++) {
+        const along = (-0.3 + this.rng.next() * 0.8) * L, side = this.rng.chance(0.5) ? 1 : -1;
+        const x = cx + ax * along - az * side * 0.1 * L, z = cz + az * along + ax * side * 0.1 * L;
+        const o = (1 + this.rng.next() * 4) * Ls, up = (4 + this.rng.next() * 7) * Ls;
+        this.white.spawn(x, 0.15, z, -az * side * o + (this.rng.next() - 0.5) * 1.5, up, ax * side * o + (this.rng.next() - 0.5) * 1.5, 1.5 + this.rng.next() * 1.2, (0.9 + this.rng.next() * 1.6) * Ls, 0.8 * Ls, 0.95, 0.45);
       }
-      for (let m = 0; m < 150; m++) {
-        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * L * 0.55;
-        // Mist hangs in the air and drifts downwind before fading.
-        this.mist.spawn(ix + Math.cos(a) * r, 0.2 + this.rng.next() * L * 0.4, iz + Math.sin(a) * r, Math.cos(a) * 0.7 + 0.35, 0.2 + this.rng.next() * 0.8, Math.sin(a) * 0.7 + 0.2, 2.4 + this.rng.next() * 2.2, 0.9 + this.rng.next() * 1.1, 0.8);
+      // Mist hangs over it and drifts downwind before fading.
+      for (let m = 0; m < 24; m++) {
+        const along = (this.rng.next() - 0.35) * L, side = (this.rng.next() - 0.5) * L * 0.5;
+        this.fog.spawn(ix + ax * along - az * side, 0.5 + this.rng.next() * L * 0.35, iz + az * along + ax * side,
+          (this.rng.next() - 0.5) * 1.2 + 0.35, 0.5 + this.rng.next() * 1.4, (this.rng.next() - 0.5) * 1.2 + 0.2,
+          2.6 + this.rng.next() * 2.2, (3 + this.rng.next() * 2.5) * Ls, 1.1 * Ls, 0.28, 0.9, 3);
       }
       for (const [r1, life, delay] of [[L * 1.0, 2.2, 0], [L * 1.5, 3.2, 0.25], [L * 2.0, 4.2, 0.6]]) this.ring(ix, iz, L * 0.3, r1, life, delay);
       w.foam.visible = true;
       w.foam.position.set(ix, 0.03, iz);
+      w.foam.rotation.y = yaw;
       w.foam.userData = { t: 0, x: ix, z: iz };
     });
+    if (w.slam) this.updateSlam(w, dt);
+
     // The flukes swing up over it as it goes under: water pours off them, then they slip in.
     once('flukeup', down && tailY > 0.3, () => {
-      w.root.updateMatrixWorld(true);
-      const tail = w.fluke.getWorldPosition(_bh);
+      const tail = w.rig.fluke.getWorldPosition(_bh);
       for (let m = 0; m < 60; m++) this.spray.spawn(tail.x + (this.rng.next() - 0.5) * L * 0.3, Math.max(0.1, tail.y) + this.rng.next() * 0.4, tail.z + (this.rng.next() - 0.5) * L * 0.3, (this.rng.next() - 0.5) * 0.4, this.rng.next() * 0.5, (this.rng.next() - 0.5) * 0.4, 0.8 + this.rng.next() * 0.6, 0.06 + this.rng.next() * 0.1, 0);
     });
+    if (down) this.flukeStream(w, dt);
     once('flukedown', w.flags.has('flukeup') && tailY < 0.05, () => {
       const tx = cx - axis.x * 0.45 * L, tz = cz - axis.z * 0.45 * L;
       this.sfx('splash', tx, tz);
-      this.burst(tx, tz, 90, 2.4, 0.45);
+      this.burst(tx, tz, 110, 2.8, 0.5);
+      for (let m = 0; m < 30; m++) {
+        const a = this.rng.next() * Math.PI * 2, o = 0.4 + this.rng.next() * 1.2;
+        this.white.spawn(tx + Math.cos(a) * 0.3, 0.05, tz + Math.sin(a) * 0.3, Math.cos(a) * o, (1.8 + this.rng.next() * 2.4) * Ls, Math.sin(a) * o, 0.9 + this.rng.next() * 0.5, (0.35 + this.rng.next() * 0.4) * Ls, 0.3 * Ls, 0.85, 0.7);
+      }
       this.ring(tx, tz, L * 0.1, L * 0.45, 2.8, 0, 0.45);
     });
 
@@ -1382,6 +1118,85 @@ export class Marine {
     }
   }
 
+  /**
+   * The landing, after the first slam: white water keeps bursting out sideways along the whole body
+   * for a moment as it sinks in, then the hole it made closes and throws up a tall jet.
+   */
+  private updateSlam(w: Whale, dt: number): void {
+    const s = w.slam!, L = w.length, Ls = L / MARINE.whaleLength;
+    s.t += dt;
+    const px = -s.az, pz = s.ax;
+    if (s.t < 0.4) {
+      const n = Math.floor(dt * 900 * (1 - s.t / 0.4) + this.rng.next());
+      for (let m = 0; m < n; m++) {
+        const along = (-0.35 + this.rng.next() * 0.9) * L, side = this.rng.chance(0.5) ? 1 : -1;
+        const x = s.x + s.ax * along + px * side * 0.12 * L, z = s.z + s.az * along + pz * side * 0.12 * L;
+        const o = (1.2 + this.rng.next() * 3.4) * Ls, up = (3.5 + this.rng.next() * 6.5) * Ls * (1 - (0.35 * Math.abs(along)) / L);
+        const drift = (this.rng.next() - 0.5) * 2;
+        this.white.spawn(x, 0.1, z, px * side * o + s.ax * drift, up, pz * side * o + s.az * drift, 1.4 + this.rng.next() * 1.1, (0.8 + this.rng.next() * 1.5) * Ls, 0.8 * Ls, 0.95, 0.5);
+      }
+    }
+    if (!s.jet && s.t > 0.45) {
+      s.jet = true;
+      const jx = s.x + s.ax * 0.1 * L, jz = s.z + s.az * 0.1 * L;
+      for (let m = 0; m < 70; m++) {
+        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * 0.12 * L, o = this.rng.next() * 0.8;
+        this.white.spawn(jx + Math.cos(a) * r, 0.1, jz + Math.sin(a) * r, Math.cos(a) * o, (6.5 + this.rng.next() * 4.5) * Ls, Math.sin(a) * o, 1.3 + this.rng.next() * 0.8, (0.6 + this.rng.next() * 0.7) * Ls, 0.35 * Ls, 0.95, 0.35);
+      }
+      this.burst(jx, jz, 220, 9.5, L * 0.1);
+    }
+    if (s.t > 3) w.slam = null;
+  }
+
+  /** Water flung off the flippers as they beat in the air, and a slap as each comes down on the sea. */
+  private finSpray(w: Whale, dt: number, airborne: boolean): void {
+    const tr = w.track, L = w.length, Ls = L / MARINE.whaleLength;
+    if (!tr.ok) return;
+    for (const right of [false, true]) {
+      const tip = (right ? w.rig.finTipR : w.rig.finTipL).getWorldPosition(right ? _t2 : _t1);
+      const prev = right ? tr.finR : tr.finL;
+      const vx = (tip.x - prev.x) / dt, vy = (tip.y - prev.y) / dt, vz = (tip.z - prev.z) / dt;
+      if (airborne && tip.y > 0.2) {
+        const n = Math.floor(dt * 45 + this.rng.next());
+        for (let m = 0; m < n; m++) {
+          const f = 0.6 + this.rng.next() * 0.4;
+          this.spray.spawn(tip.x + (this.rng.next() - 0.5) * 0.3 * Ls, tip.y, tip.z + (this.rng.next() - 0.5) * 0.3 * Ls, vx * f, vy * f, vz * f, 0.6 + this.rng.next() * 0.4, 0.05 + this.rng.next() * 0.07, 0.02);
+        }
+      }
+      const id = right ? 'slapR' : 'slapL';
+      if (prev.y > 0.12 && tip.y <= 0.12 && vy < -0.5 && !w.flags.has(id) && w.flags.has('break')) {
+        w.flags.add(id);
+        this.sfx('splash', tip.x, tip.z);
+        this.burst(tip.x, tip.z, 70, 3.2, 0.35 * Ls);
+        for (let m = 0; m < 22; m++) {
+          const a = this.rng.next() * Math.PI * 2, o = 0.5 + this.rng.next() * 1.5;
+          this.white.spawn(tip.x + Math.cos(a) * 0.2, 0.05, tip.z + Math.sin(a) * 0.2, Math.cos(a) * o + vx * 0.2, (2 + this.rng.next() * 3) * Ls, Math.sin(a) * o + vz * 0.2, 0.9 + this.rng.next() * 0.5, (0.35 + this.rng.next() * 0.45) * Ls, 0.3 * Ls, 0.9, 0.7);
+        }
+        this.ring(tip.x, tip.z, 0.2, L * 0.3, 2, 0, 0.45);
+      }
+    }
+  }
+
+  /** Water pouring off raised flukes: a curtain from the trailing edge, streaming hardest off the tips. */
+  private flukeStream(w: Whale, dt: number): void {
+    const tr = w.track;
+    if (!tr.ok) return;
+    const a = w.rig.lobeTipL.getWorldPosition(_t1), b = w.rig.lobeTipR.getWorldPosition(_t2);
+    if (Math.max(a.y, b.y) < 0.1) return;
+    const Ls = w.length / MARINE.whaleLength;
+    const n = Math.floor(dt * 110 + this.rng.next());
+    for (let m = 0; m < n; m++) {
+      const u = this.rng.next() < 0.3 ? (this.rng.chance(0.5) ? 0 : 1) : this.rng.next();
+      const x = a.x + (b.x - a.x) * u, y = a.y + (b.y - a.y) * u, z = a.z + (b.z - a.z) * u;
+      if (y < 0.1) continue;
+      const vx = (((a.x - tr.lobeL.x) * (1 - u) + (b.x - tr.lobeR.x) * u) / dt) * 0.8;
+      const vy = (((a.y - tr.lobeL.y) * (1 - u) + (b.y - tr.lobeR.y) * u) / dt) * 0.8;
+      const vz = (((a.z - tr.lobeL.z) * (1 - u) + (b.z - tr.lobeR.z) * u) / dt) * 0.8;
+      if (this.rng.next() < 0.18) this.white.spawn(x, y, z, vx, vy, vz, 0.7 + this.rng.next() * 0.4, (0.16 + this.rng.next() * 0.2) * Ls, 0.15 * Ls, 0.7, 0.3);
+      else this.spray.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.3, vy, vz + (this.rng.next() - 0.5) * 0.3, 0.6 + this.rng.next() * 0.5, 0.05 + this.rng.next() * 0.08, 0.02);
+    }
+  }
+
   /** Swirling foam left by the impact spreads and fades over seven seconds. */
   private fadeFoam(w: Whale, dt: number): void {
     const u = w.foam.userData as { t?: number };
@@ -1390,7 +1205,8 @@ export class Marine {
     const f = u.t / 7;
     const L = w.length;
     const r = L * (0.45 + 0.8 * (1 - Math.pow(1 - Math.min(1, f), 2)));
-    w.foam.scale.set(r, 1, r);
+    // Drawn out along the length of the body that landed there.
+    w.foam.scale.set(r, 1, r * 1.45);
     w.foam.rotation.y += dt * 0.5 * (1 - f);
     (w.foam.material as THREE.MeshBasicMaterial).opacity = Math.max(0, f < 0.15 ? f / 0.15 : 1 - (f - 0.15) / 0.85) * 0.95;
     if (f >= 1) w.foam.visible = false;
