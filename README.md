@@ -104,6 +104,12 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Adobe houses in five levels: the Hut (level 1, 2 people) and the Home, upgraded in place from level 2 to 5 (4, 7, 12, then 16 people), growing from a small cube with a thatched awning to a many-storey compound with stairs, courtyards, striped awnings and a rooftop pergola.
 - Ghost preview, then foundation, scaffolding and finished building.
 - Stores fill visibly and crops grow.
+- Healing Centre: a walled sandstone courtyard with four beds, a main hall behind a long striped awning and two small side rooms, reached by wide red-and-sandstone steps between flower planters.
+
+**Health**
+- Now and then someone falls sick (adults and children alike), and jaguars and alligators maul people. The sick and the mauled stop working and walk to the nearest Healing Centre, where they lie on a bed (or are cared for indoors when the beds are full); with no Healing Centre they rest at home.
+- Untreated, they die after an hour of game time, with a warning ten minutes before. The Healing Centre's card lists its patients, how long each has left and a Cure button: 50 food for sickness, 100 for a mauling. Cured islanders get up and go back to work. Tuning lives in `HEALTH` in `config.ts`.
+- In god mode (the island named GODMODE) nobody dies and curing is free.
 
 **Economy and powers**
 - Resources: wood, stone, grain, fruit, meat, fish and Belief.
@@ -131,7 +137,9 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 
 **Boats**
 - The Jetty builds canoes and fishing boats, crewed by fishers.
-- Boats sail a water A* route around rocks and reefs, then fish for five minutes, casting the net again and again as they follow the school, before carrying the catch home. They ride on the water, bobbing and rocking with the swell, and leave a wake.
+- Boats sail a water A* route around rocks, reefs, piers, rope bridges and anything built in the water, then fish for five minutes, casting the net again and again as they follow the school, before carrying the catch home. Each boat picks a school no other boat is working when one is near enough; boats sharing a school hold stations spread round it.
+- All boats ride the swell (bobbing, pitching and rolling with the water), leave a soft wake that grows with speed, and spread ripple rings while they lie still fishing. They keep clear of each other, giving way and slowing when close, and moor side by side, turning round off the pier and backing in.
+- Trade Dock boats sail out over the horizon with goods and return with others. Now and then (every 20 to 40 minutes) foreign traders in blue-and-gold sailed boats call at a finished Trade Dock with one to three bargains, accepted from the dock's card, and sail home after a few minutes.
 
 **Audio**
 - Procedural Web Audio: waves, wind, insects, bird calls, and a positional waterfall roar.
