@@ -70,6 +70,8 @@ const waterFrag = /* glsl */ `
    */
   uniform vec4 uSet0;
   uniform vec4 uSet1;
+  /** Disturbances spreading rings of waves: (x, z, start time, strength); strength 0 = unused. */
+  uniform vec4 uRip[6];
   /** Fades the swell set out over the shallows (set in main()). */
   float gSetFade;
   uniform sampler2D uHeight;
@@ -283,6 +285,25 @@ const waterFrag = /* glsl */ `
     // Far away the surface settles into a smooth sheen; glassy in very shallow water.
     float gK = mix(1.0, 0.5, smoothstep(0.15, 0.8, fw)) * mix(0.3, 1.0, smoothstep(0.05, 0.9, depth));
     grad *= gK;
+    // Disturbances (a whale coming up, a big splash): rings of waves spreading out from each, and
+    // churned white water at its heart while it's fresh.
+    float ripFoam = 0.0;
+    if (uSwash > 0.5) {
+      for (int i = 0; i < 6; i++) {
+        vec4 rp = uRip[i];
+        float age = t - rp.z;
+        if (rp.w <= 0.0 || age < 0.0 || age > 14.0) continue;
+        vec2 dv = p - rp.xy;
+        float r = length(dv) + 1e-3;
+        float front = 0.6 + age * 2.2;
+        float x = r - front;
+        float env = exp(-x * x / (0.8 + age * 0.7)) * rp.w * exp(-age * 0.3) / (1.0 + front * 0.2);
+        float ph = x * 2.8;
+        grad += (dv / r) * cos(ph) * env * 0.5;
+        ripFoam += env * smoothstep(0.5, 1.0, sin(ph)) * exp(-age * 0.9) * 0.3;
+        ripFoam += rp.w * exp(-r * r / (1.5 + age * 1.5)) * exp(-age * 0.5) * 0.35;
+      }
+    }
     vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
     // The sun's glitter sees only a little of the swells' slope: the rest widens it as roughness.
     vec2 gradS = grad - gSw * gK * 0.7;
@@ -403,6 +424,8 @@ const waterFrag = /* glsl */ `
     float foam = clamp(shore * 0.9 + bands * 0.4 + rock * 0.85 + surfFoam * 0.95 + backwash * 0.6, 0.0, 1.0);
     foam *= smoothstep(0.2, 0.5, vnoise(p * 2.6 + vec2(t * 0.3, -t * 0.2)) + shore * 0.8 + rock * 0.4 + surfFoam * 1.6);
     foam *= inside;
+    // The white water round a disturbance, broken into lacy foam (out at sea too, beyond the map).
+    foam = max(foam, clamp(ripFoam, 0.0, 1.0) * smoothstep(0.3, 0.7, vnoise(p * 4.6 + vec2(t * 0.2, -t * 0.15)) * 0.7 + vnoise(p * 1.3 - t * 0.1) * 0.3 + ripFoam * 0.4));
     lit = mix(lit, cFoam * mix(0.3, 1.05, uDay), foam);
 
     // Night bioluminescence (sea only; rivers, pools and wet sand never glow). Reuses the live
@@ -702,7 +725,16 @@ export class Water {
     /** Swell set: (dir x, dir z, amplitude, packet centre) and (wavenumber, half-width, phase, 0). */
     uSet0: { value: new THREE.Vector4(1, 0, 0, 0) },
     uSet1: { value: new THREE.Vector4(0.25, 30, 0, 0) },
+    uRip: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, -100, 0)) },
   };
+  private ripSlot = 0;
+
+  /** A disturbance on the sea (a whale coming up, a big splash): rings of waves spread out from it. */
+  disturb(x: number, z: number, strength = 1): void {
+    const slots = this.shared.uRip.value;
+    slots[this.ripSlot].set(x, z, this.shared.uTime.value, strength);
+    this.ripSlot = (this.ripSlot + 1) % slots.length;
+  }
   /** The current (or next) swell set; `wait` counts down the calm before it. */
   private set = { wait: SWELL_SET.firstAfter, t: 0, dur: 1, amp: 0, k: 0.25, w: 0.8, width: 30, dx: 1, dz: 0, speed: 1, phi: 0, active: false };
 
