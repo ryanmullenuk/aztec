@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ALLIGATORS } from '../config';
+import { ALLIGATORS, DEFENCE } from '../config';
 import { ColorFn, GeoBuilder, M, P, facet } from '../render/GeoBuilder';
 import { View } from '../render/View';
 import { RNG } from '../world/rng';
@@ -8,7 +8,7 @@ import { World } from '../world/World';
 import { Islander } from './Islander';
 import { QuadMeshes } from './quadRig';
 
-type AState = 'float' | 'swim' | 'dive' | 'crawl' | 'bask' | 'lunge' | 'retreat';
+type AState = 'float' | 'swim' | 'dive' | 'crawl' | 'bask' | 'lunge' | 'retreat' | 'dead';
 
 interface Gator {
   swamp: number;
@@ -31,6 +31,8 @@ interface Gator {
   react: number;
   preyKind: 'villager' | 'dog' | null;
   preyId: number;
+  /** Arrow hits it can still take. */
+  hp: number;
   // ---- Animation only (smoothed) ----
   /** Gait phase (cycles) and blend weights: walking, swimming (legs tucked), basking. */
   gph: number;
@@ -220,6 +222,9 @@ export class Alligators {
   private pools: { x: number; z: number }[][] = [];
   private banks: { x: number; z: number }[][] = [];
   hooks: GatorHooks | null = null;
+  private time = 0;
+  /** Swamps waiting for a new alligator (one was shot there), and when it turns up. */
+  private pending: { swamp: number; at: number }[] = [];
 
   constructor(private world: World) {
     this.rng = new RNG(world.seed * 173 + 61);
@@ -264,14 +269,58 @@ export class Alligators {
       if (!this.pools[si].length) return;
       const n = this.rng.int(ALLIGATORS.perSwamp[0], ALLIGATORS.perSwamp[1]);
       for (let k = 0; k < n && this.list.length < ALLIGATORS.max; k++) {
-        const p = this.pools[si][this.rng.int(0, this.pools[si].length - 1)];
-        this.list.push({
-          swamp: si, x: p.x, y: 0, z: p.z, heading: this.rng.range(0, 6.28), state: 'float', timer: this.rng.range(5, 25), tx: p.x, tz: p.z,
-          cool: 0, jaw: 0, sweep: this.rng.next() * 6, sink: 0, speed: 0, scale: this.rng.range(0.9, 1.2), react: this.rng.next(), preyKind: null, preyId: -1,
-          gph: this.rng.next(), walkW: 0, swimW: 0, baskW: 0, tailA: 0.1, spine: 0, lift: 0,
-        });
+        this.list.push(this.make(si));
       }
     });
+  }
+
+  private make(si: number): Gator {
+    const p = this.pools[si][this.rng.int(0, this.pools[si].length - 1)];
+    return {
+      swamp: si, x: p.x, y: 0, z: p.z, heading: this.rng.range(0, 6.28), state: 'float', timer: this.rng.range(5, 25), tx: p.x, tz: p.z,
+      cool: 0, jaw: 0, sweep: this.rng.next() * 6, sink: 0, speed: 0, scale: this.rng.range(0.9, 1.2), react: this.rng.next(), preyKind: null, preyId: -1, hp: DEFENCE.gatorHits,
+      gph: this.rng.next(), walkW: 0, swimW: 0, baskW: 0, tailA: 0.1, spine: 0, lift: 0,
+    };
+  }
+
+  /** Alligators an archer may shoot at (any still alive). */
+  get targets(): Gator[] {
+    return this.list.filter((g) => g.state !== 'dead');
+  }
+
+  /**
+   * Struck by an arrow: it thrashes and slips away under the water (or back into it off the bank),
+   * or dies after enough hits and sinks, and a while later another turns up in the swamps from
+   * upriver: they never die out.
+   */
+  hitByArrow(g: Gator): 'hurt' | 'killed' {
+    if (g.state === 'dead') return 'killed';
+    const h = this.hooks;
+    g.hp--;
+    const wy = this.waterY(g.x, g.z);
+    if (h && !Number.isNaN(wy)) h.splash(g.x, g.z, g.hp > 0 ? 18 : 34, 1.2, 0.3, wy);
+    h?.sfx('splash', g.x, g.z);
+    g.preyKind = null;
+    g.cool = ALLIGATORS.cooldown;
+    if (g.hp > 0) {
+      const inWater = !Number.isNaN(wy) && wy - this.world.heightAt(g.x, g.z) > 0.12;
+      if (inWater) {
+        g.state = 'dive';
+        g.timer = this.rng.range(14, 26);
+      } else {
+        const p = this.pickPool(g);
+        g.state = 'retreat';
+        g.tx = p.x;
+        g.tz = p.z;
+        g.timer = 20;
+      }
+      return 'hurt';
+    }
+    g.state = 'dead';
+    g.timer = 9;
+    g.jaw = 0.4;
+    this.pending.push({ swamp: g.swamp, at: this.time + this.rng.range(DEFENCE.respawn[0], DEFENCE.respawn[1]) });
+    return 'killed';
   }
 
   private waterY(x: number, z: number): number {
@@ -279,7 +328,21 @@ export class Alligators {
   }
 
   update(dt: number): void {
+    this.time += dt;
     if (dt > 0 && this.hooks) for (const g of this.list) this.think(g, dt);
+    this.list = this.list.filter((g) => g.state !== 'dead' || g.timer > 0);
+    for (let k = this.pending.length - 1; k >= 0; k--) {
+      const p = this.pending[k];
+      if (this.time < p.at || this.list.length >= ALLIGATORS.max) continue;
+      this.pending.splice(k, 1);
+      // Turns up under the water, somewhere in the swamps (not necessarily the same one).
+      const swamps = this.pools.map((P, i) => (P.length ? i : -1)).filter((i) => i >= 0);
+      const g = this.make(swamps.includes(p.swamp) && this.rng.chance(0.6) ? p.swamp : swamps[this.rng.int(0, swamps.length - 1)]);
+      g.state = 'dive';
+      g.sink = 1;
+      g.timer = this.rng.range(4, 10);
+      this.list.push(g);
+    }
     this.draw(dt);
   }
 
@@ -351,6 +414,11 @@ export class Alligators {
     }
     let sinkT = 0, jawT = 0, speed = 0;
     switch (g.state) {
+      case 'dead':
+        // Rolls and sinks out of sight in the water; on the mud it lies still and is gone later.
+        g.timer -= dt;
+        sinkT = 1.4;
+        break;
       case 'float':
         g.timer -= dt;
         g.heading += Math.sin(g.sweep * 0.2) * dt * 0.05;
@@ -443,6 +511,7 @@ export class Alligators {
     const ground = w.heightAt(g.x, g.z);
     // Floating: only the eyes, snout and ridge of the back break the surface.
     g.y = !Number.isNaN(wy) && wy - ground > 0.08 ? Math.max(ground + 0.05, wy - 0.045 - g.sink * 0.22) : ground + 0.045;
+    if (g.state === 'dead') g.y -= Math.max(0, 3 - g.timer) * 0.06;
   }
 
   private snap(g: Gator): void {

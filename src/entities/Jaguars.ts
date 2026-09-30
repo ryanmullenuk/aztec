@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { View } from '../render/View';
-import { JAGUARS } from '../config';
+import { DEFENCE, JAGUARS } from '../config';
 import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import type { Dog, Dogs } from './Dogs';
@@ -13,7 +13,7 @@ import { steer, turnTo } from './steer';
 /** Selection ids for jaguars (animals, monkeys and dogs have their own ranges). */
 export const JAG_BASE = 3_000_000;
 
-type JState = 'rest' | 'prowl' | 'stalk' | 'charge' | 'confront' | 'fight' | 'retreat';
+type JState = 'rest' | 'prowl' | 'stalk' | 'charge' | 'confront' | 'fight' | 'retreat' | 'dead' | 'arrive';
 
 export interface Jaguar {
   id: number;
@@ -51,6 +51,11 @@ export interface Jaguar {
   lie: number;
   growl: number;
   phase: number;
+  /** Arrow hits it can still take; lying dead (0..1, then sinking away). */
+  hp: number;
+  flat: number;
+  /** A newcomer still out in the water (it hasn't yet come ashore). */
+  swimming: boolean;
 }
 
 export interface JaguarHooks {
@@ -62,11 +67,14 @@ export interface JaguarHooks {
   /** A villager (or dog) has spotted the jaguar: warn the player (throttled by the game). */
   danger: (j: Jaguar, by: 'dogs' | 'villagers') => void;
   sfx: (name: string, x: number, z: number) => void;
+  /** A new jaguar has swum over from beyond the map and come ashore (optional). */
+  arrived?: (j: Jaguar) => void;
 }
 
 const STATE_TEXT: Record<JState, string> = {
   rest: 'Resting in the shade', prowl: 'Prowling its territory', stalk: 'Stalking toward the village', charge: 'Charging!',
   confront: 'Snarling at the dogs', fight: 'Fighting the dogs', retreat: 'Retreating into the jungle',
+  dead: 'Brought down by the watchtower archer', arrive: 'Swimming over from the mainland',
 };
 
 /**
@@ -82,6 +90,9 @@ export class Jaguars {
   private time = 0;
   dogs: Dogs | null = null;
   hooks: JaguarHooks | null = null;
+  /** Dens waiting for a new jaguar (one killed there), and when it sets out from beyond the map. */
+  private pending: { den: { x: number; z: number; r: number }; at: number }[] = [];
+  private nextId = 0;
 
   constructor(private world: World) {
     this.rng = new RNG(world.seed * 211 + 5);
@@ -128,16 +139,58 @@ export class Jaguars {
       pick((_i, x, z) => Math.hypot(x - m.x, z - m.z) > 40);
       if (dens.length === before) break;
     }
-    dens.slice(0, JAGUARS.count).forEach((den, id) => {
-      const black = this.rng.chance(0.12);
-      const coat = black ? 0x2e2824 : [0xd9a043, 0xcf9a3e, 0xe0ab52][id % 3];
-      this.list.push({
-        id, x: den.x, z: den.z, y: this.world.heightAt(den.x, den.z), heading: this.rng.range(0, 6.28), speed: 0, state: 'rest', timer: this.rng.range(10, 40), tx: den.x, tz: den.z,
-        den, hunt: this.rng.range(JAGUARS.huntEvery[0], JAGUARS.huntEvery[1]) * (0.6 + id * 0.5), target: -1, stalkT: 0, resolved: false, recheck: 0,
-        then: 'retreat', fightDog: -1, lungeT: 0, noticed: false, driven: false,
-        color: new THREE.Color(coat), scale: this.rng.range(0.92, 1.08), gait: 0, prevHeading: 0, turn: 0, crouch: 0, lunge: 0, lie: 1, growl: 0, phase: this.rng.range(0, 10),
-      });
-    });
+    dens.slice(0, JAGUARS.count).forEach((den, id) => this.list.push(this.make(den, den.x, den.z, id)));
+  }
+
+  private make(den: { x: number; z: number; r: number }, x: number, z: number, k: number): Jaguar {
+    const id = this.nextId++;
+    const black = this.rng.chance(0.12);
+    const coat = black ? 0x2e2824 : [0xd9a043, 0xcf9a3e, 0xe0ab52][id % 3];
+    return {
+      id, x, z, y: this.world.heightAt(x, z), heading: this.rng.range(0, 6.28), speed: 0, state: 'rest', timer: this.rng.range(10, 40), tx: den.x, tz: den.z,
+      den, hunt: this.rng.range(JAGUARS.huntEvery[0], JAGUARS.huntEvery[1]) * (0.6 + k * 0.5), target: -1, stalkT: 0, resolved: false, recheck: 0,
+      then: 'retreat', fightDog: -1, lungeT: 0, noticed: false, driven: false,
+      color: new THREE.Color(coat), scale: this.rng.range(0.92, 1.08), gait: 0, prevHeading: 0, turn: 0, crouch: 0, lunge: 0, lie: 1, growl: 0, phase: this.rng.range(0, 10),
+      hp: DEFENCE.jaguarHits, flat: 0, swimming: false,
+    };
+  }
+
+  /**
+   * Where a new jaguar sets out from: out at sea beyond the edge of the map nearest its den (the
+   * island's jaguars never die out: others swim over from the mainland to take a dead one's place).
+   */
+  offMapStart(den: { x: number; z: number }): { x: number; z: number } {
+    const H = this.world.half, out = H * 1.1;
+    // The nearest edge, a little way along it at random.
+    const ax = Math.abs(den.x), az = Math.abs(den.z);
+    const along = THREE.MathUtils.clamp((ax > az ? den.z : den.x) + this.rng.range(-12, 12), -H * 0.8, H * 0.8);
+    return ax > az ? { x: Math.sign(den.x || 1) * out, z: along } : { x: along, z: Math.sign(den.z || 1) * out };
+  }
+
+  /** Jaguars an archer may shoot at: alive and on the island. */
+  get targets(): Jaguar[] {
+    return this.list.filter((j) => j.state !== 'dead' && this.world.cellIndexAt(j.x, j.z) >= 0);
+  }
+
+  /**
+   * Struck by an arrow: it snarls and bolts for its den, or falls dead after enough hits (and
+   * another jaguar will come over from beyond the map to take its den, after a while).
+   */
+  hitByArrow(j: Jaguar): 'hurt' | 'killed' {
+    if (j.state === 'dead') return 'killed';
+    j.hp--;
+    j.growl = 0.8;
+    this.hooks?.sfx('growl', j.x, j.z);
+    if (j.hp > 0) {
+      this.retreat(j, true);
+      return 'hurt';
+    }
+    j.state = 'dead';
+    j.timer = 14;
+    j.target = -1;
+    j.fightDog = -1;
+    this.pending.push({ den: j.den, at: this.time + this.rng.range(DEFENCE.respawn[0], DEFENCE.respawn[1]) });
+    return 'killed';
   }
 
   /** Jaguars out of their dens and heading for (or at) the village. */
@@ -148,6 +201,20 @@ export class Jaguars {
   update(dt: number, night: boolean, villageCenter: { x: number; z: number } | null): void {
     this.time += dt;
     if (dt > 0 && this.hooks) for (const j of this.list) this.think(j, dt, night, villageCenter);
+    // The dead sink away; newcomers set out from beyond the map for the empty dens.
+    this.list = this.list.filter((j) => j.state !== 'dead' || j.timer > 0);
+    for (let k = this.pending.length - 1; k >= 0; k--) {
+      const p = this.pending[k];
+      if (this.time < p.at) continue;
+      this.pending.splice(k, 1);
+      const s = this.offMapStart(p.den);
+      const j = this.make(p.den, s.x, s.z, 1);
+      j.state = 'arrive';
+      j.swimming = true;
+      j.lie = 0;
+      j.heading = Math.atan2(p.den.x - s.x, p.den.z - s.z);
+      this.list.push(j);
+    }
     this.draw(dt);
   }
 
@@ -187,6 +254,33 @@ export class Jaguars {
     let speed = 0;
     const tgt = j.target >= 0 ? h.byId(j.target) : undefined;
     switch (j.state) {
+      case 'dead':
+        // Falls on its side, lies a while, then sinks away into the undergrowth.
+        j.timer -= dt;
+        j.flat = Math.min(1, j.flat + dt * 2.5);
+        j.lie = 0;
+        break;
+      case 'arrive': {
+        // Swimming in from the open sea, then padding up to its new den. Off the map there's no
+        // ground to steer by: it heads straight in.
+        if (w.cellIndexAt(j.x, j.z) < 0) {
+          const a = Math.atan2(j.tx - j.x, j.tz - j.z);
+          turnTo(j, a, dt, 3);
+          j.x += Math.sin(j.heading) * JAGUARS.prowlSpeed * 1.3 * dt;
+          j.z += Math.cos(j.heading) * JAGUARS.prowlSpeed * 1.3 * dt;
+          speed = JAGUARS.prowlSpeed * 1.3;
+        } else {
+          if (steer(w, j, j.tx, j.tz, JAGUARS.prowlSpeed * 1.3, dt, true, 1.2)) {
+            j.state = 'rest';
+            j.timer = this.rng.range(20, 50);
+          } else speed = JAGUARS.prowlSpeed * 1.3;
+          if (j.swimming && w.heightAt(j.x, j.z) > 0.05) {
+            j.swimming = false;
+            h.arrived?.(j);
+          }
+        }
+        break;
+      }
       case 'rest':
         j.timer -= dt;
         j.hunt -= dt * (night ? 2 : 1);
@@ -346,10 +440,11 @@ export class Jaguars {
     const crouchT = j.state === 'stalk' && j.speed < 1.3 ? 1 : j.state === 'confront' ? 0.7 : j.state === 'fight' ? 0.4 : 0;
     j.crouch += (crouchT - j.crouch) * Math.min(1, dt * 4);
     j.lie += ((j.state === 'rest' ? 1 : 0) - j.lie) * Math.min(1, dt * 2);
-    const gh = w.heightAt(j.x, j.z);
     const ci = w.cellIndexAt(j.x, j.z);
+    const gh = ci >= 0 ? w.heightAt(j.x, j.z) : -3;
     // Swimming: only the head and back show above the water.
     j.y = ci >= 0 && w.bridge[ci] ? Math.max(gh, 0.3) : gh < -0.05 ? -0.17 * j.scale : gh;
+    if (j.state === 'dead') j.y -= Math.max(0, 3 - j.timer) * 0.12;
   }
 
   /** Dogs (and warriors) in its face: decide whether it backs off, snarls, fights or presses on. */
@@ -470,7 +565,7 @@ export class Jaguars {
       p.sit = 0;
       p.lie = j.lie;
       p.curl = 0;
-      p.flat = 0;
+      p.flat = j.flat;
       p.crouch = j.crouch;
       p.lunge = j.lunge;
       p.limp = 0;

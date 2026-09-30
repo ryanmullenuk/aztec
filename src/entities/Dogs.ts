@@ -418,7 +418,7 @@ export class Dogs {
     if (!J) return null;
     let best: Jaguar | null = null, bd = DOGS.detect * (d.state === 'sleep' ? 0.6 : 1);
     for (const j of J.list) {
-      if (j.state === 'rest' || j.state === 'prowl') continue;
+      if (j.state === 'rest' || j.state === 'prowl' || j.state === 'dead' || j.state === 'arrive') continue;
       const dd = Math.hypot(j.x - d.x, j.z - d.z);
       if (dd < bd) {
         bd = dd;
