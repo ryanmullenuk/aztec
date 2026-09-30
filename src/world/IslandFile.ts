@@ -57,7 +57,7 @@ export function parseIslandFile(raw: string): SaveData {
     if (!fields(i, ['id', 'age', 'x', 'z', 'hunger', 'rest', 'happy', 'workplace', 'home', 'skin', 'cloth', 'cloth2', 'headdress', 'heading']) ||
         !Number.isInteger(i.id) || ids.has(i.id) || !label(i.name) || !['m', 'f'].includes(i.gender) || typeof i.child !== 'boolean' ||
         typeof i.manualRole !== 'boolean' || typeof i.jewel !== 'boolean' || ![null, 'jaguar', 'eagle'].includes(i.warrior) ||
-        !['idle', 'builder', 'woodcutter', 'miner', 'gatherer', 'farmer', 'priest', 'fisher', 'butcher', 'smoker', 'warrior'].includes(i.role)) return fail();
+        !['idle', 'builder', 'woodcutter', 'miner', 'gatherer', 'farmer', 'priest', 'fisher', 'butcher', 'smoker', 'warrior', 'archer'].includes(i.role)) return fail();
     // Health (optional: older files have none, and the healthy save none).
     if ((i.condition !== undefined && !['well', 'sick', 'mauled'].includes(i.condition)) ||
         (i.conditionT !== undefined && (!number(i.conditionT) || i.conditionT < 0))) return fail();
