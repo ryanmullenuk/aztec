@@ -757,6 +757,22 @@ export const SPECIES: Record<SpeciesKey, SpeciesDef> = {
   tapir: { name: 'Tapir', count: [3, 5], group: [1, 2], habitat: 'jungle', wanderSpeed: 0.4, fleeSpeed: 2.5, alertRadius: 9, avoidRadius: 6.5, fleeRadius: 3.5, stamina: 11, captureTime: 5, meat: 18, needsPen: false, capture: 'hunt', regrow: 480, maxSlope: 0.45 },
 };
 
+/** Pink jellyfish drifting in swarms in the shallows off the beaches. */
+export const JELLYFISH = {
+  swarms: 5,
+  perSwarm: [18, 28] as [number, number],
+  /** Bell diameter (world units; an islander is ~0.62 tall). */
+  size: [0.36, 0.62] as [number, number],
+  /** They scatter from the pointer within this distance, and for this long. */
+  fleeRadius: 2.8,
+  fleeSeconds: 1.6,
+  /** Swarm homes: open water this many cells off the beach, and at least this far apart. */
+  shore: [2, 7] as [number, number],
+  spacing: 24,
+  /** Beyond this camera distance they are not drawn (they'd be specks). */
+  drawDistance: 140,
+};
+
 export const FAUNA = {
   monkeys: [6, 10] as [number, number],
   monkeyGroup: [2, 5] as [number, number],

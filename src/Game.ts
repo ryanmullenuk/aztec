@@ -37,6 +37,7 @@ import { AudioEngine } from './audio/Audio';
 import { SaveData, applyRest, applyWorld, readSave, writeSave } from './world/Save';
 import { finishSwamps, generateSwamps } from './world/swamp';
 import { growIslets } from './world/islets';
+import { softenMapEdge } from './world/mapEdge';
 import { shapeWaterfall } from './world/waterfallSite';
 import { Bridges } from './buildings/Bridges';
 import { TradeFleet } from './entities/Trade';
@@ -49,6 +50,7 @@ import { View } from './render/View';
 import { WaterBirds } from './entities/WaterBirds';
 import { Butterflies } from './entities/Butterflies';
 import { SeaTurtles } from './entities/SeaTurtles';
+import { Jellyfish } from './entities/Jellyfish';
 import { Alligators } from './entities/Alligators';
 import { SwampView } from './water/Swamp';
 import { SEA_SURFACE } from './water/Water';
@@ -133,6 +135,7 @@ export class Game {
   waterBirds!: WaterBirds;
   butterflies!: Butterflies;
   turtles!: SeaTurtles;
+  jellies!: Jellyfish;
   gators!: Alligators;
   swampView!: SwampView;
   jaguars!: Jaguars;
@@ -213,6 +216,8 @@ export class Game {
     // The waterfall's cliff, basin and rim (after the save, so old saves get them too).
     shapeWaterfall(this.world);
     finishSwamps(this.world);
+    // The sea deepens toward the map's edge along a rounded line, so no reef runs into it (old saves too).
+    softenMapEdge(this.world, this.veg.plants.filter((p) => p.kind === 'searock' && p.state === PlantState.Alive).map((p) => p.cell));
     this.veg.refreshHeights(0, 0, this.world.N - 1, this.world.N - 1);
 
     this.rig = new CameraRig(window.innerWidth / window.innerHeight, this.world);
@@ -293,6 +298,8 @@ export class Game {
     this.scene.add(this.butterflies.mesh);
     this.turtles = new SeaTurtles(this.world, SEA_SURFACE);
     this.scene.add(this.turtles.meshes.group);
+    this.jellies = new Jellyfish(this.world, this.water);
+    this.scene.add(this.jellies.mesh);
     this.swampView = new SwampView(this.world, this.water.shared);
     this.scene.add(this.swampView.group);
     this.gators = new Alligators(this.world);
@@ -1628,6 +1635,7 @@ export class Game {
     this.dogs.update(dt, this.time.isNight);
     this.waterBirds.update(dt, this.time.hour);
     this.butterflies.update(dt, realDt, ls.day, this.raining, this.input.hover.active && !this.input.navigating && this.cursorActive ? this.cursorWorld : null);
+    this.jellies.update(dt, this.input.hover.active && !this.input.navigating && this.cursorActive ? this.cursorWorld : null);
     this.turtles.people = this.colony.grid;
     this.turtles.update(dt);
     this.gators.update(dt);
