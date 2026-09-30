@@ -597,6 +597,7 @@ export class UI {
         <li>Now and then someone falls sick, and jaguars and alligators maul people. Build a <b>Healing Centre</b> and cure them with food from its card before their time runs out, or they die.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and breach now and then. Tap one to make it jump.</li>
+        <li>Swarms of pink jellyfish drift in the shallows off the beaches. Move the pointer near them and they scatter (they glow at night).</li>
       </ul>`;
     const close = el('button', 'ib small close', ICONS.close);
     close.onclick = () => this.toggle(this.help, false);
