@@ -536,6 +536,11 @@ body.exploring #hud { visibility: hidden; pointer-events: none; }
 body.exploring #hud * { pointer-events: none !important; }
 .explore-ui { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
 .explore-ui button { pointer-events: auto; touch-action: none; user-select: none; }
+.explore-opts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.explore-title { font-weight: bold; letter-spacing: 1px; }
+.explore-height { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: bold; letter-spacing: 2px; background: #29262ecc; border: 1px solid #d8af56; border-radius: 16px; padding: 4px 10px; pointer-events: auto; }
+.explore-height input { width: clamp(70px, 18vw, 150px); accent-color: #d8af56; pointer-events: auto; touch-action: none; }
+.explore-hval { min-width: 3.2em; text-align: right; letter-spacing: 0; font-weight: normal; }
 .explore-heading { position: absolute; top: calc(12px + var(--safe-t)); left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; color: #ffe08a; text-shadow: 0 2px 4px #000; }
 .view-controls { display: flex; flex-direction: column; gap: 2px; }
 .explore-stick { position: absolute; bottom: calc(32px + var(--safe-b)); width: clamp(100px, 28vw, 140px); aspect-ratio: 1; border: 2px solid #d8af56; border-radius: 50%; background: #29262e; box-shadow: 0 4px 12px #0008, inset 0 0 0 8px #38333a; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
