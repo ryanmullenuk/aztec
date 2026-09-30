@@ -58,6 +58,11 @@ const waterFrag = /* glsl */ `
   uniform float uSurface;
   /** Wind strength patch at this pixel (set by waves()). */
   float gWind;
+  /** Slope variance of the waves too small to see at this pixel (set by waves()): the sea's roughness for the sun's glitter. */
+  float gVar;
+  /** The swells' share of the slope, and its variance (the sun's glitter treats most of the swell as roughness, so no crest rows show in it). */
+  vec2 gSw;
+  float gSwVar;
   /**
    * Occasional swell set: a packet of a few long, bigger swells rolling across the sea.
    * uSet0 = (direction x, direction z, amplitude, packet centre along the direction),
@@ -110,6 +115,23 @@ const waterFrag = /* glsl */ `
     float k = a - b - c + d;
     return vec3(du * (vec2(b - a, c - a) + k * u.yx), a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y);
   }
+  vec2 hash2(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+  }
+  /** Gradient noise with analytic slope (xy) and value (z): smoother than value noise, with no grid showing. */
+  vec3 gnoised(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p);
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    vec2 ga = hash2(i), gb = hash2(i + vec2(1.0, 0.0)), gc = hash2(i + vec2(0.0, 1.0)), gd = hash2(i + vec2(1.0, 1.0));
+    float va = dot(ga, f), vb = dot(gb, f - vec2(1.0, 0.0)), vc = dot(gc, f - vec2(0.0, 1.0)), vd = dot(gd, f - vec2(1.0, 1.0));
+    float k = va - vb - vc + vd;
+    vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd) + du * (u.yx * k + vec2(vb, vc) - va);
+    return vec3(d, va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * k);
+  }
+  /** Gradient noise, 0..1 (for masks and patterns that must not show a grid). */
+  float gnoise(vec2 p) { return clamp(gnoised(p).z * 0.72 + 0.5, 0.0, 1.0); }
   /** Swell components: wavelengths (no simple ratios, so they never fall into step) and headings. */
   const float SWL[7] = float[7](11.8, 8.3, 6.1, 4.55, 3.4, 2.45, 1.8);
   const float SWA[7] = float[7](0.0, 0.62, -0.55, 1.15, -1.0, 0.3, -1.45);
@@ -124,10 +146,15 @@ const waterFrag = /* glsl */ `
     float h = 0.0;
     g = vec2(0.0);
     ampSum = 0.0;
+    gVar = 0.0;
+    gSw = vec2(0.0);
+    gSwVar = 0.0;
     float amp = 1.0 + uStorm * 1.7;
-    // Broad fields shared by all swells (a few lookups instead of two per swell).
-    float bendA = vnoise(p * 0.031 + vec2(3.1, 7.7));
-    float bendB = vnoise(p * 0.057 + vec2(-5.3, 1.9));
+    // Broad fields shared by all swells (a few lookups instead of two per swell). The crests bend
+    // through several radians over a few dozen metres and the bends drift, so no row of crests
+    // stays straight or lines up with its neighbours.
+    float bendA = vnoise(p * 0.017 + vec2(3.1 + t * 0.004, 7.7));
+    float bendB = vnoise(p * 0.043 + vec2(-5.3, 1.9 - t * 0.005));
     float grpA = vnoise(p * 0.019 + vec2(t * 0.021, -t * 0.013));
     float grpB = vnoise(p * 0.043 + vec2(-t * 0.017, t * 0.024) + 9.4);
     for (int i = 0; i < 7; i++) {
@@ -138,7 +165,7 @@ const waterFrag = /* glsl */ `
       float k = TAU / lam;
       float w = sqrt(9.8 * k) * 0.55 * (1.0 + uFlow * 1.5);
       float mixK = fract(fi * 0.618 + 0.21);
-      float bend = (mix(bendA, bendB, mixK) - 0.5) * (4.0 + fi * 0.6);
+      float bend = (mix(bendA, bendB, mixK) - 0.5) * (7.0 + fi * 0.9);
       float ph = dot(d, p) * k + t * w + fi * 1.93 + bend;
       // Wave groups: each swell swells and fades across the sea.
       float grp = 0.3 + 1.4 * smoothstep(0.15, 0.85, mix(grpA, grpB, fract(fi * 0.414 + 0.35)));
@@ -146,7 +173,14 @@ const waterFrag = /* glsl */ `
       h += A * sin(ph);
       // Long swells shade gently, and fade further as the camera pulls back (from high up a real
       // sea shows wind texture and glitter, not rows of swell).
-      g += A * k * d * cos(ph) * 0.34 * (1.0 - smoothstep(lam * 0.12, lam * 0.4, fw)) * (1.0 - 0.65 * smoothstep(0.06, 0.4, fw));
+      float seen = (1.0 - smoothstep(lam * 0.12, lam * 0.4, fw)) * (1.0 - 0.65 * smoothstep(0.06, 0.4, fw));
+      vec2 sg = A * k * d * cos(ph) * 0.34 * seen;
+      g += sg;
+      gSw += sg;
+      // What can't be seen still roughens the surface for the glitter.
+      float sl = A * k * 0.34;
+      gVar += 0.5 * sl * sl * (1.0 - seen);
+      gSwVar += 0.5 * sl * sl * seen * seen;
       ampSum += A;
     }
     // Swell set (only while one is running, and faded over the shallows).
@@ -160,7 +194,9 @@ const waterFrag = /* glsl */ `
       float ph = s * k - uSet1.z;
       float A = setA * env;
       h += A * sin(ph);
-      g += A * k * sd * cos(ph) * 0.45 * (1.0 - smoothstep(0.12 * TAU / k, 0.4 * TAU / k, fw)) * (1.0 - 0.6 * smoothstep(0.06, 0.4, fw));
+      vec2 sg = A * k * sd * cos(ph) * 0.45 * (1.0 - smoothstep(0.12 * TAU / k, 0.4 * TAU / k, fw)) * (1.0 - 0.6 * smoothstep(0.06, 0.4, fw));
+      g += sg;
+      gSw += sg;
       ampSum += A;
     }
     // Wind patches: rough, darker ruffled water beside glassy calm stretches, drifting slowly.
@@ -169,30 +205,41 @@ const waterFrag = /* glsl */ `
     vec2 warp = vec2(vnoise(p * 0.045 + vec2(t * 0.012, 0.0)), vnoise(p * 0.045 + vec2(5.2, -t * 0.01))) * 6.0;
     float ra = 0.32 * amp * mix(0.35, 1.7, gWind);
     float freq = 0.42;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
       float fi = float(i);
-      float ca = cos(0.9 + fi * 2.1), sa = sin(0.9 + fi * 2.1);
+      // Each octave turned by an irrational angle and stretched along its crests (wind ripples are
+      // longer than they are wide), drifting its own way.
+      float ang = 0.9 + fi * 2.39996;
+      float ca = cos(ang), sa = sin(ang);
       mat2 R = mat2(ca, -sa, sa, ca);
+      vec2 st = vec2(1.0, 1.65);
       vec2 drift = vec2(cos(fi * 2.4 + 0.5), sin(fi * 2.4 + 0.5)) * (0.22 + fi * 0.08) * (1.0 + uFlow * 3.0);
-      vec2 q = R * (p + warp) * freq + drift * t * freq;
-      vec3 nd = vnoised(q);
+      vec2 q = (R * (p + warp)) * st * freq + drift * t * freq;
+      vec3 nd = gnoised(q);
       float fade = 1.0 - smoothstep(0.12 / freq, 0.45 / freq, fw);
-      g += (transpose(R) * nd.xy) * freq * ra * 0.12 * fade;
-      h += (nd.z - 0.5) * ra * 0.12;
-      freq *= 2.1;
-      ra *= 0.55;
+      float sl = freq * ra * 0.1;
+      g += (transpose(R) * (nd.xy * st)) * sl * fade;
+      gVar += 0.35 * sl * sl * (1.0 - fade);
+      h += nd.z * ra * 0.12;
+      freq *= 2.13;
+      ra *= 0.56;
     }
     // Broad, slow undulations that stay visible zoomed right out (no period, no rows).
-    vec3 m1 = vnoised(p * 0.07 + vec2(t * 0.02, -t * 0.015));
-    vec3 m2 = vnoised(p * 0.16 + vec2(-t * 0.03, t * 0.02) + 3.3);
-    g += m1.xy * 0.07 * 0.85 + m2.xy * 0.16 * 0.22;
+    vec3 m1 = gnoised(p * 0.07 + vec2(t * 0.02, -t * 0.015));
+    vec3 m2 = gnoised(p * 0.16 + vec2(-t * 0.03, t * 0.02) + 3.3);
+    g += m1.xy * 0.07 * 0.6 + m2.xy * 0.16 * 0.16;
     return h;
   }
   void main() {
     vec2 uv = (vW.xz + uWorld * 0.5) / uWorld;
     float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
     vec4 hr = texture2D(uHeight, clamp(uv, 0.0, 1.0));
-    float bed = mix(-7.0, hr.r, inside);
+    // How far inside the map (world units; negative beyond it). Its seabed eases down to the open
+    // ocean floor over the last few metres (deep water there anyway), so the map never shows a step.
+    vec2 eu = min(uv, 1.0 - uv) * uWorld;
+    float edgeIn = min(eu.x, eu.y);
+    float inMap = smoothstep(0.0, 8.0, edgeIn) * inside;
+    float bed = mix(-7.0, hr.r, inMap);
     float t = uTime;
     vec2 p = vW.xz;
     // ---- Surf ----
@@ -202,18 +249,21 @@ const waterFrag = /* glsl */ `
     float along = vnoise(p * 0.055) * 2.8 + vnoise(p * 0.16 + 4.0) * 0.8;
     float surfP = t * 1.2 + along * 3.14159;
     float setK = 0.72 + 0.28 * sin(surfP * 0.34 + along * 1.7);
-    // Distance to the nearest land (blue channel): surf lines run parallel to the coast.
-    float sd = hr.b;
+    // Distance to the nearest land (blue channel): surf lines run parallel to the coast. Beyond the
+    // map it carries on growing from the edge.
+    float sd = hr.b + max(-edgeIn, 0.0);
     // ---- Open ocean ----
-    // The reef shelf gives way to deep open sea far from any land, and near the map's edge inside a
-    // rounded, wobbly outline, so the turquoise hugs the islands and the sea never shows the square
-    // map. Beyond the map it is the same deep sea (the distance-to-land field tops out at 20).
-    float wob = (vnoise(p * 0.03 + 1.7) - 0.5) * 9.0 + (vnoise(p * 0.1 + 8.3) - 0.5) * 3.0;
-    vec2 ep = abs(vW.xz) / (uWorld * 0.5);
-    float rr = pow(pow(ep.x, 5.0) + pow(ep.y, 5.0), 0.2) + wob / (uWorld * 0.5);
-    float edgeFade = max(smoothstep(0.8, 0.97, rr) * smoothstep(1.0, 5.0, sd), 1.0 - inside);
-    float openK = max(smoothstep(11.0, 19.0, sd + wob * 0.6), edgeFade);
-    float surfZone = (1.0 - smoothstep(2.6, 5.5, sd)) * inside * uSwash;
+    // Away from the islands the sea keeps deepening: its colour darkens gradually with distance from
+    // land, over tens of metres and wandering with broad noise, so no ring shows round the reef where
+    // the island's colour stops, and nothing marks where the map ends.
+    float wob = (vnoise(p * 0.021 + 1.7) - 0.5) * 16.0 + (vnoise(p * 0.07 + 8.3) - 0.5) * 5.0;
+    float openK = smoothstep(6.0, 46.0, sd + wob);
+    // The last few metres before the map's seabed ends (always deep water): the glowing shallows fade out there.
+    float edgeFade = 1.0 - smoothstep(0.0, 6.0, edgeIn);
+    // Surf only close in, and broken along the coast into stretches that come and go (never a
+    // continuous line tracing the shore).
+    float surfPatch = smoothstep(0.32, 0.68, vnoise(p * 0.21 + vec2(t * 0.03, -t * 0.02)) * 0.7 + vnoise(p * 0.6 - vec2(0.0, t * 0.05)) * 0.3);
+    float surfZone = (1.0 - smoothstep(1.4, 3.4 + 0.5 * along, sd)) * inside * uSwash * surfPatch;
     float fSw = fract((surfP - 1.5708) / TAU);
     float runup = smoothstep(0.0, 0.16, fSw) * (1.0 - smoothstep(0.28, 0.92, fSw));
     float level = mix(vW.y, -0.03 + (uSurface + 0.03) * runup * setK, uSwash * inside);
@@ -230,30 +280,34 @@ const waterFrag = /* glsl */ `
     vec2 grad; float ampSum;
     gSetFade = uSwash * (0.15 + 0.85 * smoothstep(0.6, 4.5, depth));
     float h0 = waves(p, t, fw, grad, ampSum);
-    // Far away the surface settles into a smooth sheen.
-    grad *= mix(1.0, 0.5, smoothstep(0.15, 0.8, fw));
-    // Glassy in very shallow water.
-    grad *= mix(0.3, 1.0, smoothstep(0.05, 0.9, depth));
+    // Far away the surface settles into a smooth sheen; glassy in very shallow water.
+    float gK = mix(1.0, 0.5, smoothstep(0.15, 0.8, fw)) * mix(0.3, 1.0, smoothstep(0.05, 0.9, depth));
+    grad *= gK;
     vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
+    // The sun's glitter sees only a little of the swells' slope: the rest widens it as roughness.
+    vec2 gradS = grad - gSw * gK * 0.7;
+    vec3 ns = normalize(vec3(-gradS.x, 1.0, -gradS.y));
     vec3 V = normalize(cameraPosition - vW);
     vec3 L = normalize(uSunDir);
     float crest = h0 / max(ampSum, 1e-3);
 
-    // Body colour by depth: bright turquoise shallows -> teal -> deep navy, darker toward the map edge.
-    // Colour uses a blurred depth so seabed terrace steps don't show as contour stripes.
+    // Body colour by depth: bright turquoise shallows -> teal -> deep navy. Colour uses a wide blur of
+    // the seabed (two rings of samples), so terrace steps and the reef's drop-off fade over several
+    // metres, and its depth wanders with broad noise, so the edge of the shallows meanders like a
+    // real reef instead of tracing a neat ring round each island.
     float bs = 0.0;
     for (int k = 0; k < 6; k++) {
       float ak = float(k) * 1.0472;
-      vec2 ou = vec2(cos(ak), sin(ak)) * (2.2 / uWorld);
-      bs += texture2D(uHeight, clamp(uv + ou, 0.0, 1.0)).r;
+      bs += texture2D(uHeight, clamp(uv + vec2(cos(ak), sin(ak)) * (2.4 / uWorld), 0.0, 1.0)).r;
+      bs += texture2D(uHeight, clamp(uv + vec2(cos(ak + 0.5236), sin(ak + 0.5236)) * (5.5 / uWorld), 0.0, 1.0)).r;
     }
-    float cdepth = max(level - mix(-7.0, (bs / 6.0) * 0.6 + hr.r * 0.4, inside), 0.0) + uDeepen;
-    vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.75, cdepth));
-    col = mix(col, cMid, smoothstep(0.6, 2.6, cdepth));
-    col = mix(col, cDeep2, smoothstep(2.0, 5.2, cdepth));
-    float far = smoothstep(uWorld * 0.42, uWorld * 1.4, length(vW.xz));
-    // Blend toward open-ocean colour approaching the map edge so its square outline never shows.
-    col = mix(col, cDeep, clamp(max(max(smoothstep(4.5, 8.0, cdepth), far), openK), 0.0, 1.0));
+    float cdepth = max(level - mix(-7.0, (bs / 12.0) * 0.7 + hr.r * 0.3, inMap), 0.0) + uDeepen;
+    float reefN = vnoise(p * 0.07 + 3.7) * 0.6 + vnoise(p * 0.19 - 1.3) * 0.4;
+    float cd = cdepth * (0.75 + 0.5 * reefN) + (vnoise(p * 0.031 + 9.1) - 0.5) * 0.7 * smoothstep(0.3, 1.2, cdepth) + openK * 7.0 * uSwash;
+    vec3 col = mix(cShallowB, cShallow, smoothstep(0.05, 0.75, cd));
+    col = mix(col, cMid, smoothstep(0.6, 2.8, cd));
+    col = mix(col, cDeep2, smoothstep(2.2, 5.6, cd));
+    col = mix(col, cDeep, smoothstep(5.0, 10.0, cd));
     // Very soft, very large colour drift (like light and shade from passing clouds) — no visible tiling.
     float drift = vnoise(p * 0.018 + vec2(t * 0.006, -t * 0.004)) * 0.6 + vnoise(p * 0.05 - vec2(t * 0.01, 0.0)) * 0.4;
     col *= 0.93 + 0.14 * drift;
@@ -263,6 +317,10 @@ const waterFrag = /* glsl */ `
     float dayK = mix(0.3, 1.0, uDay);
     float ndl = max(dot(n, L), 0.0);
     vec3 lit = col * (0.78 + 0.22 * ndl) * mix(vec3(1.0), uSunCol, 0.15) * dayK;
+    // The swells read as long, soft bands: crests catch a little more light, troughs sit darker
+    // (strongest at middle distances; close up the ripples take over, far off it all evens out).
+    float swellK = smoothstep(1.5, 5.0, depth) * (1.0 - smoothstep(0.35, 1.3, fw)) * uSwash;
+    lit *= 1.0 + 0.08 * clamp(crest, -1.0, 1.0) * swellK;
     // Gentle light through the swell tops (every pow() base is clamped to 0..1: pow of a tiny negative
     // rounding error is NaN on some GPUs, and one NaN pixel turns the whole frame black once bloom spreads it).
     float back = pow(clamp(dot(-V, L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
@@ -278,26 +336,40 @@ const waterFrag = /* glsl */ `
 
     // Sky reflection (Fresnel), kept soft so the water keeps its colour.
     vec3 R = reflect(-V, n);
-    vec3 skyR = mix(uSkyCol * 0.95 + vec3(0.04), uSkyCol * vec3(0.42, 0.56, 0.75), clamp(R.y, 0.0, 1.0)) * mix(0.28, 1.0, uDay);
+    float ry = clamp(R.y, 0.0, 1.0);
+    vec3 skyR = mix(uSkyCol * 0.95 + vec3(0.04), uSkyCol * vec3(0.42, 0.56, 0.75), ry);
+    // Fair-weather clouds mirrored in the sea: a soft, drifting cloud layer seen along the reflected
+    // ray (with parallax, so it slides across the waves as the view moves).
+    vec2 cq2 = (p + R.xz / max(ry, 0.08) * 45.0) * 0.011 + vec2(t * 0.0035, t * 0.0021);
+    float cloud = smoothstep(0.5, 0.82, vnoise(cq2) * 0.6 + vnoise(cq2 * 2.3 + 1.7) * 0.28 + vnoise(cq2 * 5.3 + 4.1) * 0.12);
+    skyR = mix(skyR, vec3(0.96, 0.95, 0.93) * (0.75 + 0.25 * ry), cloud * 0.55 * (1.0 - uStorm * 0.5));
+    skyR *= mix(0.28, 1.0, uDay);
     float F = 0.02 + 0.98 * pow(clamp(1.0 - dot(n, V), 0.0, 1.0), 5.0);
     F = clamp(F * 1.2 + 0.02, 0.0, 0.6);
     lit = mix(lit, skyR, F);
 
-    // Sun (or moon) on the water: a soft glowing path with a brighter core, and a few gentle glints in it.
+    // Sun (or moon) on the water: glitter off a rough sea. The waves too small to draw at this distance
+    // widen the reflection (their slope variance, gVar), so far off it spreads into a soft, dim path
+    // and close up it tightens into bright glints: never a blown-out sheet, or rows of streaks.
     vec3 H = normalize(L + V + vec3(0.0, 1e-4, 0.0));
-    float nh = clamp(dot(n, H), 0.0, 1.0);
-    float glare = pow(nh, 900.0) * 5.0 + pow(nh, 160.0) * 0.9 + pow(nh, 30.0) * 0.08;
+    float nh = clamp(dot(ns, H), 1e-3, 1.0);
+    float nh2 = nh * nh;
+    float camD = length(cameraPosition - vW);
+    float m2 = 0.003 + (gVar + gSwVar * gK * gK * 0.9) * 2.0 + 0.009 * smoothstep(30.0, 260.0, camD);
+    float Dg = exp(-(1.0 - nh2) / (nh2 * m2)) / (3.14159 * m2 * nh2 * nh2);
+    float Fh = 0.02 + 0.98 * pow(clamp(1.0 - dot(H, V), 0.0, 1.0), 5.0);
+    float glare = min(Dg * Fh / (4.0 * max(dot(ns, V), 0.2)), 5.0);
+    // Close up, the glitter breaks into twinkling points, each on its own slow timing.
     vec2 gp = p * 4.0;
     vec2 cell = floor(gp);
     float r1 = hsh(cell);
-    // Each glint fades in and out on its own slow timing.
     float twinkle = pow(clamp(0.5 + 0.5 * sin(t * (0.7 + r1 * 0.9) + r1 * 40.0), 0.0, 1.0), 3.0);
     vec2 fc = fract(gp) - 0.5 - (vec2(hsh(cell + 11.3), hsh(cell + 5.9)) - 0.5) * 0.55;
     float dot1 = smoothstep(0.16, 0.0, length(fc));
-    float spark = step(0.86, hsh(cell + 9.1)) * twinkle * dot1 * pow(nh, 40.0) * 3.0 * (1.0 - smoothstep(0.04, 0.14, fw));
+    float spark = step(0.86, hsh(cell + 9.1)) * twinkle * dot1 * min(Dg * 0.015, 1.0) * 3.0 * (1.0 - smoothstep(0.03, 0.08, fw));
     // At night the moon path is softened so the living light reads over it.
     float sunVis = (1.0 - uStorm * 0.85) * smoothstep(-0.02, 0.12, L.y) * (1.0 - 0.75 * (1.0 - smoothstep(0.28, 0.58, uDay)));
-    lit += uSunCol * (glare + spark) * uSunI * 0.3 * sunVis;
+    lit += uSunCol * (glare * 0.9 + spark * 0.8) * uSunI * 0.3 * sunVis;
 
     // Whitecaps only in storms.
     float capN = vnoise(p * 1.7 + vec2(t * 0.25, -t * 0.15));
@@ -312,13 +384,15 @@ const waterFrag = /* glsl */ `
     float shore = 1.0 - smoothstep(0.0, 0.05 + 0.06 * fn + 0.16 * surge, depth);
     // Rolling surf lines: a lighter hump out in the shallows that steepens and breaks into
     // foam as it nears the beach.
-    float line = pow(clamp(0.5 + 0.5 * sin(sd * 3.6 + surfP), 0.0, 1.0), 4.0) * surfZone * setK;
+    // Wave spacing and height vary along the coast, and the crests break up into foam.
+    float spacing = 3.6 * (0.8 + 0.4 * vnoise(p * 0.09 + 5.5));
+    float line = pow(clamp(0.5 + 0.5 * sin(sd * spacing + surfP), 0.0, 1.0), 4.0) * surfZone * setK;
     float breaking = 1.0 - smoothstep(0.3, 2.2, sd);
-    lit += vec3(0.14, 0.24, 0.24) * line * (1.0 - breaking) * dayK;
+    lit += vec3(0.1, 0.18, 0.18) * line * (1.0 - breaking) * dayK;
     // The steep face in front of each wave sits in its own shadow.
-    float trough = pow(clamp(0.5 + 0.5 * sin(sd * 3.6 + surfP + 1.1), 0.0, 1.0), 6.0) * surfZone * setK;
+    float trough = pow(clamp(0.5 + 0.5 * sin(sd * spacing + surfP + 1.1), 0.0, 1.0), 6.0) * surfZone * setK;
     lit *= 1.0 - 0.16 * trough * (0.4 + breaking);
-    float surfFoam = line * mix(0.3, 1.0, breaking) * smoothstep(0.08, 0.42, vnoise(p * 3.1 + vec2(t * 0.4, -t * 0.25)) * 0.8 + breaking * 0.3) * 1.35;
+    float surfFoam = line * mix(0.15, 1.0, breaking) * smoothstep(0.25, 0.6, vnoise(p * 3.1 + vec2(t * 0.4, -t * 0.25)) * 0.75 + vnoise(p * 0.9 - t * 0.1) * 0.25 + breaking * 0.25) * 1.35;
     // The foam left behind as a wave drains back down the beach.
     float backwash = (1.0 - smoothstep(0.0, 0.18, depth)) * smoothstep(0.3, 0.6, fSw) * (1.0 - smoothstep(0.6, 0.95, fSw)) * uSwash
                    * smoothstep(0.45, 0.75, vnoise(p * 4.5 + vec2(0.0, t * 0.3)));
@@ -354,12 +428,12 @@ const waterFrag = /* glsl */ `
       lit = mix(lit, nightSea, bioNight * 0.78);
       // Currents: domain-warped ridge noise makes long, winding ribbons.
       vec2 flow = p + vec2(t * 0.05, -t * 0.035);
-      vec2 warp = vec2(vnoise(flow * 0.045), vnoise(flow * 0.045 + 7.3)) - 0.5;
+      vec2 warp = vec2(gnoise(flow * 0.045), gnoise(flow * 0.045 + 7.3)) - 0.5;
       vec2 q = flow + warp * 9.0;
-      float ridge = 1.0 - abs(vnoise(q * 0.06) * 2.0 - 1.0);
-      float ribbon = smoothstep(0.38, 0.9, ridge) * smoothstep(0.25, 0.65, vnoise(q * 0.15 + 3.0));
+      float ridge = 1.0 - abs(gnoise(q * 0.06) * 2.0 - 1.0);
+      float ribbon = smoothstep(0.38, 0.9, ridge) * smoothstep(0.25, 0.65, gnoise(q * 0.15 + 3.0));
       // A second, narrower set of drifts between the main streams.
-      float ridge2 = 1.0 - abs(vnoise(q * 0.16 + 11.0) * 2.0 - 1.0);
+      float ridge2 = 1.0 - abs(gnoise(q * 0.16 + 11.0) * 2.0 - 1.0);
       ribbon = max(ribbon, smoothstep(0.78, 0.97, ridge2) * 0.5);
       // Rich near the islands; a thinner scatter carries on across the open sea, past the map.
       float habitat = (midK * 0.85 + shallowK * 0.55) * nearIsle + 0.12 * openK;
@@ -368,13 +442,14 @@ const waterFrag = /* glsl */ `
       vec2 sq = q + vec2(t * 0.12, 0.0);
       float specks = plankton(sq * 5.5, t, fw * 5.5) * 0.75 + plankton(sq * 2.7 + 19.0, t * 0.8, fw * 2.7);
       // Plankton gathers in clouds within the stream rather than spreading evenly.
-      specks *= 0.35 + 1.3 * smoothstep(0.3, 0.8, vnoise(sq * 0.7 + 23.0));
+      float clumps = gnoise(sq * 0.7 + 23.0);
+      specks *= 0.35 + 1.3 * smoothstep(0.3, 0.8, clumps);
       // The soft haze of a drift belongs to the rich water near the islands; out at sea only a few specks.
       lit += vec3(0.01, 0.2, 0.62) * stream * 0.3 * nearIsle;
       lit += vec3(0.05, 0.5, 1.7) * stream * specks * 1.2;
       // Far off, the specks shrink below a pixel: their average light keeps the drifts visible.
       float farK = smoothstep(0.06, 0.3, fw * 5.5);
-      lit += vec3(0.02, 0.32, 1.05) * stream * farK * nearIsle * (0.35 + 0.65 * smoothstep(0.3, 0.8, vnoise(sq * 0.7 + 23.0))) * 0.8;
+      lit += vec3(0.02, 0.32, 1.05) * stream * farK * nearIsle * (0.35 + 0.65 * smoothstep(0.3, 0.8, clumps)) * 0.8;
       // Lone sparks scattered through the shallows and channels.
       vec2 lp = p * 1.6 + vec2(t * 0.03, 0.0) + 5.0;
       float lone = plankton(lp, t * 1.3, fw * 1.6) * step(0.82, hsh(floor(lp) + 3.3));
@@ -387,9 +462,11 @@ const waterFrag = /* glsl */ `
       bioA = clamp(shallowK * 0.5 + stream * 0.5 + stir * 0.6, 0.0, 0.85) * bioNight;
     }
 
-    // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface.
+    // Deep water stays slightly translucent so whales, rays and fish schools show beneath the surface
+    // (less of the featureless sea floor shows through far out).
     float alpha = mix(0.22, 0.6, smoothstep(0.0, 0.9, cdepth));
-    alpha = mix(alpha, 0.64, smoothstep(0.9, 3.6, cdepth));
+    alpha = mix(alpha, 0.66, smoothstep(0.9, 3.6, cdepth));
+    alpha = mix(alpha, 0.8, openK * uSwash);
     alpha = max(alpha, foam);
     alpha = max(alpha, bioA);
     // Wet sand just above the water line: a thin dark gloss, no water colour.
@@ -397,9 +474,6 @@ const waterFrag = /* glsl */ `
       lit = mix(vec3(0.3, 0.27, 0.2), skyR * 0.6, 0.25) * dayK;
       alpha = 0.3 * wet;
     }
-    // Beyond the island's seabed there is nothing underneath: fully opaque open sea.
-    // Toward the map's edge (and beyond it) there is no seabed to see: fully opaque open sea.
-    alpha = mix(alpha, 1.0, edgeFade);
     gl_FragColor = vec4(lit, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -678,11 +752,12 @@ export class Water {
     ocean.position.y = SEA_SURFACE;
     ocean.renderOrder = 10;
     this.group.add(ocean);
-    // Dark ocean floor under everything, so looking through the water past the island's seabed
-    // never shows the sky colour behind.
+    // Ocean floor under everything beyond the map, so looking through the water never shows the sky
+    // colour behind. Coloured and lit like the island's own deep seabed (the terrain's fully absorbed
+    // tint), so the sea looks the same over both and the map's square edge never shows.
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD.oceanSize, WORLD.oceanSize, 1, 1).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(0x06202f), fog: true })
+      new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(0.03, 0.15, 0.24, THREE.LinearSRGBColorSpace), roughness: 1, metalness: 0 })
     );
     floor.position.y = -6.2;
     floor.name = 'oceanFloor';
@@ -805,12 +880,12 @@ export class Water {
     const toH = THREE.DataUtils.toHalfFloat;
     for (let j = 0; j < r; j++) {
       for (let i = 0; i < r; i++) {
-        // 3x3 blur (texels → world units: two texels per unit), capped far out at sea.
+        // 3x3 blur (texels → world units: two texels per unit), capped far out at sea (80 units).
         let sum = 0, n = 0;
         for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
           const ii = i + di, jj = j + dj;
           if (ii < 0 || jj < 0 || ii >= r || jj >= r) continue;
-          sum += Math.min(D[jj * r + ii], 40);
+          sum += Math.min(D[jj * r + ii], 160);
           n++;
         }
         this.heightData[(j * r + i) * 4 + 2] = toH((sum / n) * 0.5);
