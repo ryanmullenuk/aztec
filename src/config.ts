@@ -842,7 +842,7 @@ export const SEA_STACKS = {
   /** Open water needed straight out to sea from a stack (exposed coast only). */
   exposure: 30,
   /** How high the biggest bursts of white water climb, and the distance within which they play. */
-  burstHeight: 5.5,
+  burstHeight: 8.5,
   viewRange: 150,
 };
 

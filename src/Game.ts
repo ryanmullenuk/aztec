@@ -12,7 +12,7 @@ import { Water } from './water/Water';
 import { Lighting } from './render/Lighting';
 import { PostFX } from './render/PostFX';
 import { CameraRig } from './render/CameraRig';
-import { FX } from './render/materials';
+import { FX, setCanopyFade } from './render/materials';
 import { Input } from './ui/Input';
 import { UI } from './ui/UI';
 import { PAINT_TOOLS, TOOLBAR, TOOLS, ToolId } from './ui/tools';
@@ -1605,6 +1605,7 @@ export class Game {
     FX.uCamPos.value.copy(this.rig.camera.position);
     FX.uFocus.value.copy(this.rig.target);
     FX.uCut.value = 1 - THREE.MathUtils.smoothstep(this.rig.cur.dist, 14, 30);
+    setCanopyFade(FX.uCut.value);
 
     const growth = [1.2, 1.0, 0.85, 0.5][this.time.seasonIndex] * (this.raining ? 1.6 : 1);
     this.veg.update(dt, this.rig.camera.position, this.rig.target, RENDER.presets[this.preset].lodDist, growth, t);
