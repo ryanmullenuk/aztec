@@ -570,6 +570,7 @@ export class BuildingSystem {
       case 'firepit': return models.firepitModel();
       case 'kennel': return models.kennelModel();
       case 'greathall': return models.greatHallModel();
+      case 'healer': return models.healingCentreModel();
       case 'well': return models.wellModel();
       case 'butcher': return models.butcherModel(sw, sd);
       case 'pigpen': return models.pigpenModel(sw, sd);

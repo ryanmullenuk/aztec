@@ -413,7 +413,10 @@ export function templeModel(tier: number): BuildingModel {
   for (let k = 0; k < stairN; k++) {
     const yTop = ((k + 1) / stairN) * H;
     const z0 = zf(k), z1 = zf(k + 1);
-    b.add(P.box(0.82, yTop, z0 - z1 + 0.02), { color: (p) => (p.y > yTop - 0.04 ? K.terracotta : K.terracotta.clone().multiplyScalar(0.8)) }, M.t(0, yTop / 2, (z0 + z1) / 2));
+    // Treads stand a hair proud of the terraces they cut into, so the red and the stone tops never
+    // share a plane (that flickered as the camera moved).
+    const yT = yTop + 0.008;
+    b.add(P.box(0.82, yT, z0 - z1 + 0.02), { color: (p) => (p.y > yT - 0.04 ? K.terracotta : K.terracotta.clone().multiplyScalar(0.8)) }, M.t(0, yT / 2, (z0 + z1) / 2));
   }
   // Sloped balustrades either side of the stairs.
   const slope = Math.atan2(H, run + 0.06);
@@ -1564,13 +1567,13 @@ function slabs(b: GeoBuilder, x0: number, z0: number, w: number, d: number, cell
 const FLOWER = new THREE.OctahedronGeometry(0.045, 0);
 
 /** A clump of red (and a few orange) tropical flowers on short stems. */
-function blooms(b: GeoBuilder, x: number, y: number, z: number, n: number, sx: number, sz: number, seed: number): void {
+function blooms(b: GeoBuilder, x: number, y: number, z: number, n: number, sx: number, sz: number, seed: number, redShare = 0.75): void {
   const r = new RNG(seed);
   for (let k = 0; k < n; k++) {
     const px = x + r.range(-sx, sx), pz = z + r.range(-sz, sz);
     const h = r.range(0.1, 0.2);
     b.add(P.cyl(0.008, 0.01, h, 3), { color: c(0x3c7a2e) }, M.t(px, y + h / 2, pz));
-    const petal = r.next() < 0.75 ? c(0xd8322a) : c(0xef7a22);
+    const petal = r.next() < redShare ? c(0xd8322a) : c(0xef7a22);
     b.add(FLOWER, { color: (q) => (q.y > y + h + 0.035 ? c(0xf2d04a) : petal.clone()), leaf: 1 }, M.t(px, y + h + 0.02, pz, 0, r.next() * 3, 0, 1, 0.6, 1));
   }
 }
@@ -1745,7 +1748,8 @@ export function greatHallModel(): BuildingModel {
   const planter = (x: number, z: number, w: number, d: number, seed: number) => {
     b.add(P.box(w, 0.22, d), { color: sand }, M.t(x, 0.11, z));
     b.add(P.box(w + 0.03, 0.05, d + 0.03), { color: K.red }, M.t(x, 0.245, z));
-    b.add(P.box(w - 0.08, 0.02, d - 0.08), { color: c(0x4a3624) }, M.t(x, 0.26, z));
+    // Soil just above the red rim's top (level with it, the two flickered).
+    b.add(P.box(w - 0.08, 0.02, d - 0.08), { color: c(0x4a3624) }, M.t(x, 0.266, z));
     const long = Math.max(w, d), along = w >= d;
     const n = Math.max(1, Math.round(long / 0.4));
     for (let k = 0; k < n; k++) {
@@ -1770,4 +1774,201 @@ export function greatHallModel(): BuildingModel {
   // Bell frame under the front beam (the bell itself swings separately).
   b.add(P.box(0.05, 0.1, 0.05), { color: K.timberDark }, M.t(0, HALL.bell.y + 0.04, HALL.bell.z));
   return { finished: b.build(), torches, height: 2.4, canopy: roof.build() };
+}
+
+// ---------------- Healing Centre ----------------
+
+/**
+ * Layout of the Healing Centre (model-local, door faces +z): a sandstone courtyard raised on a low
+ * paved base and reached by wide front steps, the main hall along the back, a small room at each
+ * front corner and four beds in the open court. Shared by the model and the patients who use it.
+ */
+export const HEAL = {
+  /** Courtyard floor height; half-width of the base and its back and front edges; the front steps. */
+  h: 0.24,
+  half: 2.3,
+  back: -2.3,
+  front: 1.8,
+  stairHalf: 0.7,
+  stairFoot: 2.25,
+  /** The main hall's front wall (its doorway is at x = 0). */
+  hallFront: -1.1,
+  /** Beds (lengthwise, head end at the back, z0) and the mattress top above the floor. */
+  beds: [-1.05, -0.45, 0.45, 1.05].map((x) => ({ x, z0: -0.3 })),
+  bedLen: 0.66,
+  bedW: 0.3,
+  bedTop: 0.17,
+  /** Where a patient stands beside bed k before lying down (local x): the aisle, or the gap between beds. */
+  bedSide(k: number): number {
+    const x = HEAL.beds[k].x;
+    return Math.sign(x) * (Math.abs(x) < 0.7 ? 0.12 : 0.75);
+  },
+  /** Floor height at a local point: the courtyard, the front steps, else the ground. */
+  floorY(lx: number, lz: number): number {
+    if (Math.abs(lx) <= HEAL.half && lz >= HEAL.back && lz <= HEAL.front) return HEAL.h;
+    if (Math.abs(lx) <= HEAL.stairHalf && lz > HEAL.front && lz < HEAL.stairFoot) return (HEAL.h * (HEAL.stairFoot - lz)) / (HEAL.stairFoot - HEAL.front);
+    return 0;
+  },
+};
+
+const HC = {
+  wall: c(0xe2b77e),
+  wallLight: c(0xf0d3a2),
+  dark: c(0xc39a62),
+  roof: c(0xd7a86c),
+  band: c(0x8e2a22),
+  red: c(0xb8322a),
+  cream: c(0xf3e3c6),
+  post: c(0x5e3b22),
+  clay: c(0xc4643a),
+  clayDark: c(0x9c4a2c),
+  leaf: c(0x3f8a34),
+  leafLight: c(0x7cc04a),
+};
+
+/** A sandstone block with a dark red band round its foot and a raised parapet round its flat roof. */
+function sandBlock(b: GeoBuilder, w: number, h: number, d: number, x: number, y: number, z: number): void {
+  b.add(P.rbox(w, h, d, 0.03), { color: (p) => HC.wall.clone().lerp(HC.wallLight, Math.min(1, Math.max(0, (p.y - y) / h)) * 0.5) }, M.t(x, y + h / 2, z));
+  b.add(P.box(w + 0.02, 0.12, d + 0.02), { color: HC.band }, M.t(x, y + 0.06, z));
+  b.add(P.box(w + 0.03, 0.03, d + 0.03), { color: HC.dark }, M.t(x, y + h - 0.015, z));
+  const t = 0.08, ph = 0.13;
+  b.add(P.box(w, ph, t), { color: HC.wallLight }, M.t(x, y + h + ph / 2, z + d / 2 - t / 2));
+  b.add(P.box(w, ph, t), { color: HC.wallLight }, M.t(x, y + h + ph / 2, z - d / 2 + t / 2));
+  b.add(P.box(t, ph, d - t * 2), { color: HC.wallLight }, M.t(x + w / 2 - t / 2, y + h + ph / 2, z));
+  b.add(P.box(t, ph, d - t * 2), { color: HC.wallLight }, M.t(x - w / 2 + t / 2, y + h + ph / 2, z));
+  b.add(P.box(w - t * 2, 0.02, d - t * 2), { color: HC.roof }, M.t(x, y + h + 0.01, z));
+}
+
+/** A round clay storage jar. */
+function clayJar(b: GeoBuilder, x: number, y: number, z: number, s = 1): void {
+  b.add(P.sphere(0.08 * s, 1), { color: (p) => (p.y < y + 0.06 * s ? HC.clayDark : HC.clay) }, M.t(x, y + 0.09 * s, z, 0, 0, 0, 1, 1.15, 1));
+  b.add(P.cyl(0.035 * s, 0.045 * s, 0.05 * s, 7), { color: HC.clay }, M.t(x, y + 0.19 * s, z));
+  b.add(P.cyl(0.045 * s, 0.045 * s, 0.015 * s, 7), { color: HC.clayDark }, M.t(x, y + 0.215 * s, z));
+}
+
+/**
+ * Healing Centre: a stone-paved plot carrying a raised sandstone courtyard. Along the back, the long
+ * main hall with a flat roof, a raised parapet and a green leaf over its doorway, shaded by a long red
+ * and white striped awning on dark posts over a table of bowls, herbs and clay jars. A small room at
+ * each front corner with a window and a little striped awning over its red door, and four low beds
+ * with cream mattresses and red pillows and blankets in the open court. Wide front steps with red
+ * risers between planters of leafy plants and orange flowers, torches on the front corner posts and
+ * a flagstone path out front.
+ */
+export function healingCentreModel(): BuildingModel {
+  const b = new GeoBuilder();
+  const rng = new RNG(1313);
+  const H = HEAL.h, W = HEAL.half, BK = HEAL.back, F = HEAL.front, HF = HEAL.hallFront;
+  // Paved ground over the whole plot and a flagstone path out from the steps.
+  b.add(P.box(4.95, 0.012, 4.95), { color: c(0x8f887d) }, M.t(0, 0.006, 0));
+  for (let x = -0.95; x < 0.9; ) {
+    const w = rng.range(0.24, 0.36);
+    for (const z of [2.3, 2.45]) {
+      if (z > 2.4 && Math.abs(x + w / 2) > 0.7) continue;
+      b.add(P.box(w - 0.025, 0.02, 0.13), { color: c(0xaaa49a).lerp(c(0x7d7870), rng.next() * 0.7) }, M.t(x + w / 2 + rng.range(-0.01, 0.01), 0.01, z + rng.range(-0.01, 0.01), 0, rng.range(-0.05, 0.05), 0));
+    }
+    x += w;
+  }
+  // The courtyard base: a stone course under a sandstone coping with a thin red fascia.
+  const cz = (F + BK) / 2, cd = F - BK;
+  b.add(P.box(2 * W, H - 0.04, cd), { color: K.stoneDark }, M.t(0, (H - 0.04) / 2, cz));
+  b.add(P.box(2 * W + 0.04, 0.04, cd + 0.04), { color: HC.dark }, M.t(0, H - 0.02, cz));
+  b.add(P.box(2 * W + 0.02, 0.035, cd + 0.02), { color: HC.band }, M.t(0, H - 0.075, cz));
+  // Sandstone floor tiles over the court (not under the rooms).
+  const cell = (2 * W) / 16;
+  slabs(b, -W, HF, 16, 10, cell, H, 0.012, (i, j) => HC.wallLight.clone().lerp(HC.dark, ((i * 5 + j * 11) % 4) / 8 + rng.range(0, 0.12)), (x, z) => Math.abs(x) > 1.3 && z > 0.45);
+  // Front steps: red risers under sandstone treads.
+  const steps = 3, run = (HEAL.stairFoot - F) / steps, rise = H / steps;
+  for (let k = 0; k < steps; k++) {
+    const top = H - k * rise, z = F + run * (k + 0.5);
+    b.add(P.box(HEAL.stairHalf * 2, top - 0.02, run), { color: K.red }, M.t(0, (top - 0.02) / 2, z));
+    b.add(P.box(HEAL.stairHalf * 2 + 0.02, 0.02, run + 0.02), { color: HC.wallLight }, M.t(0, top - 0.01, z));
+  }
+  // Main hall along the back, its doorway facing the court under a green leaf emblem.
+  const hallH = 1.15, hallD = HF - BK;
+  sandBlock(b, 2 * W, hallH, hallD, 0, H, (HF + BK) / 2);
+  b.add(P.box(0.46, 0.64, 0.03), { color: HC.wallLight }, M.t(0, H + 0.32, HF + 0.005));
+  b.add(P.box(0.36, 0.56, 0.04), { color: c(0x3a2721) }, M.t(0, H + 0.28, HF + 0.012));
+  b.add(P.box(0.5, 0.05, 0.05), { color: HC.band }, M.t(0, H + 0.66, HF + 0.02));
+  b.add(P.cyl(0.1, 0.1, 0.025, 12), { color: HC.cream }, M.t(0, H + 0.98, HF + 0.012, Math.PI / 2, 0, 0));
+  for (const [a, s] of [[0.5, 0.85], [-0.5, 0.85], [0, 1.1]]) {
+    b.add(P.sphere(0.05, 0), { color: s > 1 ? HC.leafLight : HC.leaf }, M.t(Math.sin(a) * 0.04, H + 0.98 + Math.cos(a) * 0.015, HF + 0.03, 0, 0, -a, 0.45 * s, 1.2 * s, 0.25));
+  }
+  b.add(P.box(0.012, 0.08, 0.01), { color: c(0x2f6a28) }, M.t(0, H + 0.93, HF + 0.035));
+  for (const x of [-1.55, 1.55]) adobeWindow(b, x, H + 0.55, HF + 0.01, false, 0.16, 0.2);
+  // The long striped awning in front of the hall (drawn with the canopy), on four dark posts.
+  const roof = new GeoBuilder();
+  const aw = 3.7, az1 = -0.45, yTop = H + 0.84, yLow = H + 0.68;
+  const alen = Math.hypot(az1 - HF, yTop - yLow), slope = Math.atan2(yTop - yLow, az1 - HF);
+  const stripes = 12;
+  for (let k = 0; k < stripes; k++) {
+    roof.add(P.box(aw / stripes + 0.002, 0.025, alen), { color: k % 2 ? K.white : K.red }, M.t(-aw / 2 + (aw / stripes) * (k + 0.5), (yTop + yLow) / 2, (HF + az1) / 2, slope, 0, 0));
+  }
+  roof.add(P.box(aw + 0.02, 0.08, 0.02), { color: K.red }, M.t(0, yLow - 0.05, az1 + 0.01));
+  for (const x of [-1.8, -0.6, 0.6, 1.8]) b.add(P.box(0.07, yLow - H, 0.07), { color: HC.post }, M.t(x, H + (yLow - H) / 2, az1 - 0.04));
+  b.add(P.box(aw, 0.05, 0.05), { color: HC.post }, M.t(0, yLow - 0.02, az1 - 0.04));
+  // Under the awning: a long table of bowls and herbs, clay jars and potted plants.
+  const tx = -1.15, tz = -0.8, tw = 0.9, td = 0.28, th = 0.28;
+  b.add(P.box(tw, 0.04, td), { color: K.timber }, M.t(tx, H + th, tz));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(P.box(0.04, th - 0.02, 0.04), { color: HC.post }, M.t(tx + sx * (tw / 2 - 0.05), H + (th - 0.02) / 2, tz + sz * (td / 2 - 0.04)));
+  for (const [dx, col] of [[-0.3, HC.clay], [-0.12, K.stoneDark], [0.05, HC.clay]] as [number, THREE.Color][]) {
+    b.add(P.cyl(0.055, 0.035, 0.04, 8), { color: col }, M.t(tx + dx, H + th + 0.04, tz));
+    b.add(P.cyl(0.045, 0.045, 0.01, 8), { color: dx < 0 ? c(0x6e9a3a) : c(0xd9a54a) }, M.t(tx + dx, H + th + 0.055, tz));
+  }
+  pottedPlant(b, tx + 0.3, H + th + 0.02, tz, 0.7);
+  clayJar(b, -1.78, H, -0.8, 1.1);
+  clayJar(b, -1.72, H, -0.6, 0.8);
+  clayJar(b, 1.05, H, -0.85, 1.2);
+  clayJar(b, 1.28, H, -0.8, 0.9);
+  pottedPlant(b, 1.55, H, -0.8, 1.1);
+  pottedPlant(b, 1.8, H, -0.72, 0.85);
+  pottedPlant(b, -0.35, H, -0.85, 0.9);
+  // The two small front rooms, doors facing the court under little striped awnings.
+  for (const sx of [-1, 1]) {
+    const rx = sx * 1.825, rz = 1.05, rw = 0.95, rd = 1.1, rh = 0.8;
+    sandBlock(b, rw, rh, rd, rx, H, rz);
+    adobeWindow(b, rx, H + 0.5, rz + rd / 2 + 0.005, false, 0.14, 0.16);
+    adobeWindow(b, sx * (W + 0.005), H + 0.5, rz, true, 0.14, 0.16);
+    // Local frame on the inner wall: x along it, y up from the floor, +z out into the court.
+    const m0 = M.t(sx * (1.825 - rw / 2), H, rz, 0, (-sx * Math.PI) / 2, 0);
+    const at = (x: number, y: number, z: number, tilt = 0) => m0.clone().multiply(M.t(x, y, z, tilt, 0, 0));
+    b.add(P.box(0.32, 0.5, 0.03), { color: HC.wallLight }, at(0, 0.25, 0.005));
+    b.add(P.box(0.26, 0.44, 0.04), { color: HC.red }, at(0, 0.22, 0.012));
+    b.add(P.box(0.02, 0.02, 0.02), { color: K.gold }, at(0.08, 0.22, 0.035));
+    const sw = 0.5, sd = 0.26, n = 5;
+    for (let k = 0; k < n; k++) b.add(P.box(sw / n + 0.002, 0.02, sd), { color: k % 2 ? K.white : K.red }, at(-sw / 2 + (sw / n) * (k + 0.5), 0.6, sd / 2, 0.3));
+    b.add(P.box(sw + 0.01, 0.05, 0.015), { color: K.red }, at(0, 0.54, sd * 0.96));
+    for (const x of [-0.2, 0.2]) b.add(P.box(0.025, 0.025, 0.22), { color: HC.post }, at(x, 0.5, 0.1, -0.5));
+  }
+  // Four low beds: wooden frames, cream mattresses, red pillows and folded red blankets.
+  for (const bed of HEAL.beds) {
+    const L = HEAL.bedLen, BW = HEAL.bedW, zc = bed.z0 + L / 2;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(P.box(0.04, 0.09, 0.04), { color: HC.post }, M.t(bed.x + sx * (BW / 2 - 0.03), H + 0.045, zc + sz * (L / 2 - 0.03)));
+    b.add(P.box(BW, 0.04, L), { color: K.timber }, M.t(bed.x, H + 0.1, zc));
+    b.add(P.box(BW, 0.12, 0.03), { color: HC.post }, M.t(bed.x, H + 0.14, bed.z0 + 0.015));
+    b.add(P.box(BW - 0.03, 0.05, L - 0.05), { color: HC.cream }, M.t(bed.x, H + 0.145, zc + 0.01));
+    b.add(P.box(BW - 0.09, 0.04, 0.1), { color: HC.red }, M.t(bed.x, H + 0.185, bed.z0 + 0.1));
+    b.add(P.box(BW - 0.01, 0.018, 0.2), { color: HC.red }, M.t(bed.x, H + 0.178, bed.z0 + L - 0.13));
+    b.add(P.box(BW, 0.02, 0.03), { color: HC.cream }, M.t(bed.x, H + 0.18, bed.z0 + L - 0.1));
+  }
+  // Raised planters either side of the steps, full of leafy plants and orange flowers.
+  for (const sx of [-1, 1]) {
+    const px = sx * 1.4, pz = 2.04, pw = 0.95, pd = 0.36;
+    b.add(P.box(pw, 0.26, pd), { color: HC.wall }, M.t(px, 0.13, pz));
+    b.add(P.box(pw + 0.03, 0.05, pd + 0.03), { color: HC.red }, M.t(px, 0.28, pz));
+    b.add(P.box(pw - 0.08, 0.02, pd - 0.08), { color: c(0x4a3624) }, M.t(px, 0.3, pz));
+    for (let k = 0; k < 3; k++) {
+      const x = px + (k - 1) * 0.3 + rng.range(-0.03, 0.03), z = pz + rng.range(-0.04, 0.04);
+      if (k === 1) broadLeaf(b, x, 0.3, z, 1.35, 70 + sx * 3 + k);
+      else fern(b, x, 0.3, z, 1.1, 80 + sx * 3 + k);
+    }
+    blooms(b, px, 0.3, pz, 10, pw / 2 - 0.1, pd / 2 - 0.08, 90 + sx, 0.3);
+  }
+  // Short posts at the corners: torches at the front, stone posts at the back.
+  const torches = [torchPole(b, -2.4, 2.4, 0.6), torchPole(b, 2.4, 2.4, 0.6)];
+  for (const sx of [-1, 1]) {
+    b.add(P.box(0.12, 0.34, 0.12), { color: K.stone }, M.t(sx * 2.4, 0.17, -2.4));
+    b.add(P.box(0.16, 0.05, 0.16), { color: HC.dark }, M.t(sx * 2.4, 0.36, -2.4));
+  }
+  return { finished: b.build(), torches, height: 1.6, canopy: roof.build() };
 }
