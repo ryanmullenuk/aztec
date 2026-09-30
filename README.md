@@ -79,6 +79,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - The sea's colour follows its real depth: turquoise shallows with meandering reef edges, deepening gradually to navy far from land, with no ring round the islands. Toward the map's edge the sea floor falls away along a rounded line that follows the coasts (the outer islets drop off like a reef wall), and the ocean floor beyond is lit like the island's own deep seabed, so the map's square edge never shows.
 - A 10-minute day/night cycle where golden hour lasts longest; the light hands over smoothly to a bright silvery moon with a glitter path on the sea, and village torches light up with real point lights.
 - The sun and moon show in the sky wherever the view looks up far enough (free-roam, or a low tilt). The sun is a bright disc in a warm glow that turns orange, swells and sinks into the sea as it sets. At night a pale full moon rides high in a cool halo. Both fade behind storm cloud.
+- On a clear night the sky fills with stars (brighter ones tinted blue-white or amber, twinkling) and the Milky Way arches across it, a soft band with a brighter core and dark dust lanes. They fade out at dawn and behind cloud.
 
 **Vegetation**
 - A tree catalogue: palms (straight, leaning, curved), eight broadleaf varieties (round, tall and narrow, spreading, jungle giants, vine-hung, pink blossom) and orange fruit trees, plus ferns, flowering bushes, apple bushes and banana trees, all with a wind-sway shader.
@@ -107,11 +108,17 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Ghost preview, then foundation, scaffolding and finished building.
 - Stores fill visibly and crops grow.
 - Healing Centre: a walled sandstone courtyard with four beds, a main hall behind a long striped awning and two small side rooms, reached by wide red-and-sandstone steps between flower planters.
+- Watchtower: a tall timber lookout on a stone footing, with a wattle parapet, a ladder, a red and gold banner and a torch burning on top at night.
 
 **Health**
 - Now and then someone falls sick (adults and children alike), and jaguars and alligators maul people. The sick and the mauled stop working and walk to the nearest Healing Centre, where they lie on a bed (or are cared for indoors when the beds are full); with no Healing Centre they rest at home.
 - Untreated, they die after an hour of game time, with a warning ten minutes before. The Healing Centre's card lists its patients, how long each has left and a Cure button: 50 food for sickness, 100 for a mauling. Cured islanders get up and go back to work. Tuning lives in `HEALTH` in `config.ts`.
 - In god mode (the island named GODMODE) nobody dies and curing is free.
+
+**Defence**
+- Jaguars keep dens deep in the jungle and stalk the village now and then; alligators lie in wait in the swamps. Dogs and warriors drive jaguars off.
+- A Watchtower keeps one villager on watch as an archer, day and night. The archer turns to face the nearest jaguar or alligator within range, draws and looses an arrow on a real arc, leading a moving target. Most arrows fly true: a wounded beast flees, and a few hits kill it. Misses stick quivering in the ground. The tower's card shows who is on watch, the arrows loosed and the predators brought down.
+- The predators never die out: a new jaguar swims over from beyond the edge of the map to take a dead one's den, and a new alligator turns up in the swamps a few minutes later. Tuning lives in `DEFENCE` in `config.ts`.
 
 **Economy and powers**
 - Resources: wood, stone, grain, fruit, meat, fish and Belief.
