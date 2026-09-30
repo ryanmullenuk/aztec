@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import type { Where } from '../ui/where';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL, HEALTH, TIME } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
-import { HALL } from '../buildings/models';
+import { HALL, HEAL } from '../buildings/models';
 import { Economy } from '../economy/Economy';
-import { Islander, Role, Task, makeIslander } from '../entities/Islander';
+import { Condition, Islander, Role, Task, makeIslander } from '../entities/Islander';
 import { Plant, PlantState, Vegetation } from '../vegetation/Vegetation';
 import { GameTime } from '../world/Time';
 import { World } from '../world/World';
@@ -20,7 +20,7 @@ export interface ColonyHooks {
   /** Fisher reached the jetty: board a boat. Returns true if a boat accepted the crew. */
   boardBoat?: (isl: Islander, jetty: Building) => boolean;
   sfx?: (name: string, x: number, z: number) => void;
-  notify?: (text: string, at?: Where) => void;
+  notify?: (text: string, at?: Where, kind?: 'info' | 'warn') => void;
   /** Animals kept in a building's pen. */
   penCount?: (b: Building) => number;
   /** Capture API (animals are only ever caught when the player orders it). */
@@ -57,6 +57,7 @@ export class Colony {
   private jobTimer = 0;
   private houseTimer = 0;
   private wearTimer = 0;
+  private healthTimer = 0;
   wearDirty = false;
   private blacklist = new Map<number, number>();
   private usedNames = new Set<string>();
@@ -104,6 +105,7 @@ export class Colony {
   restore(data: Partial<Islander> & { id: number; name: string; gender: 'm' | 'f' }): Islander {
     const isl = makeIslander(data.id, data.name, data.gender, data.x ?? 0, data.z ?? 0, this.rnd, data.child);
     Object.assign(isl, data, { task: null, path: null, pathPending: false, hidden: false, carry: null, sleeping: false });
+    if (isl.condition !== 'well' && !(isl.conditionT > 0)) isl.conditionT = HEALTH.deathSeconds;
     isl.y = this.world.groundY(isl.x, isl.z);
     this.usedNames.add(isl.name);
     this.nextId = Math.max(this.nextId, isl.id + 1);
@@ -148,6 +150,7 @@ export class Colony {
     let speed = (run ? ISLANDER.runSpeed : ISLANDER.walkSpeed) * (isl.child ? 0.8 : 1);
     if (isl.hunger <= 0.02) speed *= 0.7;
     if (isl.injured > 0) speed *= 0.6;
+    if (isl.condition !== 'well') speed *= HEALTH.sickSpeed;
     const cell = this.world.cellIndexAt(isl.x, isl.z);
     if (cell >= 0) {
       speed *= 1 - this.world.forest[cell] * 0.35;
@@ -222,6 +225,7 @@ export class Colony {
     }
     if (t.kind === 'build') this.bld.byId(t.target)?.builders.delete(isl.id);
     if (t.kind === 'hall') this.leaveHall(isl, t);
+    if (t.kind === 'heal') this.leaveHeal(isl, t);
     // Abandoned capture: the animal gets away (or is let go).
     if (t.kind === 'capture' && (t.phase ?? 0) < 2) {
       this.hooks.releaseAnimal?.(t.target);
@@ -242,6 +246,7 @@ export class Colony {
   /** Player override: make this islander work at a building or on a resource. */
   assign(isl: Islander, b: Building | null, plant: Plant | null): string {
     if (isl.child) return `${isl.name} is too young to work.`;
+    if (isl.condition !== 'well') return `${isl.name} is ${isl.condition === 'sick' ? 'sick' : 'badly hurt'} and cannot work until cured.`;
     this.cancelTask(isl);
     isl.manualRole = true;
     if (plant) {
@@ -292,7 +297,7 @@ export class Colony {
   private nearestFree(x: number, z: number): Islander | null {
     let best: Islander | null = null, bd = Infinity;
     for (const i of this.list) {
-      if (i.child || i.role === 'warrior' || i.manualRole) continue;
+      if (i.child || i.role === 'warrior' || i.manualRole || i.condition !== 'well') continue;
       const d = (i.x - x) ** 2 + (i.z - z) ** 2;
       if (d < bd) {
         bd = d;
@@ -303,7 +308,13 @@ export class Colony {
   }
 
   private assignJobs(): void {
-    const workers = this.list.filter((i) => !i.child && i.role !== 'warrior');
+    // The sick and injured are off work: others take their places until they are cured.
+    for (const i of this.list) {
+      if (i.condition === 'well' || i.child || i.manualRole || i.role === 'warrior') continue;
+      i.workplace = -1;
+      i.role = 'idle';
+    }
+    const workers = this.list.filter((i) => !i.child && i.role !== 'warrior' && i.condition === 'well');
     // Drop invalid workplaces.
     for (const i of workers) {
       if (i.workplace >= 0) {
@@ -534,6 +545,8 @@ export class Colony {
     if (this.bld.list.some((w) => w.key === 'well' && w.complete && (w.x - hx) ** 2 + (w.z - hz) ** 2 < r2)) target += COMFORTS.wellHappy;
     isl.happy += (Math.min(1, target) - isl.happy) * 0.08;
 
+    // Sick or hurt: off to a Healing Centre (or home to rest) until cured.
+    if (isl.condition !== 'well') return this.goHeal(isl);
     if (isl.child) {
       if (night) return this.goSleep(isl);
       if (isl.age > ISLANDER.childGrowDays * 600 * 0.4 && this.rnd() < 0.4) {
@@ -840,7 +853,7 @@ export class Colony {
   nearestHunter(x: number, z: number): Islander | null {
     let best: Islander | null = null, bd = Infinity;
     for (const i of this.list) {
-      if (i.child || i.sleeping || i.hidden || i.warrior || i.task?.kind === 'capture') continue;
+      if (i.child || i.sleeping || i.hidden || i.warrior || i.condition !== 'well' || i.task?.kind === 'capture') continue;
       const d = (i.x - x) ** 2 + (i.z - z) ** 2;
       if (d < bd) {
         bd = d;
@@ -853,7 +866,7 @@ export class Colony {
   /** A one-off round-up uses only unoccupied adults and reserves each animal once. */
   roundUp(pen: Building, animals: { id: number; x: number; z: number }[]): number {
     if (!pen.complete || !['pigpen', 'chickenpen'].includes(pen.key)) return 0;
-    const free = this.list.filter(i => !i.child && !i.sleeping && !i.hidden && !i.warrior &&
+    const free = this.list.filter(i => !i.child && !i.sleeping && !i.hidden && !i.warrior && i.condition === 'well' &&
       !i.carry && !i.manualRole && i.workplace < 0 && i.hunger > 0.25 && i.rest > 0.25 &&
       (!i.task || i.task.kind === 'wander'));
     let count = 0;
@@ -879,6 +892,7 @@ export class Colony {
     const who = isl ?? this.nearestHunter(pos.x, pos.z);
     if (!who) return { ok: false, msg: this.list.some((i) => !i.child && i.sleeping) ? 'Everyone is asleep. Try again in the morning.' : 'Nobody is free to go hunting.' };
     if (who.child) return { ok: false, msg: `${who.name} is too young to hunt.` };
+    if (who.condition !== 'well') return { ok: false, msg: `${who.name} is too unwell to hunt.` };
     this.setTask(who, 'capture', animalId, pos.x, pos.z);
     who.task!.phase = 0;
     if (destination) who.task!.building = destination.id;
@@ -1392,6 +1406,10 @@ export class Colony {
         this.runHall(isl, t, dt);
         break;
       }
+      case 'heal': {
+        this.runHeal(isl, t, dt);
+        break;
+      }
       case 'flee': {
         // Running for shelter; indoors at home they stay hidden until the danger passes.
         if (t.stage < 2) {
@@ -1714,17 +1732,299 @@ export class Colony {
     }
   }
 
-  /** Where to save a villager: someone in the hall is saved at its door. */
+  /** Where to save a villager: someone in the hall (or in the Healing Centre) is saved at its door. */
   savePos(isl: Islander): { x: number; z: number } {
     const t = isl.task;
-    if (t?.kind === 'hall' && isl.floorY !== null) {
+    if ((t?.kind === 'hall' || (t?.kind === 'heal' && t.phase === 1)) && (isl.floorY !== null || isl.hidden)) {
       const b = this.bld.byId(t.target);
       if (b) return { x: b.door.x, z: b.door.z };
     }
     return { x: isl.x, z: isl.z };
   }
 
-  /** Caught by a jaguar (or an alligator): badly hurt (limping, shaken), or killed. */
+  // ---------------- Health ----------------
+
+  private healers(): Building[] {
+    return this.bld.list.filter((b) => b.key === 'healer' && b.complete);
+  }
+
+  private nearestHealer(isl: Islander): Building | null {
+    let best: Building | null = null, bd = Infinity;
+    for (const b of this.healers()) {
+      const d = (b.door.x - isl.x) ** 2 + (b.door.z - isl.z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Falls sick, or is mauled: stops what they are doing (unless out at sea) and goes for care. A
+   * mauling outranks sickness; the clock already running keeps going.
+   */
+  afflict(isl: Islander, c: Exclude<Condition, 'well'>): void {
+    if (isl.condition === c || isl.condition === 'mauled') return;
+    isl.conditionT = isl.condition === 'well' ? HEALTH.deathSeconds : Math.min(isl.conditionT, HEALTH.deathSeconds);
+    isl.condition = c;
+    const t = isl.task;
+    // Out in a boat, already heading for care, or asleep (they wake up unwell): carry on for now.
+    if (t && ((t.kind === 'fish' && t.stage >= 2) || t.kind === 'heal' || t.kind === 'sleep')) return;
+    this.cancelTask(isl);
+    isl.think = 0;
+  }
+
+  /** What happens next, for the notification: care at the Healing Centre, or a deadline. */
+  private careNote(isl: Islander): string {
+    if (this.healers().length) return 'They are going to the Healing Centre.';
+    return `Build a Healing Centre to cure them within ${Math.ceil(isl.conditionT / 60)} minutes.`;
+  }
+
+  /** Now and then someone falls sick (not while the village is still tiny). */
+  private sicken(): void {
+    if (this.list.length < HEALTH.minPopulation) return;
+    const p = (HEALTH.sickChancePerDay * HEALTH.checkSeconds) / TIME.dayLength;
+    for (const isl of this.list) {
+      if (isl.condition !== 'well' || isl.hidden || this.rnd() >= p) continue;
+      this.afflict(isl, 'sick');
+      this.hooks.notify?.(`${isl.name} has fallen sick. ${this.careNote(isl)}`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }), 'warn');
+    }
+  }
+
+  /**
+   * Sick or mauled: the clock runs down (it stands still in god mode), with a warning near the end,
+   * then death. Returns true if they died.
+   */
+  private ail(isl: Islander, dt: number): boolean {
+    if (this.eco.godMode) return false;
+    const before = isl.conditionT;
+    isl.conditionT = Math.max(0, before - dt);
+    const at = () => (isl.hidden ? null : { x: isl.x, z: isl.z });
+    if (before > HEALTH.warnSeconds && isl.conditionT <= HEALTH.warnSeconds) {
+      const left = `${isl.name} will die in ${Math.round(HEALTH.warnSeconds / 60)} minutes`;
+      this.hooks.notify?.(this.healers().length ? `${left} unless cured at the Healing Centre!` : `${left}: build a Healing Centre to cure them!`, at, 'warn');
+    }
+    if (isl.conditionT > 0) return false;
+    // Out at sea: they hold on until the boat is back.
+    if (isl.task?.kind === 'fish' && isl.task.stage >= 2) return false;
+    this.hooks.notify?.(`${isl.name} has died of ${isl.condition === 'sick' ? 'their sickness' : 'their wounds'}.`, isl.hidden ? undefined : { x: isl.x, z: isl.z }, 'warn');
+    this.remove(isl);
+    return true;
+  }
+
+  /** Food it takes to cure an islander (free in god mode). */
+  cureCost(isl: Islander): number {
+    return isl.condition === 'well' || this.eco.godMode ? 0 : HEALTH.cureFood[isl.condition];
+  }
+
+  canCure(isl: Islander): boolean {
+    return isl.condition !== 'well' && (this.eco.godMode || this.eco.food >= this.cureCost(isl));
+  }
+
+  /** Cure an islander, paying in food: they get up and go back to work. */
+  cure(isl: Islander): boolean {
+    if (!this.canCure(isl)) return false;
+    this.takeFood(this.cureCost(isl));
+    isl.condition = 'well';
+    isl.conditionT = 0;
+    isl.injured = 0;
+    isl.happy = Math.min(1, isl.happy + 0.1);
+    const t = isl.task;
+    const b = t?.kind === 'heal' && t.phase === 1 ? this.bld.byId(t.target) : undefined;
+    if (t && b && t.stage === 3) this.leaveCare(isl, t, b);
+    else if (t?.kind === 'heal' && t.stage !== 2 && t.stage !== 4) this.releaseTask(isl);
+    isl.think = 0;
+    return true;
+  }
+
+  /** Take food from the stores, a unit at a time from whichever kind there is most of. */
+  private takeFood(n: number): void {
+    if (this.eco.godMode) return;
+    const res = this.eco.res;
+    for (let left = n; left > 1e-6; ) {
+      const k = FOOD_KEYS.reduce((a, b) => (res[b] > res[a] ? b : a));
+      const take = Math.min(left, 1, res[k]);
+      if (take <= 0) break;
+      res[k] -= take;
+      left -= take;
+    }
+  }
+
+  /** Patients in (or on their way to) a Healing Centre. */
+  patients(b: Building): Islander[] {
+    return this.list.filter((o) => o.task?.kind === 'heal' && o.task.phase === 1 && o.task.target === b.id && o.condition !== 'well');
+  }
+
+  /** A free bed in a Healing Centre, or -1 (then they are cared for indoors). */
+  private freeBed(b: Building): number {
+    const taken = new Set<number>();
+    for (const o of this.list) if (o.task?.kind === 'heal' && o.task.phase === 1 && o.task.target === b.id && (o.task.slot ?? -1) >= 0) taken.add(o.task.slot!);
+    for (let k = 0; k < HEAL.beds.length; k++) if (!taken.has(k)) return k;
+    return -1;
+  }
+
+  /** Off for care: to the nearest Healing Centre (a bed there if one is free), else home to rest. */
+  private goHeal(isl: Islander): void {
+    const b = this.nearestHealer(isl);
+    if (!b) return this.restHome(isl);
+    this.setTask(isl, 'heal', b.id, b.door.x, b.door.z);
+    const t = isl.task!;
+    t.phase = 1;
+    t.slot = this.freeBed(b);
+    t.timer = 5;
+  }
+
+  /** No Healing Centre (or no way there): rest at home, or by the fire, looking again now and then. */
+  private restHome(isl: Islander): void {
+    const home = isl.home >= 0 ? this.bld.byId(isl.home) : undefined;
+    const fire = this.bld.of('campfire')[0];
+    if (home && home.complete) this.setTask(isl, 'heal', home.id, home.door.x, home.door.z);
+    else if (fire) {
+      const a = this.rnd() * Math.PI * 2;
+      this.setTask(isl, 'heal', -1, fire.x + Math.cos(a) * 2.2, fire.z + Math.sin(a) * 2.2);
+    } else this.setTask(isl, 'heal', -1, isl.x, isl.z);
+    isl.task!.phase = 0;
+    isl.task!.timer = 20;
+  }
+
+  /** The walk from the foot of the Healing Centre's steps to the side of bed k (or, k < 0, into the hall). */
+  private healRoute(k: number): { x: number; z: number }[] {
+    const r = [{ x: 0, z: HEAL.stairFoot + 0.3 }, { x: 0, z: HEAL.front - 0.1 }];
+    if (k < 0) r.push({ x: 0, z: HEAL.hallFront + 0.1 });
+    else {
+      const sx = HEAL.bedSide(k), mid = HEAL.beds[k].z0 + HEAL.bedLen / 2;
+      r.push({ x: 0, z: 0.6 }, { x: sx, z: 0.6 }, { x: sx, z: mid });
+    }
+    return r;
+  }
+
+  /**
+   * Care: walk to the Healing Centre, up the steps to a bed (or in to the hall when the beds are
+   * full) and stay there until cured, then walk back out. With no Healing Centre, rest at home.
+   * Stages: 0-1 to the door, 2 walking in, 3 in care, 4 walking out (cured).
+   */
+  private runHeal(isl: Islander, t: Task, dt: number): void {
+    const b = t.target >= 0 ? this.bld.byId(t.target) : undefined;
+    if (t.target >= 0 && (!b || !b.complete)) return this.releaseTask(isl);
+    isl.tool = 'none';
+    const centre = t.phase === 1 ? b : undefined;
+    if (t.stage < 2) {
+      if (isl.condition === 'well') return this.releaseTask(isl);
+      const r = this.travel(isl, dt, t.x, t.z, centre ? { goalRadius: 0.6 } : b ? { allowBuilding: b.id, goalRadius: 1 } : { goalRadius: 1 });
+      if (r === 'walking') return;
+      if (centre) {
+        // Can't get there (or the path gave out short of the door): rest at home instead.
+        if (r === 'failed' || Math.hypot(isl.x - t.x, isl.z - t.z) > 1.2) {
+          this.releaseTask(isl);
+          return this.restHome(isl);
+        }
+        t.stage = 2;
+      } else {
+        // Indoors at home, or lying down where they are.
+        t.stage = 3;
+        isl.sleeping = true;
+        if (b && r === 'arrived') isl.hidden = true;
+      }
+    }
+    if (!centre) {
+      isl.anim = 'sleep';
+      if (isl.condition === 'well') return this.releaseTask(isl);
+      t.timer -= dt;
+      if (t.timer <= 0) {
+        t.timer = 20;
+        // A Healing Centre has been finished: go there.
+        if (this.healers().length) {
+          this.releaseTask(isl);
+          isl.think = 0;
+        }
+      }
+      return;
+    }
+    if (t.stage === 2 || t.stage === 4) {
+      if (!t.route) {
+        const inRoute = this.healRoute(t.slot ?? -1);
+        t.route = t.stage === 2 ? inRoute : [...inRoute].reverse().slice(1).concat([{ x: 0, z: centre.def.size[1] / 2 + 0.55 }]);
+        t.step = 0;
+      }
+      const wp = t.route[t.step ?? 0];
+      const [wx, wz] = centre.local(wp.x, wp.z);
+      const dx = wx - isl.x, dz = wz - isl.z, d = Math.hypot(dx, dz);
+      const speed = ISLANDER.walkSpeed * (isl.child ? 0.8 : 1) * (isl.condition === 'well' ? 1 : HEALTH.sickSpeed);
+      const step = speed * dt;
+      if (d <= step) {
+        isl.x = wx;
+        isl.z = wz;
+        t.step = (t.step ?? 0) + 1;
+      } else {
+        isl.x += (dx / d) * step;
+        isl.z += (dz / d) * step;
+        this.faceTo(isl, dx, dz, dt);
+      }
+      isl.anim = 'walk';
+      isl.speed = speed;
+      const [lx, lz] = centre.toLocal(isl.x, isl.z);
+      isl.floorY = centre.y + HEAL.floorY(lx, lz);
+      if ((t.step ?? 0) >= t.route.length) {
+        t.route = undefined;
+        if (t.stage === 2) t.stage = 3;
+        else {
+          isl.floorY = null;
+          return this.releaseTask(isl);
+        }
+      }
+      return;
+    }
+    // In care: lying on a bed, or looked after indoors (moving to a bed when one comes free).
+    if (isl.condition === 'well') return this.leaveCare(isl, t, centre);
+    isl.sleeping = true;
+    isl.safe = true;
+    isl.anim = 'sleep';
+    const k = t.slot ?? -1;
+    if (k >= 0) {
+      const bed = HEAL.beds[k];
+      [isl.x, isl.z] = centre.local(bed.x, bed.z0 + 0.16);
+      isl.heading = (centre.rot * Math.PI) / 2;
+      isl.floorY = centre.y + HEAL.h + HEAL.bedTop - 0.01;
+      isl.hidden = false;
+      return;
+    }
+    isl.hidden = true;
+    t.timer -= dt;
+    if (t.timer <= 0) {
+      t.timer = 5;
+      t.slot = this.freeBed(centre);
+    }
+  }
+
+  /** Cured in the Healing Centre: up from bed (or out of the hall) and walk back out. */
+  private leaveCare(isl: Islander, t: Task, b: Building): void {
+    const route = this.healRoute(t.slot ?? -1);
+    const last = route[route.length - 1];
+    [isl.x, isl.z] = b.local(last.x, last.z);
+    isl.floorY = b.y + HEAL.h;
+    isl.hidden = false;
+    isl.sleeping = false;
+    isl.safe = false;
+    t.stage = 4;
+    t.route = undefined;
+  }
+
+  /** Care over or interrupted: up and out (someone inside steps out of the door). */
+  private leaveHeal(isl: Islander, t: Task): void {
+    const inside = isl.floorY !== null || isl.hidden;
+    isl.sleeping = false;
+    isl.hidden = false;
+    isl.safe = false;
+    isl.floorY = null;
+    const b = t.target >= 0 ? this.bld.byId(t.target) : undefined;
+    if (inside && b) {
+      isl.x = b.door.x;
+      isl.z = b.door.z;
+    }
+  }
+
+  /** Caught by a jaguar (or an alligator): mauled (limping, badly hurt, needing care), or killed. */
   maul(isl: Islander, killed: boolean, by = 'a jaguar'): void {
     if (killed) {
       this.hooks.notify?.(`${isl.name} was killed by ${by}.`, { x: isl.x, z: isl.z });
@@ -1734,8 +2034,9 @@ export class Colony {
     isl.injured = 180;
     isl.happy = Math.max(0, isl.happy - 0.3);
     isl.rest = Math.max(0, isl.rest - 0.3);
-    this.hooks.notify?.(`${isl.name} was ${by === 'a jaguar' ? 'mauled' : 'bitten'} by ${by} and is badly hurt.`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
     this.alarm(isl.x, isl.z, 1);
+    this.afflict(isl, 'mauled');
+    this.hooks.notify?.(`${isl.name} was ${by === 'a jaguar' ? 'mauled' : 'bitten'} by ${by} and is badly hurt. ${this.careNote(isl)}`, () => (isl.hidden ? null : { x: isl.x, z: isl.z }));
   }
 
   /** Remove an islander from the village for good. */
@@ -1759,7 +2060,7 @@ export class Colony {
   callHelpers(b: Building): Islander[] {
     const r2 = COMFORTS.helpersRadius * COMFORTS.helpersRadius;
     const cand = this.list
-      .filter((i) => !i.child && i.role !== 'warrior' && !i.hidden && !(i.role === 'builder' && i.workplace === b.id))
+      .filter((i) => !i.child && i.role !== 'warrior' && !i.hidden && i.condition === 'well' && !(i.role === 'builder' && i.workplace === b.id))
       .map((i) => ({ i, d: (i.x - b.x) ** 2 + (i.z - b.z) ** 2 }))
       .filter((c) => c.d < r2)
       .sort((a, c) => a.d - c.d)
@@ -1821,6 +2122,11 @@ export class Colony {
       if (this.lastDay >= 0) this.dawn();
       this.lastDay = this.time.day;
     }
+    this.healthTimer -= dt;
+    if (this.healthTimer <= 0) {
+      this.healthTimer = HEALTH.checkSeconds;
+      this.sicken();
+    }
 
     let happy = 0;
     this.grid.clear();
@@ -1828,6 +2134,7 @@ export class Colony {
       isl.animT += dt;
       isl.age += dt;
       if (isl.injured > 0) isl.injured = Math.max(0, isl.injured - dt);
+      if (isl.condition !== 'well' && this.ail(isl, dt)) continue;
       isl.hunger = Math.max(0, isl.hunger - ISLANDER.hungerDrain * dt * (isl.child ? 0.6 : 1));
       if (!isl.sleeping) isl.rest = Math.max(0, isl.rest - ISLANDER.restDrain * dt);
       if (this.eco.godMode) {
@@ -1861,8 +2168,53 @@ export class Colony {
         this.grid.insert(isl);
       }
     }
+    this.separate(dt);
     this.eco.add('belief', happy * ISLANDER.beliefPerHappyPerSecond * dt);
     void JETTY;
+  }
+
+  /**
+   * People don't walk through each other: anyone on the move (or standing idle) who overlaps a
+   * neighbour is eased apart a little each frame, so crowds part smoothly. Someone seated, lying
+   * down or busy at a fixed spot holds their place and the walker steps round them. Nudges only
+   * ever land on open ground (never into water or a building they aren't already in).
+   */
+  private separate(dt: number): void {
+    const W = this.world;
+    const free = (i: Islander) => i.anim === 'walk' || i.anim === 'run' || i.anim === 'carry' || (i.anim === 'idle' && !i.task);
+    const size = (i: Islander) => ISLANDER.personalSpace * (i.child ? 0.75 : 1) * 0.5;
+    const k = Math.min(1, dt * 8);
+    for (const a of this.list) {
+      if (a.hidden || a.sleeping || !free(a)) continue;
+      const ra = size(a);
+      let px = 0, pz = 0;
+      this.grid.query(a.x, a.z, ISLANDER.personalSpace, (b, d2) => {
+        if (b === a || b.hidden) return;
+        const min = ra + size(b);
+        if (d2 >= min * min) return;
+        const d = Math.sqrt(d2);
+        let dx = a.x - b.x, dz = a.z - b.z, len = d;
+        // Standing exactly on top of each other: each steps off in their own direction.
+        if (d < 1e-4) {
+          const ang = a.id * 2.39996;
+          dx = Math.cos(ang);
+          dz = Math.sin(ang);
+          len = 1;
+        }
+        // Two walkers each take half; a walker gives way fully to someone who is busy or seated.
+        const share = free(b) && !b.sleeping ? 0.5 : 1;
+        const over = (min - d) * share;
+        px += (dx / len) * over;
+        pz += (dz / len) * over;
+      });
+      if (px === 0 && pz === 0) continue;
+      const nx = a.x + px * k, nz = a.z + pz * k;
+      const from = W.cellIndexAt(a.x, a.z), to = W.cellIndexAt(nx, nz);
+      if (to < 0 || !W.isLandCell(to)) continue;
+      if (to !== from && W.occ[to] && W.occ[to] !== (from >= 0 ? W.occ[from] : 0) && !W.passable(W.occ[to] - 1)) continue;
+      a.x = nx;
+      a.z = nz;
+    }
   }
 
   /** Screen-space pick (closest islander to the pointer within a radius in pixels). */
@@ -1886,6 +2238,13 @@ export class Colony {
   /** Current activity text for the info panel. */
   activity(isl: Islander): string {
     const t = isl.task;
+    if (t?.kind === 'heal') {
+      if (t.phase !== 1) return t.stage < 2 ? 'Going home to rest' : isl.hidden ? 'Resting at home' : 'Resting by the fire';
+      if (t.stage < 2) return 'Going to the Healing Centre';
+      if (t.stage === 4) return 'Leaving the Healing Centre';
+      if (t.stage === 2) return 'Going in to the Healing Centre';
+      return isl.hidden ? 'Being cared for in the Healing Centre' : 'Lying in bed at the Healing Centre';
+    }
     if (isl.sleeping) return 'Sleeping';
     if (!t) return 'Thinking';
     const b = t.target >= 0 ? this.bld.byId(t.target) : undefined;
