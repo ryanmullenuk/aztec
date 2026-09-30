@@ -6,8 +6,8 @@ import { DOG_BASE } from '../entities/Dogs';
 import { JAG_BASE } from '../entities/Jaguars';
 import type { Game } from '../Game';
 import { Building } from '../buildings/Buildings';
-import { HALL } from '../buildings/models';
-import { ROLE_LABEL } from '../entities/Islander';
+import { HALL, HEAL } from '../buildings/models';
+import { CONDITION_LABEL, ROLE_LABEL, type Islander } from '../entities/Islander';
 import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
@@ -28,7 +28,7 @@ const BUILD_ICON: Record<BuildingKey, string> = {
   woodstore: 'b_woodstore', grainstore: 'b_grainstore', warroom: 'b_warroom', jetty: 'b_jetty',
   maizefarm: 'b_maize', chinampa: 'b_chinampa', smokehouse: 'b_smoke',
   tradedock: 'b_trade', torch: 'b_torch', bonfire: 'b_bonfire', firepit: 'b_firepit', well: 'b_well', kennel: 'b_kennel', greathall: 'b_greathall',
-  pigpen: 'b_pigpen', chickenpen: 'b_chickenpen',
+  pigpen: 'b_pigpen', chickenpen: 'b_chickenpen', healer: 'b_healer',
 };
 
 interface TutorialStep {
@@ -594,6 +594,7 @@ export class UI {
         <li>A Jetty builds fishing boats. Fish stocks regrow slowly, so spread your fishing.</li>
         <li>Across the strait to the east lies a wild island with thick jungle, more fruit and most of the game. Build a <b>Rope bridge</b> (Build menu) across the shallows to reach it.</li>
         <li>New settlers arrive by canoe when you have spare beds and food.</li>
+        <li>Now and then someone falls sick, and jaguars and alligators maul people. Build a <b>Healing Centre</b> and cure them with food from its card before their time runs out, or they die.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and breach now and then. Tap one to make it jump.</li>
       </ul>`;
@@ -876,6 +877,12 @@ export class UI {
     return `<div class="need"><span>${label}</span><div class="nb ${cls}"><div style="width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%"></div></div></div>`;
   }
 
+  /** Sick or mauled: the condition and the time left untreated (else a limp, if any). */
+  private healthText(isl: Islander): string {
+    if (isl.condition !== 'well') return `${CONDITION_LABEL[isl.condition]} · ${this.game.eco.godMode ? 'in no danger' : `${Math.ceil(isl.conditionT / 60)} min left`}`;
+    return isl.injured > 0 ? `Injured, limping (${Math.ceil(isl.injured)}s)` : '';
+  }
+
   private renderInfo(force: boolean): void {
     const g = this.game;
     const isl = g.selectedIslander >= 0 ? g.colony.byId(g.selectedIslander) : undefined;
@@ -899,14 +906,15 @@ export class UI {
       const home = isl.home >= 0 ? g.buildings.byId(isl.home) : undefined;
       const role = isl.child ? 'Child' : isl.warrior ? (isl.warrior === 'jaguar' ? 'Jaguar warrior' : 'Eagle warrior') : ROLE_LABEL[isl.role];
       const carry = isl.carry ? `${icon(isl.carry.res === 'wood' ? 'wood' : isl.carry.res)} ${isl.carry.n} ${isl.carry.res}` : 'Nothing';
-      key = `i${isl.id}|${Math.ceil(isl.injured / 10)}|${role}|${g.colony.activity(isl)}|${carry}|${home?.id}|${Math.round(isl.hunger * 20)}|${Math.round(isl.rest * 20)}|${Math.round(isl.happy * 20)}|${g.followId === isl.id}`;
+      key = `i${isl.id}|${Math.ceil(isl.injured / 10)}|${isl.condition}|${Math.ceil(isl.conditionT / 60)}|${role}|${g.colony.activity(isl)}|${carry}|${home?.id}|${Math.round(isl.hunger * 20)}|${Math.round(isl.rest * 20)}|${Math.round(isl.happy * 20)}|${g.followId === isl.id}`;
       html = `
         <div class="card-head"><span>${isl.name}</span><span class="tag ${isl.gender}">${isl.gender === 'm' ? 'Male' : 'Female'}${isl.child ? ' · child' : ''}</span></div>
         <div class="kv"><span>Job</span><b>${role}${isl.manualRole ? ' <em>(assigned)</em>' : ''}</b></div>
         <div class="kv"><span>Doing</span><b>${g.colony.activity(isl)}</b></div>
         <div class="kv"><span>Carrying</span><b>${carry}</b></div>
         <div class="kv"><span>Home</span><b>${home ? home.label : 'None, sleeps by the fire'}</b></div>
-        ${isl.injured > 0 ? `<div class="kv"><span>Health</span><b>Injured by a jaguar, limping (${Math.ceil(isl.injured)}s)</b></div>` : ''}
+        ${this.healthText(isl) ? `<div class="kv"><span>Health</span><b>${this.healthText(isl)}</b></div>` : ''}
+        ${isl.condition !== 'well' ? `<p class="muted small">${g.buildings.list.some((x) => x.key === 'healer' && x.complete) ? 'Cure them from the Healing Centre’s card.' : 'Build a Healing Centre to cure them.'}</p>` : ''}
         ${this.bar('Food', isl.hunger, isl.hunger < 0.3 ? 'low' : '')}
         ${this.bar('Rest', isl.rest, isl.rest < 0.25 ? 'low' : '')}
         ${this.bar('Happiness', isl.happy, isl.happy > 0.6 ? 'good' : '')}
@@ -964,7 +972,7 @@ export class UI {
         <div class="actions"><button class="btn small" data-a="capture" ${free && (!d.needsPen || hasPen) ? '' : 'disabled'}>${ICONS.harvest} ${label}</button></div>
         <p class="muted small">Tip: select an islander first, then tap an animal to send them after it.</p>`;
     } else if (b) {
-      key = `b${b.id}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
+      key = `b${b.id}|${b.key === 'tradedock' ? g.trade.visitKey(b) : ''}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'healer' ? g.colony.patients(b).map((p) => `${p.id}:${p.condition}:${Math.ceil(p.conditionT / 60)}:${p.task?.slot}:${g.colony.canCure(p)}`).join(',') : ''}|${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
       html = this.buildingHtml(b);
     }
     if (!force && key === this.infoKey) return;
@@ -998,6 +1006,19 @@ export class UI {
       const ships = g.trade.of(b);
       const docked = ships.filter((s) => s.state === 'docked').length;
       body += `<div class="kv"><span>Trade boats</span><b>${ships.length ? `${docked} moored · ${ships.length - docked} at sea` : 'None yet'}${b.boatBuild > 0 ? ` (building ${Math.round((b.boatBuild / TRADE.boatBuildSeconds) * 100)}%)` : ''}</b></div>`;
+      // Visiting traders moored at the dock, with their bargains.
+      const v = g.trade.visiting(b);
+      if (v) {
+        const goods = (r: Partial<Record<ResourceKey, number>>) => (Object.entries(r) as [ResourceKey, number][]).map(([key, n]) => `<span class="tg">${icon(key)} ${n}</span>`).join(' ');
+        const rows = v.deals.map((d, k) => {
+          const why = g.trade.whyNot(d);
+          const btn = d.taken ? '<span class="muted small">Traded</span>' : `<button class="btn small" data-a="visit${k}" ${why ? 'disabled' : ''} title="${why ?? ''}">Accept</button>${why ? ` <span class="muted small">${why}</span>` : ''}`;
+          return `<div class="trow"><span class="tgive">${goods(d.give)}</span><span class="tarrow">→</span><span class="tget">${goods(d.get)}</span><span class="tbtns">${btn}</span></div>`;
+        }).join('');
+        body += `<div class="sec-h">${ICONS.boat} Visiting traders</div>
+          <p class="muted small">Traders from ${v.from} are moored here (leaving in about ${Math.max(1, Math.ceil(v.timer / 60))} min). You give the goods on the left for those on the right.</p>
+          <div class="trows">${rows}</div>`;
+      }
     }
     if (b.key === 'kennel' && b.complete) {
       const D = g.dogs;
@@ -1014,6 +1035,16 @@ export class UI {
       body += `<div class="kv"><span>Resting</span><b>${h.resting}</b></div>
         <div class="kv"><span>Sheltering</span><b>${h.sheltering}</b></div>
         <div class="kv"><span>Room for</span><b>${HALL.seats.length} seated, ${HALL.stands.length} standing</b></div>`;
+    }
+    if (b.key === 'healer' && b.complete) {
+      const pts = g.colony.patients(b);
+      body += `<div class="kv"><span>Beds in use</span><b>${pts.filter((p) => (p.task?.slot ?? -1) >= 0).length} / ${HEAL.beds.length}</b></div><div class="sec-h">Patients</div>`;
+      if (!pts.length) body += '<p class="muted small">Nobody is here. The sick and the injured come here to be cared for.</p>';
+      for (const p of pts) {
+        const cost = g.colony.cureCost(p);
+        body += `<div class="kv"><span><button class="btn small ghost" data-a="patient:${p.id}" title="Select ${p.name}">${p.name}</button></span><b>${this.healthText(p)}</b></div>
+          <div class="actions" style="margin-top:2px"><button class="btn small" data-a="cure:${p.id}" ${g.colony.canCure(p) ? '' : 'disabled'}>Cure <span class="c">${cost ? `${cost} food` : 'free'}</span></button></div>`;
+      }
     }
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
     if (b.complete && (b.key === 'pigpen' || b.key === 'chickenpen')) body += `<div class="kv"><span>Animals in pen</span><b>${g.wildlife.penCount(b)}</b></div>`;
@@ -1074,6 +1105,13 @@ export class UI {
       }
     }
     if (b) {
+      if (a.startsWith('patient:')) g.select({ islander: Number(a.slice(8)) });
+      if (a.startsWith('cure:')) {
+        const p = g.colony.byId(Number(a.slice(5)));
+        const cost = p ? g.colony.cureCost(p) : 0;
+        if (p && g.colony.cure(p)) this.toast(`${p.name} is cured${cost ? ` (${cost} food)` : ''} and will go back to work.`);
+        else this.toast('Not enough food to cure them.', 'warn');
+      }
       if (a === 'roundup') g.roundUpAnimals(b);
       if (a === 'bell') g.ringHallBell(b);
       if (a === 'helpers') {
@@ -1102,6 +1140,7 @@ export class UI {
       }
       if (a === 'boat') g.buildBoat(b);
       if (a === 'tradeboat') this.toast(g.trade.orderBoat(b));
+      if (a.startsWith('visit')) this.toast(g.trade.accept(b, parseInt(a.slice(5), 10)));
       if (a === 'breed') this.toast(g.dogs.breed(b));
       if (a === 'dogroam' || a === 'dogguard') {
         b.dogRole = a === 'dogguard' ? 'guard' : 'roam';
