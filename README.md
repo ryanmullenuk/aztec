@@ -75,7 +75,8 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
   - GTAO, subtle bloom, warm/teal colour grading, vignette and SMAA/FXAA.
 - ACES tone mapping; a low golden sun with long soft shadows fitted to the view; a cool sky bounce light.
 - Sunlight glows through fronds, with warm rim light on treetops and roofs, and contact shadows under objects.
-- Ocean shader: sixteen layered directional waves (swell to fine chop) with analytic normals that fade with distance, Fresnel sky reflection, a sun or moon glitter path with sparkling glints, whitecap flecks, turquoise shallows fading to deep navy, light absorbed with depth, caustics on the seabed, and shoreline and rock foam.
+- Ocean shader: long swells whose crests bend and drift in slowly moving wave groups, under gradient-noise wind ripples stretched along their crests (no grid or repeating pattern at any zoom). It adds Fresnel sky reflection with soft drifting clouds mirrored in it, and sun or moon glitter from a rough sea: waves too small to draw widen it into a soft path far off and break it into twinkling glints close up. There are whitecap flecks in storms, caustics on the seabed and shoreline and rock foam. Surf rolls in broken stretches rather than lines tracing the coast.
+- The sea's colour follows its real depth: turquoise shallows with meandering reef edges, deepening gradually to navy far from land, with no ring round the islands. Toward the map's edge the sea floor falls away along a rounded line that follows the coasts (the outer islets drop off like a reef wall), and the ocean floor beyond is lit like the island's own deep seabed, so the map's square edge never shows.
 - A 10-minute day/night cycle where golden hour lasts longest; the light hands over smoothly to a bright silvery moon with a glitter path on the sea, and village torches light up with real point lights.
 
 **Vegetation**
@@ -128,12 +129,16 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Decorative reef fish (six varieties) school around reefs, rocks and the lagoon. Big swirling schools in deep water are what the fishing boats track down, and over-fished stocks regrow slowly.
 - Population limits per species, habitat-aware spawning and respawning, lower update rates far from the camera, and animals (including penned livestock) are saved with the island.
 
-**Whales and dolphins**
-- Smooth-shaded humpbacks (dark slate backs, white pleated throats and bellies, knobbly heads, long white flippers, serrated flukes) glide underwater with a travelling body wave, leaving faint fluke prints on the surface, and never touch the seabed. They breach every so often in deep water (or when tapped), following a reference clip:
-  - An underwater glow as it rises, then a near-vertical lift out of the water while it spins, fins spread, with a foam ring at the waterline.
-  - It topples onto its back into a huge splash: a crown of water tongues, fine spray and clumps, white-water mist drifting downwind, and lacy foam that spreads and fades. Then the fluke lifts, streaming water, as it dives.
+**Whales, dolphins and jellyfish**
+- Humpbacks are one skinned mesh on a 19-joint skeleton: a flexible spine, flukes whose lobes flex, and shoulder-elbow-wrist flippers.
+  - The body is lofted with grooved throat pleats, a flat knobbly rostrum, a barnacled chin, an eye and lip line, a hump with its dorsal fin and knuckles along the tail stock.
+  - The flippers are long and tapered with a knobbly leading edge; the flukes are swept, notched and scalloped, black above and patterned white below.
+- They glide underwater with a travelling body wave and never touch the seabed. Turns curve the whole body, head first with the tail following, and the flippers steer. They come up to blow, and dive with the flukes lifting and streaming water.
+- They breach every so often in deep water (or when tapped):
+  - An underwater glow as it rises, then it bursts out steeply, rears up to about 70% clear and twists with its flippers beating.
+  - It topples faster and faster onto its back, slamming down along its whole length in white water and mist. A tall jet follows where it went in, and the flippers slap down after it. Water streams off the body, flippers and flukes as they move.
 - Smooth, flexible dolphins (beak, swept dorsal fin, dark cape and white belly) swim in pods of six that leap together in a rippling line, arching through the air, with the odd high spinning jump, splashes and ripples.
-- Swimming whales flex along the whole body, with flippers swept back along the flanks and a supple fluke.
+- Swarms of pink moon jellies drift in the shallows off the beaches. Their bells pulse (rising on each squeeze), with four gonads showing through, and frilly arms and fine tentacles ripple and trail behind them. They scatter from the pointer, pulsing hard and diving away, then drift back, and they glow pink at night.
 
 **Boats**
 - The Jetty builds canoes and fishing boats, crewed by fishers.
