@@ -1972,3 +1972,114 @@ export function healingCentreModel(): BuildingModel {
   }
   return { finished: b.build(), torches, height: 1.6, canopy: roof.build() };
 }
+
+// ---------------- Watchtower ----------------
+
+/** Watchtower layout (local): the platform's floor height, and where the archer stands on it. */
+export const TOWER = { platform: 2.42, archerZ: -0.05 };
+
+/**
+ * Watchtower: four leaning timber legs on a stone footing, cross-braced and lashed, a plank
+ * platform with a wattle parapet (open to the sky, so the archer shows from above), a ladder up
+ * the front, and a torch basket on a tall corner post that burns at night.
+ */
+export function watchtowerModel(): BuildingModel {
+  const b = new GeoBuilder();
+  const rng = new RNG(1789);
+  const P0 = TOWER.platform;
+  // Stone footing and rubble.
+  b.add(P.rbox(1.55, 0.34, 1.55, 0.08), { color: K.stoneDark }, M.t(0, 0.17, 0));
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2 + rng.next() * 0.3;
+    b.add(lumpy(P.sphere(0.1 + rng.next() * 0.05, 1), 0.25, 300 + k, 0.7), { color: k % 2 ? K.stone : K.stoneDark }, M.t(Math.cos(a) * 0.86, 0.05, Math.sin(a) * 0.86));
+  }
+  // Legs lean in toward the top.
+  const foot = 0.62, top = 0.52;
+  const legs: [number, number][] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  for (const [sx, sz] of legs) {
+    const x0 = sx * foot, z0 = sz * foot, x1 = sx * top, z1 = sz * top;
+    const h = P0 - 0.3;
+    const len = Math.hypot(h, x1 - x0, z1 - z0);
+    b.add(P.cyl(0.055, 0.075, len, 6), { color: K.timber }, M.t((x0 + x1) / 2, 0.3 + h / 2, (z0 + z1) / 2, (z1 - z0) / len, 0, -(x1 - x0) / len));
+    // Rope lashings.
+    for (const y of [0.9, 1.7]) b.add(P.cyl(0.07, 0.07, 0.05, 6), { color: K.rope }, M.t(x0 + (x1 - x0) * ((y - 0.3) / h), y, z0 + (z1 - z0) * ((y - 0.3) / h)));
+  }
+  // Cross braces on the back and sides (the front has the ladder).
+  const brace = (ax: number, az: number, bx: number, bz: number, y0: number, y1: number) => {
+    const dx = bx - ax, dz = bz - az, dy = y1 - y0, len = Math.hypot(dx, dy, dz);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, dy, dz).normalize());
+    const m = new THREE.Matrix4().compose(new THREE.Vector3((ax + bx) / 2, (y0 + y1) / 2, (az + bz) / 2), q, new THREE.Vector3(1, 1, 1));
+    b.add(P.cyl(0.03, 0.03, len, 5), { color: K.timberDark }, m);
+  };
+  const at = (s: number, y: number) => foot + (top - foot) * ((y - 0.3) / (P0 - 0.3)) * s;
+  for (const [y0, y1] of [[0.5, 1.45], [1.45, 2.3]]) {
+    brace(-at(1, y0), -at(1, y0), at(1, y1), -at(1, y1), y0, y1);
+    brace(at(1, y0), -at(1, y0), -at(1, y1), -at(1, y1), y0, y1);
+    for (const s of [-1, 1]) {
+      brace(s * at(1, y0), -at(1, y0), s * at(1, y1), at(1, y1), y0, y1);
+      brace(s * at(1, y0), at(1, y0), s * at(1, y1), -at(1, y1), y0, y1);
+    }
+  }
+  // Plank platform with a beam under its edge.
+  b.add(P.box(1.34, 0.1, 1.34), { color: K.timberDark }, M.t(0, P0 - 0.12, 0));
+  for (let k = 0; k < 7; k++) {
+    b.add(P.box(0.18, 0.05, 1.3), { color: k % 2 ? K.timber : c(0x8a6038) }, M.t(-0.57 + k * 0.19, P0 - 0.03, 0));
+  }
+  // Wattle parapet round three sides and the back of the front, a gap at the ladder.
+  const wall = (x: number, z: number, w: number, d: number) => {
+    b.add(P.box(w, 0.3, d), { color: (p) => ((p.x * 11 + p.z * 11 + p.y * 16) % 1 < 0.5 ? K.rope : c(0xa9864f)).clone() }, M.t(x, P0 + 0.15, z));
+  };
+  wall(0, -0.64, 1.34, 0.06);
+  wall(-0.64, 0, 0.06, 1.34);
+  wall(0.64, 0, 0.06, 1.34);
+  wall(-0.42, 0.64, 0.5, 0.06);
+  wall(0.42, 0.64, 0.5, 0.06);
+  for (const [sx, sz] of legs) b.add(P.cyl(0.04, 0.045, 0.5, 6), { color: K.timber }, M.t(sx * 0.64, P0 + 0.25, sz * 0.64));
+  // A red-and-gold banner on the front rail.
+  b.add(P.box(0.24, 0.3, 0.02), { color: K.red }, M.t(-0.42, P0 + 0.02, 0.68));
+  b.add(P.box(0.24, 0.05, 0.022), { color: K.gold }, M.t(-0.42, P0 - 0.1, 0.68));
+  // Ladder up the front.
+  for (const sx of [-0.14, 0.14]) b.add(P.cyl(0.025, 0.025, P0 + 0.2, 5), { color: K.timber }, M.t(sx, (P0 + 0.2) / 2, 0.86, -0.2, 0, 0));
+  for (let k = 0; k < 9; k++) {
+    const y = 0.25 + k * 0.26;
+    b.add(P.cyl(0.018, 0.018, 0.3, 5), { color: K.timberDark }, M.t(0, y, 0.86 - Math.tan(0.2) * (y - (P0 + 0.2) / 2), 0, 0, Math.PI / 2));
+  }
+  // The torch: a tall post at the back corner with a basket of burning pitch pine.
+  const tx = -0.6, tz = -0.6;
+  b.add(P.cyl(0.03, 0.04, 0.95, 6), { color: K.timberDark }, M.t(tx, P0 + 0.47, tz));
+  b.add(P.cyl(0.09, 0.055, 0.14, 7), { color: (p) => ((p.y * 40) % 1 < 0.5 ? K.timberDark : K.rope).clone() }, M.t(tx, P0 + 0.98, tz));
+  // Quiver rack and a spare bundle of arrows.
+  b.add(P.cyl(0.05, 0.05, 0.32, 6), { color: c(0x6e4a2c) }, M.t(0.48, P0 + 0.16, -0.48));
+  for (let k = 0; k < 5; k++) b.add(P.cyl(0.006, 0.006, 0.42, 3), { color: K.timber }, M.t(0.46 + (k % 3) * 0.02, P0 + 0.3, -0.48 + (k % 2) * 0.02));
+  return { finished: b.build(), torches: [new THREE.Vector3(tx, P0 + 1.1, tz)], height: P0 + 0.9 };
+}
+
+/** The archer on a watchtower (local: standing on the platform floor, facing +z with the bow held out). */
+export function towerArcherGeometry(): { body: THREE.BufferGeometry; arrow: THREE.BufferGeometry } {
+  const b = new GeoBuilder();
+  const skin = c(0xa86a44), cloth = c(0xc0392b), dark = c(0x2a1c14);
+  for (const sx of [-1, 1]) b.add(P.cyl(0.028, 0.034, 0.3, 6), { color: skin }, M.t(sx * 0.045, 0.15, 0));
+  b.add(P.cyl(0.085, 0.07, 0.16, 7), { color: cloth }, M.t(0, 0.34, 0));
+  b.add(P.box(0.18, 0.04, 0.12), { color: K.gold }, M.t(0, 0.27, 0));
+  b.add(P.cyl(0.075, 0.08, 0.18, 7), { color: skin }, M.t(0, 0.5, 0));
+  b.add(P.sphere(0.068, 1), { color: skin }, M.t(0, 0.66, 0.01));
+  b.add(P.cyl(0.07, 0.07, 0.03, 8), { color: dark }, M.t(0, 0.7, 0.005));
+  // Feather headdress: jade, gold and red plumes fanned behind.
+  const plumes = [K.jade, K.gold, K.red, K.gold, K.jade];
+  plumes.forEach((col, k) => b.add(P.cone(0.02, 0.2, 5), { color: col }, M.t((k - 2) * 0.03, 0.8, -0.04, -0.35, 0, (k - 2) * 0.22)));
+  // Arms: the left held out gripping the bow, the right drawn back to the cheek.
+  b.add(P.cyl(0.022, 0.022, 0.26, 5), { color: skin }, M.t(0.07, 0.56, 0.12, Math.PI / 2 - 0.1, 0, 0));
+  b.add(P.cyl(0.022, 0.022, 0.2, 5), { color: skin }, M.t(-0.07, 0.58, 0.05, Math.PI / 2 + 0.25, 0, 0.3));
+  // Bow: a tall curved stave with its string.
+  const bow = new THREE.TorusGeometry(0.24, 0.012, 4, 14, Math.PI * 0.75).rotateZ(Math.PI / 2 - Math.PI * 0.375).rotateY(Math.PI / 2);
+  b.add(bow, { color: c(0x5a3a20) }, M.t(0.07, 0.56, 0.02));
+  b.add(P.cyl(0.003, 0.003, 0.44, 3), { color: K.white }, M.t(0.07, 0.56, 0.09));
+  // Quiver on the back.
+  b.add(P.cyl(0.035, 0.03, 0.26, 6), { color: c(0x6e4a2c) }, M.t(-0.05, 0.55, -0.09, 0.3, 0, 0.25));
+  const a = new GeoBuilder();
+  a.add(P.cyl(0.006, 0.006, 0.5, 3), { color: K.timber }, M.t(0, 0, 0, Math.PI / 2, 0, 0));
+  a.add(P.cone(0.016, 0.05, 4), { color: K.stoneDark }, M.t(0, 0, 0.27, Math.PI / 2, 0, 0));
+  a.add(P.box(0.03, 0.002, 0.07), { color: K.white }, M.t(0, 0, -0.22));
+  a.add(P.box(0.002, 0.03, 0.07), { color: K.white }, M.t(0, 0, -0.22));
+  return { body: b.build(), arrow: a.build() };
+}
