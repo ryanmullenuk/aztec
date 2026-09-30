@@ -397,6 +397,9 @@ export class AudioEngine {
       // Jaguar: a low rasping rumble.
       case 'growl': burst('lowpass', 280, 3, 0.75, 0.3, 160); tone('sawtooth', 82, 64, 0.7, 0.05); break;
       case 'yelp': tone('triangle', 1450, 650, 0.2, 0.12); break;
+      // A bowstring's twang and the arrow's hiss away; the thud of it striking home.
+      case 'bow': tone('triangle', 190, 150, 0.16, 0.2); burst('highpass', 2600, 0.8, 0.22, 0.12, 5200, 0.02); break;
+      case 'arrowhit': burst('lowpass', 900, 1.5, 0.08, 0.35); tone('sine', 140, 90, 0.08, 0.2); break;
       // The Great Hall's bronze bell: three slow strikes, each a cluster of inharmonic partials
       // (hum, fundamental, minor third, fifth, octave, upper) ringing down at their own rates.
       case 'bell': {
