@@ -246,7 +246,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall' | 'pigpen' | 'chickenpen' | 'healer';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall' | 'pigpen' | 'chickenpen' | 'healer' | 'watchtower';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -293,6 +293,24 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   grainstore: { key: 'grainstore', name: 'Grain Store', description: 'Stores grain, fruit, meat and fish. Baskets fill visibly.', size: [2, 2], cost: { wood: 18, stone: 4, belief: 0 }, buildTime: 24, builders: 2, workers: 0, foodCap: 140, placeable: true },
   warroom: { key: 'warroom', name: 'War Room', description: 'Trains Jaguar and Eagle warriors who patrol the island.', size: [3, 3], cost: { wood: 30, stone: 30, belief: 15 }, buildTime: 55, builders: 3, workers: 0, placeable: true },
   jetty: { key: 'jetty', name: 'Jetty', description: 'Wooden pier into the shallows. Builds canoes and fishing boats.', size: [2, 2], cost: { wood: 24, stone: 0, belief: 0 }, buildTime: 30, builders: 2, workers: 3, placeable: true },
+  watchtower: { key: 'watchtower', name: 'Watchtower', description: 'A tall timber lookout on a stone footing, with a torch burning on top at night. One villager keeps watch up there as an archer and shoots at jaguars and alligators that come close.', size: [2, 2], cost: { wood: 30, stone: 16, belief: 0 }, buildTime: 40, builders: 2, workers: 1, placeable: true },
+};
+
+/** Watchtower archers: how far they shoot, how often, and how hard predators are to bring down. */
+export const DEFENCE = {
+  range: 13,
+  /** Seconds between arrows, and the arrow's speed (world units a second). */
+  reload: 2.4,
+  arrowSpeed: 20,
+  /** Chance an arrow flies true. */
+  accuracy: 0.8,
+  /** Arrows it takes to bring one down (each hit sends it running). */
+  jaguarHits: 3,
+  gatorHits: 2,
+  /** Seconds before a replacement arrives: a new jaguar swims in from far out at sea, a new alligator moves into the swamp. */
+  respawn: [150, 300] as [number, number],
+  /** Seconds an archer stays up on watch before coming down (to eat, rest), then going back. */
+  watch: [90, 150] as [number, number],
 };
 
 /** New settlers arriving by canoe once the village has room and food to spare. */

@@ -53,6 +53,7 @@ import { Butterflies } from './entities/Butterflies';
 import { SeaTurtles } from './entities/SeaTurtles';
 import { Jellyfish } from './entities/Jellyfish';
 import { Alligators } from './entities/Alligators';
+import { Defence } from './entities/Defence';
 import { SwampView } from './water/Swamp';
 import { SEA_SURFACE } from './water/Water';
 import type { Islander } from './entities/Islander';
@@ -141,6 +142,7 @@ export class Game {
   gators!: Alligators;
   swampView!: SwampView;
   jaguars!: Jaguars;
+  defence!: Defence;
   private lastDanger = -999;
   /** The Great Hall bell has called the village to sanctuary; seconds the coast has been clear. */
   private hallAlert = false;
@@ -308,6 +310,8 @@ export class Game {
     this.scene.add(this.swampView.group);
     this.gators = new Alligators(this.world);
     this.scene.add(this.gators.meshes.group);
+    this.defence = new Defence(this.world, this.buildings);
+    this.scene.add(this.defence.mesh);
     this.powers = new Powers(this.eco, this.buildings, this.lighting, this.water, this.time, () => this.rng.next());
     this.scene.add(this.powers.group);
     this.audio = new AudioEngine();
@@ -469,6 +473,7 @@ export class Game {
       alarm, danger, sfx,
       maul: (isl, killed) => this.colony.maul(isl, killed),
       godMode: () => this.eco.godMode,
+      arrived: (j) => this.ui?.toast('A jaguar has swum over from the mainland and come ashore to take the empty den.', 'warn', () => ({ x: j.x, z: j.z })),
     };
     const W = this.wildlife;
     this.waterBirds.hooks = {
@@ -500,6 +505,22 @@ export class Game {
       splash: (x, z, n, sp, r, y) => this.marine.splash(x, z, n, sp, r, y),
       sfx,
       godMode: () => this.eco.godMode,
+    };
+    // Watchtower archers shoot at jaguars and alligators that come within range.
+    type GatorRef = Parameters<Alligators['hitByArrow']>[0];
+    this.defence.hooks = {
+      quarry: () => [
+        ...this.jaguars.targets.map((j) => ({ kind: 'jaguar' as const, ref: j, aimY: j.y + 0.3 * j.scale })),
+        ...this.gators.targets.map((g) => ({ kind: 'alligator' as const, ref: g, aimY: g.y + 0.03 })),
+      ],
+      hit: (kind, ref) => (kind === 'jaguar' ? this.jaguars.hitByArrow(ref as Jaguar) : this.gators.hitByArrow(ref as GatorRef)),
+      sfx,
+      killed: (kind, at) =>
+        this.ui?.toast(
+          kind === 'jaguar' ? 'The watchtower archer has brought down a jaguar! Another will swim over from the mainland in time.' : 'The watchtower archer has killed an alligator. Another will come down the rivers to the swamp in time.',
+          'info',
+          () => at,
+        ),
     };
     this.colony.onRemoved = (isl) => {
       this.dogs.onVillagerGone(isl.id);
@@ -1597,7 +1618,7 @@ export class Game {
     fog.far = fog.near + RENDER.fogFar;
     this.renderer.toneMappingExposure = ls.exposure;
     // The sun and moon in the sky (seen when the view looks up: free-roam, or tilted low).
-    this.skyBodies.update(this.rig.camera, ls, this.lighting.overcast);
+    this.skyBodies.update(this.rig.camera, ls, this.lighting.overcast, this.settings.dayNight ? this.time.t : RENDER.fixedTimeOfDay, t);
 
     const ws = this.water.shared;
     ws.uSunDir.value.copy(ls.sunDir);
@@ -1645,6 +1666,7 @@ export class Game {
     this.turtles.people = this.colony.grid;
     this.turtles.update(dt);
     this.gators.update(dt);
+    this.defence.update(dt);
     this.buildings.update(dt, t, ls.night, this.time.seasonIndex, this.raining, this.rig.target);
     this.updateSettlers(dt);
     if (this.introFollow) {
