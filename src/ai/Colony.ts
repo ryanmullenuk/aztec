@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Where } from '../ui/where';
-import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL, HEALTH, TIME } from '../config';
+import { ECONOMY, FARM, FOOD_KEYS, ISLANDER, JETTY, NAMES, ResourceKey, TEMPLE, WARRIOR, FARM_TYPES, isFarm, SMOKE, COMFORTS, PATHS, GREAT_HALL, HEALTH, TIME, DEFENCE } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { HALL, HEAL } from '../buildings/models';
 import { Economy } from '../economy/Economy';
@@ -263,7 +263,7 @@ export class Colony {
       isl.workplace = b.id;
       return `${isl.name} will help build the ${b.label}.`;
     }
-    const map: Partial<Record<string, Role>> = { farm: 'farmer', maizefarm: 'farmer', chinampa: 'farmer', temple: 'priest', jetty: 'fisher', butcher: 'butcher', smokehouse: 'smoker', woodstore: 'woodcutter', grainstore: 'gatherer' };
+    const map: Partial<Record<string, Role>> = { farm: 'farmer', maizefarm: 'farmer', chinampa: 'farmer', temple: 'priest', jetty: 'fisher', butcher: 'butcher', smokehouse: 'smoker', woodstore: 'woodcutter', grainstore: 'gatherer', watchtower: 'archer' };
     if (b.key === 'warroom') {
       isl.manualRole = false;
       return this.trainWarrior(b, this.rnd() < 0.5 ? 'jaguar' : 'eagle', isl) ? `${isl.name} is training as a warrior.` : 'Not enough resources to train a warrior.';
@@ -274,7 +274,7 @@ export class Colony {
       return `Nothing to do at the ${b.label}.`;
     }
     isl.role = role;
-    isl.workplace = isFarm(b.key) || ['temple', 'jetty', 'butcher', 'smokehouse'].includes(b.key) ? b.id : -1;
+    isl.workplace = isFarm(b.key) || ['temple', 'jetty', 'butcher', 'smokehouse', 'watchtower'].includes(b.key) ? b.id : -1;
     return `${isl.name} now works as a ${role}.`;
   }
 
@@ -339,9 +339,10 @@ export class Colony {
       else if (b.key === 'temple') slots.push({ b, role: 'priest', n: b.def.workers });
       else if (b.key === 'butcher') slots.push({ b, role: 'butcher', n: b.def.workers });
       else if (b.key === 'jetty') slots.push({ b, role: 'fisher', n: Math.min(b.def.workers, b.boats.length) });
+      else if (b.key === 'watchtower') slots.push({ b, role: 'archer', n: b.def.workers });
     }
     // Builders first, then food producers, then the temple.
-    const prio: Record<string, number> = { builder: 0, farmer: 1, fisher: 2, butcher: 3, smoker: 3.5, priest: 4 };
+    const prio: Record<string, number> = { builder: 0, archer: 0.5, farmer: 1, fisher: 2, butcher: 3, smoker: 3.5, priest: 4 };
     slots.sort((a, b) => prio[a.role] - prio[b.role]);
     // Priests only once the tribe can spare them.
     for (const s of slots) if (s.role === 'priest') s.n = Math.min(s.n, Math.max(0, Math.floor((workers.length - 4) / 3)));
@@ -581,8 +582,10 @@ export class Colony {
         return this.setTask(isl, 'bonfire', fire.id, fire.x + Math.cos(a) * 1.25, fire.z + Math.sin(a) * 1.25);
       }
     }
-    if ((night && isl.role !== 'warrior') || isl.rest < ISLANDER.sleepThreshold) return this.goSleep(isl);
-    if (night && isl.role === 'warrior' && isl.rest < 0.5) return this.goSleep(isl);
+    // Warriors and tower archers keep watch through the night, until they tire.
+    const watchman = isl.role === 'warrior' || isl.role === 'archer';
+    if ((night && !watchman) || isl.rest < ISLANDER.sleepThreshold) return this.goSleep(isl);
+    if (night && watchman && isl.rest < 0.5) return this.goSleep(isl);
     if (this.work(isl)) return;
     // Nothing to do in their own job (store full, nothing left nearby): decide for themselves.
     if (isl.role !== 'warrior' && isl.role !== 'builder' && this.selfDirected(isl)) return;
@@ -805,6 +808,12 @@ export class Colony {
         // Only animals the player has had captured and penned are butchered.
         if ((this.hooks.penCount?.(b) ?? 0) === 0) return false;
         this.setTask(isl, 'butcher', b.id, b.penX, b.penZ);
+        return true;
+      }
+      case 'archer': {
+        const b = this.bld.byId(isl.workplace);
+        if (!b || !b.complete) return false;
+        this.setTask(isl, 'guard', b.id, b.door.x, b.door.z);
         return true;
       }
       case 'fisher': {
@@ -1077,6 +1086,32 @@ export class Colony {
           this.releaseTask(isl);
           this.deliver(isl);
         } else this.releaseTask(isl);
+        break;
+      }
+      case 'guard': {
+        // Up the ladder to the platform, then on watch (the tower's archer figure shows while they're up).
+        const b = this.bld.byId(t.target);
+        if (!b || !b.complete) {
+          isl.hidden = false;
+          return this.releaseTask(isl);
+        }
+        if (t.stage < 2) {
+          const r = this.travel(isl, dt, t.x, t.z, { allowBuilding: b.id, goalRadius: 0.7 });
+          if (r === 'failed') return this.fail(isl);
+          if (r !== 'arrived') return;
+          t.stage = 2;
+          t.timer = DEFENCE.watch[0] + this.rnd() * (DEFENCE.watch[1] - DEFENCE.watch[0]);
+          isl.hidden = true;
+        }
+        b.manned = 1;
+        b.watchman = isl.id;
+        t.timer -= dt;
+        // Down again to eat or rest (never while a jaguar is about).
+        if (t.timer > 0 || (this.hooks.threat?.() && isl.rest > 0.1 && isl.hunger > 0.05)) return;
+        isl.hidden = false;
+        isl.x = b.door.x;
+        isl.z = b.door.z;
+        this.releaseTask(isl);
         break;
       }
       case 'smoke': {
@@ -1456,7 +1491,7 @@ export class Colony {
         warriors.push(isl);
         continue;
       }
-      if (isl.task?.kind === 'flee') continue;
+      if (isl.task?.kind === 'flee' || isl.task?.kind === 'guard') continue;
       // Already at (or on the way to) the Great Hall: stay there, now as sanctuary.
       if (isl.task?.kind === 'hall') {
         this.toShelter(isl.task);
@@ -1581,7 +1616,7 @@ export class Colony {
         }
         continue;
       }
-      if (isl.task?.kind === 'flee') continue;
+      if (isl.task?.kind === 'flee' || isl.task?.kind === 'guard') continue;
       if (isl.task?.kind === 'hall') {
         this.toShelter(isl.task);
         n++;
@@ -2256,6 +2291,7 @@ export class Colony {
       case 'build': return `Building the ${b?.label ?? 'site'}`;
       case 'farm': return b && (b.growth >= 1 || b.stock > 0) ? `Harvesting ${(FARM_TYPES[b.key]?.label ?? 'crops').toLowerCase()}` : b?.key === 'chinampa' ? 'Tending the chinampa beds' : 'Tending the fields';
       case 'smoke': return 'Smoking fish and meat';
+      case 'guard': return t.stage >= 2 ? 'Keeping watch from the tower' : 'Heading up the watchtower';
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
       case 'bonfire': return 'Singing and telling stories at the bonfire';
