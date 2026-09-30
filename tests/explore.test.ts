@@ -4,23 +4,36 @@ import { PerspectiveCamera, Vector3 } from 'three';
 import { Explore } from '../src/render/Explore';
 function setup() {
   const e = Object.create(Explore.prototype) as any;
-  Object.assign(e, { active: true, x: 0, z: 0, yaw: 0, pitch: 0, keys: new Set(['up']), sticks: { move: { x: 0, y: 0, pointer: -1 }, look: { x: 0, y: 0, pointer: -1 } },
+  Object.assign(e, { active: true, x: 0, z: 0, yaw: 0, pitch: 0, lift: 0, pace: 1, ground: null, keys: new Set(['up']), sticks: { move: { x: 0, y: 0, pointer: -1 }, look: { x: 0, y: 0, pointer: -1 } },
     overlay: { querySelectorAll: () => [], classList: { add() {} } },
     rig: { cur: { x: 0, z: 0, dist: 30 }, camera: new PerspectiveCamera(), target: new Vector3() },
-    world: { cellIndexAt: () => 0, isLandCell: () => true, occ: [0], heightAt: () => 2 } });
+    heightIn: { value: '0' }, heightOut: { textContent: '' },
+    world: { N: 100, centerX: (c: number) => c - 50, centerZ: (c: number) => c - 50, cellIndexAt: () => 0, isLandCell: () => true, occ: [0], heightAt: () => 2 } });
   return e;
 }
 test('walk at eye level with bounded speed, leaving the overhead goal alone', () => {
   const e = setup(); e.rig.goal = { x: 50, z: 50 }; e.update(2);
   assert.equal(e.rig.camera.position.y, 3.55);
-  assert.ok(Math.abs(e.rig.camera.position.z + 0.12) < 1e-8);
+  assert.ok(Math.abs(e.rig.camera.position.z + 0.35) < 1e-8);
   assert.deepEqual(e.rig.goal, { x: 50, z: 50 });
+});
+test('height option lifts the view, travels faster up high, and Shift sprints', () => {
+  const e = setup(); e.keys = new Set(['rise']);
+  for (let i = 0; i < 20; i++) e.update(0.05);
+  assert.ok(e.lift > 3); assert.equal(e.rig.camera.position.y, 3.55 + e.lift);
+  const low = setup(); low.update(0.05);
+  const high = setup(); high.lift = 20; high.update(0.05);
+  assert.ok(Math.abs(high.z / low.z - 3) < 1e-8);
+  const run = setup(); run.keys.add('sprint'); run.update(0.05);
+  assert.ok(Math.abs(run.z / low.z - 2.2) < 1e-8);
+  const top = setup(); top.keys = new Set(['rise']); top.lift = 39.9; top.update(0.05);
+  assert.equal(top.lift, 40);
 });
 test('free roam passes through occupied ground, water, map edges and steep drops', () => {
   for (const block of [(w: any) => w.occ[0] = 1, (w: any) => w.isLandCell = () => false,
     (w: any) => w.cellIndexAt = () => -1, (w: any) => w.heightAt = (_x: number, z: number) => z < 0 ? -5 : 2]) {
     const e = setup(); block(e.world); e.update(0.05);
-    assert.ok(Math.abs(e.rig.camera.position.z + 0.12) < 1e-8);
+    assert.ok(Math.abs(e.rig.camera.position.z + 0.35) < 1e-8);
     assert.ok(e.rig.camera.position.y >= 1.55);
   }
 });
@@ -29,7 +42,7 @@ test('joysticks support simultaneous movement and looking without diagonal speed
   e.sticks.move = { x: 1, y: -1, pointer: 1 };
   e.sticks.look = { x: 1, y: -1, pointer: 2 };
   e.update(0.05);
-  assert.ok(Math.abs(Math.hypot(e.x, e.z) - 0.12) < 1e-8);
+  assert.ok(Math.abs(Math.hypot(e.x, e.z) - 0.35) < 1e-8);
   assert.ok(e.yaw < 0); assert.ok(e.pitch > 0); assert.ok(e.x > 0);
   e.clear();
   assert.deepEqual(e.sticks.move, { x: 0, y: 0, pointer: -1 });
