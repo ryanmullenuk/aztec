@@ -234,10 +234,10 @@ export class SeaStacks {
   readonly group = new THREE.Group();
   readonly sites: StackSite[];
   private surf: Surf[] = [];
-  private spray = new Particles(1600, 0xf6fcff);
-  private sheet = new Particles(260, 0xf4fbff, 0.8);
-  private mist = new Particles(260, 0xeef8ff, 0.3);
-  private foam = new Particles(700, 0xf2f9ff, 0.75);
+  private spray = new Particles(3600, 0xf6fcff);
+  private sheet = new Particles(700, 0xf4fbff, 0.8);
+  private mist = new Particles(600, 0xeef8ff, 0.3);
+  private foam = new Particles(1400, 0xf2f9ff, 0.75);
 
   constructor(private world: World, seed: number, avoid: { x: number; z: number; r: number }[] = []) {
     const w = world;
@@ -269,7 +269,7 @@ export class SeaStacks {
       this.stampFoam(s);
       this.surf.push({
         site: s, px: m.x + s.sx * (m.r + 1), pz: m.z + s.sz * (m.r + 1), prev: 0, rising: false,
-        cool: rng.range(0, 6), crashAt: rng.range(0.05, 0.11), gap: rng.range(3.2, 6.5), churn: rng.next(),
+        cool: rng.range(0, 3), crashAt: rng.range(0.03, 0.07), gap: rng.range(1.6, 3.4), churn: rng.next(),
       });
     }
     if (b.vertexCount) {
@@ -333,13 +333,16 @@ export class SeaStacks {
       const h = water.waveHeight(u.px, u.pz, time);
       const rising = h > u.prev;
       if (u.rising && !rising && h > u.crashAt && u.cool <= 0) {
-        this.crash(u, THREE.MathUtils.clamp(0.55 + (h - u.crashAt) * 5, 0.55, 1.25));
+        this.crash(u, THREE.MathUtils.clamp(0.75 + (h - u.crashAt) * 6, 0.75, 1.6));
         u.cool = u.gap * (0.8 + Math.random() * 0.5);
+      } else if (u.rising && !rising && u.cool <= u.gap * 0.5) {
+        // Smaller crests between the big ones still slap up the face.
+        this.crash(u, 0.4 + Math.random() * 0.2);
       }
       u.rising = rising;
       u.prev = h;
       // Between the big bursts, a restless churn of white water round the foot.
-      u.churn += dt * 2.2;
+      u.churn += dt * 3.5;
       if (u.churn >= 1) {
         u.churn -= 1;
         this.churn(u.site);
@@ -360,31 +363,34 @@ export class SeaStacks {
     // The wave comes in from the sea side; the burst climbs the face and is thrown up and over.
     const ix = -s.sx, iz = -s.sz, tx = -iz, tz = ix;
     const R = m.r * 1.3;
-    const H = Math.min(m.top + 1, SEA_STACKS.burstHeight * k);
+    const H = Math.min(m.top + 3, SEA_STACKS.burstHeight * k);
     const up = Math.sqrt(2 * 7 * H);
-    for (let i = 0; i < Math.round(170 * k); i++) {
+    for (let i = 0; i < Math.round(320 * k); i++) {
       // Across the seaward face, strongest in the middle.
       const side = (Math.random() + Math.random() - 1) * 1.1;
       const face = Math.sqrt(Math.max(0, 1 - side * side * 0.6));
       const px = m.x + s.sx * R * face + tx * side * R, pz = m.z + s.sz * R * face + tz * side * R;
       const v = up * (0.45 + Math.random() * 0.6) * (1 - Math.abs(side) * 0.3);
-      const out = 0.4 + Math.random() * 1.3;
-      this.spray.spawn(px, y + Math.random() * 0.4, pz, -ix * out * 0.4 + tx * side * 0.8 + (Math.random() - 0.5) * 0.6, v, -iz * out * 0.4 + tz * side * 0.8 + (Math.random() - 0.5) * 0.6, 1.1 + Math.random() * 0.9, 0.12 + Math.random() * 0.2, 0.05);
+      // Fanned out wide across and over the face, some thrown back out to sea.
+      const out = (Math.random() < 0.3 ? -0.6 : 0.4) + Math.random() * 1.6;
+      const fan = 1.4 + k * 0.8;
+      this.spray.spawn(px, y + Math.random() * 0.4, pz, -ix * out * 0.9 + tx * side * fan + (Math.random() - 0.5) * 1.4, v, -iz * out * 0.9 + tz * side * fan + (Math.random() - 0.5) * 1.4, 1.2 + Math.random() * 1.0, 0.16 + Math.random() * 0.3, 0.08);
     }
     // Heavy sheets of white water heaving up the face.
-    for (let i = 0; i < Math.round(26 * k); i++) {
-      const side = (Math.random() - 0.5) * 1.6;
+    for (let i = 0; i < Math.round(55 * k); i++) {
+      const side = (Math.random() - 0.5) * 1.8;
       const px = m.x + s.sx * R + tx * side * R, pz = m.z + s.sz * R + tz * side * R;
-      this.sheet.spawn(px, y + 0.1, pz, (Math.random() - 0.5) * 0.4, up * (0.35 + Math.random() * 0.35), (Math.random() - 0.5) * 0.4, 1.0 + Math.random() * 0.5, 0.45 + Math.random() * 0.35, 0.35);
+      this.sheet.spawn(px, y + 0.1, pz, tx * side * 1.2 + s.sx * Math.random() * 0.6 + (Math.random() - 0.5) * 0.5, up * (0.35 + Math.random() * 0.35), tz * side * 1.2 + s.sz * Math.random() * 0.6 + (Math.random() - 0.5) * 0.5, 1.1 + Math.random() * 0.6, 0.65 + Math.random() * 0.5, 0.5);
     }
     // Fine mist hanging and drifting off the top of the burst.
-    for (let i = 0; i < Math.round(22 * k); i++) {
+    for (let i = 0; i < Math.round(45 * k); i++) {
       const side = (Math.random() - 0.5) * 2;
-      this.mist.spawn(m.x + s.sx * R + tx * side * R, y + H * (0.35 + Math.random() * 0.5), m.z + s.sz * R + tz * side * R, ix * 0.4 + (Math.random() - 0.5) * 0.5, 0.3 + Math.random() * 0.5, iz * 0.4 + (Math.random() - 0.5) * 0.5, 2.2 + Math.random() * 1.6, 0.9 + Math.random() * 0.9, 0.7);
+      this.mist.spawn(m.x + s.sx * R + tx * side * R, y + H * (0.35 + Math.random() * 0.5), m.z + s.sz * R + tz * side * R, ix * 0.4 + (Math.random() - 0.5) * 0.5, 0.3 + Math.random() * 0.5, iz * 0.4 + (Math.random() - 0.5) * 0.5, 2.4 + Math.random() * 1.8, 1.2 + Math.random() * 1.2, 0.9);
     }
     // White water rushing round both sides of the foot and spreading out.
-    for (let i = 0; i < 34; i++) {
-      const a = (i / 34) * Math.PI * 2 + Math.random() * 0.3;
+    const nf = Math.round(28 + 26 * k);
+    for (let i = 0; i < nf; i++) {
+      const a = (i / nf) * Math.PI * 2 + Math.random() * 0.3;
       const cx = Math.cos(a), cz = Math.sin(a);
       const lee = cx * s.sx + cz * s.sz < 0 ? 0.6 : 1;
       const d = m.r * (1.0 + Math.random() * 0.35);
@@ -393,11 +399,13 @@ export class SeaStacks {
     }
     // Smaller bursts off the rocks on the seaward side.
     for (const r of s.rocks) {
-      if ((r.x - m.x) * s.sx + (r.z - m.z) * s.sz < 0 || r.top < 0) continue;
-      const n = Math.round((10 + r.r * 20) * k);
+      if (r.top < 0) continue;
+      // Full bursts off the seaward rocks, lesser ones off those sheltered behind the stack.
+      const lee = (r.x - m.x) * s.sx + (r.z - m.z) * s.sz < 0 ? 0.45 : 1;
+      const n = Math.round((18 + r.r * 40) * k * lee);
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
-        this.spray.spawn(r.x + s.sx * r.r + Math.cos(a) * r.r * 0.6, y, r.z + s.sz * r.r + Math.sin(a) * r.r * 0.6, ix * 0.4 + Math.cos(a) * 0.4, (1.6 + Math.random() * 2.2) * k, iz * 0.4 + Math.sin(a) * 0.4, 0.7 + Math.random() * 0.5, 0.08 + Math.random() * 0.12, 0.04);
+        this.spray.spawn(r.x + s.sx * r.r + Math.cos(a) * r.r * 0.6, y, r.z + s.sz * r.r + Math.sin(a) * r.r * 0.6, ix * 0.4 + Math.cos(a) * 0.4, (2.2 + Math.random() * 3.2) * k * lee, iz * 0.4 + Math.sin(a) * 0.4, 0.8 + Math.random() * 0.6, 0.12 + Math.random() * 0.18, 0.06);
       }
       for (let i = 0; i < 5; i++) {
         const a = Math.random() * Math.PI * 2;
@@ -413,6 +421,13 @@ export class SeaStacks {
       const a = Math.random() * Math.PI * 2;
       const d = r.r * (r === s.main ? 1.15 : 1);
       this.foam.spawn(r.x + Math.cos(a) * d, y, r.z + Math.sin(a) * d, Math.cos(a) * 0.25, 0.01, Math.sin(a) * 0.25, 1.6 + Math.random(), 0.4 + Math.random() * 0.3, 0.3);
+    }
+    // And spits of spray off the seaward face.
+    const m = s.main;
+    for (let i = 0; i < 6; i++) {
+      const side = (Math.random() - 0.5) * 1.6;
+      this.spray.spawn(m.x + s.sx * m.r * 1.2 - s.sz * side * m.r, y, m.z + s.sz * m.r * 1.2 + s.sx * side * m.r,
+        s.sx * 0.3, 1.5 + Math.random() * 2, s.sz * 0.3, 0.6 + Math.random() * 0.4, 0.1 + Math.random() * 0.12, 0.05);
     }
   }
 }
