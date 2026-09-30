@@ -820,15 +820,18 @@ export const MARINE = {
   whaleSpeed: 1.5,
   /** Cruising depth of the whale's body centre below the surface. */
   swimDepth: 1.7,
-  /** Seconds until the first breach, then a random gap between breaches per whale (rare). */
-  firstBreach: 45,
-  breachEvery: [100, 170] as [number, number],
-  /** Breaches only in deep, open water: seabed below this under the whole run... */
-  breachBed: -5.1,
+  /**
+   * Seconds until a whale first comes right up for air (head and back out, a big blow, flukes up
+   * as it dives), then a random gap between those per whale (it breathes more quietly between).
+   */
+  firstRise: 40,
+  riseEvery: [70, 130] as [number, number],
+  /** Only in deep, open water: seabed below this under the whole run... */
+  riseBed: -4.8,
   /** ...and nothing shallower than the deep sea (land, reef shelf) within this of it. */
-  breachClear: 14,
-  /** Seconds a whale spends swimming out to open water to breach before giving up. */
-  breachSeek: 60,
+  riseClear: 8,
+  /** Seconds a whale spends swimming out to open water to come up before giving up. */
+  riseSeek: 60,
   /** Cruising whales turn away from water shallower than this ahead of them. */
   whaleBed: -4.6,
   /** Seconds until a whale first comes up to breathe (back, blow, dive), then the gap between breaths. */

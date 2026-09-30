@@ -10,6 +10,7 @@ import { Terrain } from './terrain/Terrain';
 import { Sculptor, SculptMode } from './terrain/Sculpt';
 import { Water } from './water/Water';
 import { Lighting } from './render/Lighting';
+import { SkyBodies } from './render/SkyBodies';
 import { PostFX } from './render/PostFX';
 import { CameraRig } from './render/CameraRig';
 import { FX, setCanopyFade } from './render/materials';
@@ -126,6 +127,7 @@ export class Game {
   rig3d: IslanderRig;
   sculptor: Sculptor;
   lighting: Lighting;
+  skyBodies: SkyBodies;
   post: PostFX;
   input: Input;
   ui: UI;
@@ -263,6 +265,8 @@ export class Game {
     this.buildings.instantBuild = () => this.eco.godMode && this.settings.instantBuild;
 
     this.lighting = new Lighting(this.scene, cfg.shadowSize);
+    this.skyBodies = new SkyBodies();
+    this.scene.add(this.skyBodies.group);
     const seaAngle = Math.atan2(this.world.seaDir.z, this.world.seaDir.x);
     this.lighting.eveningAzimuth = seaAngle + Math.PI;
 
@@ -1055,11 +1059,11 @@ export class Game {
       this.audio?.sfx('select', monkey.x, monkey.z);
       return;
     }
-    // Tap a whale to make it breach.
+    // Tap a whale to make it come up for air.
     if (p && p.y <= 0.05) {
       const w = this.marine.whaleNear(p.x, p.z, 4);
       if (w) {
-        this.marine.breach(w);
+        this.marine.rise(w);
         return;
       }
     }
@@ -1592,6 +1596,8 @@ export class Game {
     fog.near = Math.max(RENDER.fogNear, this.rig.cur.dist * 1.6);
     fog.far = fog.near + RENDER.fogFar;
     this.renderer.toneMappingExposure = ls.exposure;
+    // The sun and moon in the sky (seen when the view looks up: free-roam, or tilted low).
+    this.skyBodies.update(this.rig.camera, ls, this.lighting.overcast);
 
     const ws = this.water.shared;
     ws.uSunDir.value.copy(ls.sunDir);
