@@ -1,91 +1,80 @@
 import * as THREE from 'three';
 import type { WhaleRig } from './WhaleModel';
 
-// ---------------- Breach ----------------
+// ---------------- Coming up for air ----------------
 // One continuous move from cruising to cruising, in whale lengths (L) and degrees:
 //   y: body-centre height, h: travel along the heading, pitch: head tilt from straight up
-//   (90 = level, above 90 nose-down), roll: spin about the body axis, fin: 0 flippers swept
-//   back along the flanks .. 1 flung wide, flap: how hard they beat, arch: back bend (positive
-//   hollows the back, the bow of a breach), stroke: strength of the fluke strokes.
-// The whale noses down and gathers speed, pulls up in a tight J and bursts out at a steep
-// angle, driving up with its last strokes and slowing under gravity until about seventy per
-// cent of its length is clear. It hangs a moment, twisting, then topples over faster and faster
-// and slams down on its back; it goes under head-first with the flukes swinging up over it, and
-// levels out back at cruising depth. About four and a half seconds of it are above water.
+//   (90 = level, above 90 nose-down), roll: lean to one side (the fraction of a small lean),
+//   fin: 0 flippers swept back along the flanks .. 1 held out wide, arch: back bend (positive
+//   hollows the back, negative humps it), stroke: strength of the fluke strokes.
+// The whale angles up from cruising depth and its head bursts through the surface, pushing up a
+// mound of water that pours off it, until the head and the front of its back are clear (never
+// more than about forty per cent of it, and never the whole whale). It blows, then the head
+// sinks back as the back rolls up through the surface, and it arches over into a dive: the tail
+// stock humps up and the flukes lift clear, streaming water, before it slips under and levels out
+// back at cruising depth.
 
-/** Beats of the breach (seconds from its start). */
-export const BREACH_T = { breakout: 3.25, peak: 4.55, impact: 5.7, end: 12 };
+/** Beats of the rise (seconds from its start): the head breaking out, the blow, the flukes up, the end. */
+export const RISE_T = { breakout: 3.1, blow: 3.75, flukes: 8.6, end: 14.2 };
 
-interface BreachKey {
+interface RiseKey {
   t: number;
   y: number;
   h: number;
   pitch: number;
-  /** Until the impact, the fraction of the landing roll; after it, 1 + the fraction of the way on round to a full turn. */
   roll: number;
   fin: number;
-  flap: number;
   arch: number;
   stroke: number;
 }
-export type BreachPose = Omit<BreachKey, 't'>;
+export type RisePose = Omit<RiseKey, 't'>;
 
-const KEYS: BreachKey[] = [
-  // Cruising, then nosing down and driving deeper with ever stronger strokes.
-  { t: 0, y: -0.327, h: 0, pitch: 90, roll: 0, fin: 0, flap: 0, arch: 0, stroke: 1 },
-  { t: 0.8, y: -0.36, h: 0.24, pitch: 101, roll: 0, fin: 0, flap: 0, arch: -0.08, stroke: 1.4 },
-  { t: 1.6, y: -0.49, h: 0.55, pitch: 105, roll: 0, fin: 0, flap: 0, arch: -0.12, stroke: 1.9 },
-  { t: 2.3, y: -0.6, h: 0.93, pitch: 92, roll: 0, fin: 0.05, flap: 0, arch: 0.1, stroke: 2.4 },
-  // The pull-up: a tight J, accelerating hard (the body bends into the curve).
-  { t: 2.85, y: -0.48, h: 1.3, pitch: 66, roll: 0.03, fin: 0.12, flap: 0, arch: 0.55, stroke: 2.8 },
-  // Breakout: the head bursts through the surface, still steepening, the flippers swinging out.
-  { t: BREACH_T.breakout, y: -0.335, h: 1.56, pitch: 48, roll: 0.1, fin: 0.35, flap: 0.2, arch: 0.4, stroke: 2.2 },
-  // Rising, slowing under gravity, rearing up toward vertical and starting to twist.
-  { t: 3.7, y: -0.03, h: 1.77, pitch: 30, roll: 0.23, fin: 0.8, flap: 0.6, arch: 0.25, stroke: 1 },
-  { t: 4.15, y: 0.13, h: 1.88, pitch: 21, roll: 0.37, fin: 1, flap: 0.85, arch: 0.05, stroke: 0.5 },
-  // Highest: about 70 % of the body clear; it hangs, then begins to topple.
-  { t: BREACH_T.peak, y: 0.19, h: 1.94, pitch: 21, roll: 0.5, fin: 1, flap: 0.8, arch: -0.1, stroke: 0.4 },
-  // Toppling over faster and faster, twisting onto its back, the body bowing as it falls.
-  { t: 4.95, y: 0.17, h: 2.0, pitch: 33, roll: 0.65, fin: 1, flap: 0.6, arch: 0.1, stroke: 0.4 },
-  { t: 5.35, y: 0.11, h: 2.09, pitch: 56, roll: 0.82, fin: 1, flap: 0.4, arch: 0.35, stroke: 0.5 },
-  // Slamming down flat.
-  { t: BREACH_T.impact, y: 0.02, h: 2.2, pitch: 92, roll: 1, fin: 0.9, flap: 0.15, arch: 0.45, stroke: 0.5 },
-  // Under head-first; the tail swings up and the flukes lift clear before following it down.
-  { t: 6.2, y: -0.1, h: 2.34, pitch: 113, roll: 1.08, fin: 0.6, flap: 0, arch: 0.25, stroke: 0.5 },
-  { t: 6.8, y: -0.2, h: 2.47, pitch: 131, roll: 1.22, fin: 0.35, flap: 0, arch: 0.1, stroke: 0.6 },
-  { t: 7.4, y: -0.28, h: 2.6, pitch: 136, roll: 1.4, fin: 0.2, flap: 0, arch: 0.05, stroke: 1 },
-  { t: 8.0, y: -0.38, h: 2.75, pitch: 122, roll: 1.62, fin: 0.1, flap: 0, arch: 0, stroke: 1.4 },
-  // Rolling upright and levelling out, back up to cruising depth and speed.
-  { t: 9.5, y: -0.47, h: 3.14, pitch: 98, roll: 1.9, fin: 0.03, flap: 0, arch: 0, stroke: 1.3 },
-  { t: 10.7, y: -0.37, h: 3.46, pitch: 85, roll: 2, fin: 0, flap: 0, arch: 0, stroke: 1.1 },
-  { t: BREACH_T.end, y: -0.327, h: 3.81, pitch: 90, roll: 2, fin: 0, flap: 0, arch: 0, stroke: 1 },
+const KEYS: RiseKey[] = [
+  // Cruising, then angling up toward the light, gathering speed.
+  { t: 0, y: -0.327, h: 0, pitch: 90, roll: 0, fin: 0, arch: 0, stroke: 1 },
+  { t: 1.3, y: -0.34, h: 0.38, pitch: 83, roll: 0, fin: 0.05, arch: 0.05, stroke: 1.5 },
+  { t: 2.5, y: -0.24, h: 0.8, pitch: 72, roll: 0.3, fin: 0.1, arch: 0.1, stroke: 1.8 },
+  // The head bursts through, pushing up a mound of water that pours off it.
+  { t: 3.2, y: -0.1, h: 1.03, pitch: 66, roll: 0.7, fin: 0.18, arch: 0.08, stroke: 1.1 },
+  // Head and blowholes clear: the blow, and it lingers with its head up a moment.
+  { t: RISE_T.blow, y: -0.04, h: 1.16, pitch: 67, roll: 1, fin: 0.22, arch: 0.02, stroke: 0.6 },
+  { t: 4.7, y: -0.04, h: 1.36, pitch: 72, roll: 0.8, fin: 0.18, arch: -0.05, stroke: 0.5 },
+  // The head sinks back as the back rolls up through the surface, water sheeting off it, and the
+  // hump of the back and the dorsal fin roll over.
+  { t: 5.8, y: -0.07, h: 1.6, pitch: 86, roll: 0.35, fin: 0.1, arch: -0.3, stroke: 0.5 },
+  { t: 6.8, y: -0.13, h: 1.83, pitch: 100, roll: 0.1, fin: 0.05, arch: -0.55, stroke: 0.4 },
+  // Rolling forward into the dive: the tail stock humps up and the flukes lift clear.
+  { t: 7.7, y: -0.2, h: 2.02, pitch: 116, roll: 0, fin: 0.02, arch: -0.45, stroke: 0.25 },
+  { t: RISE_T.flukes, y: -0.2, h: 2.17, pitch: 130, roll: 0, fin: 0, arch: -0.25, stroke: 0.2 },
+  { t: 9.4, y: -0.3, h: 2.3, pitch: 130, roll: 0, fin: 0, arch: -0.1, stroke: 0.4 },
+  // Slipping under and levelling out at cruising depth and speed.
+  { t: 10.4, y: -0.42, h: 2.48, pitch: 112, roll: 0, fin: 0, arch: 0, stroke: 1.2 },
+  { t: 11.8, y: -0.43, h: 2.84, pitch: 94, roll: 0, fin: 0, arch: 0, stroke: 1.2 },
+  { t: 13.2, y: -0.327, h: 3.22, pitch: 88, roll: 0, fin: 0, arch: 0, stroke: 1 },
+  { t: RISE_T.end, y: -0.327, h: 3.49, pitch: 90, roll: 0, fin: 0, arch: 0, stroke: 1 },
 ];
 
-/** How far the breach carries the whale along its heading (whale lengths). */
-export const BREACH_REACH = KEYS[KEYS.length - 1].h;
+/** How far the rise carries the whale along its heading (whale lengths). */
+export const RISE_REACH = KEYS[KEYS.length - 1].h;
 /** Body half-thickness allowance (whale lengths) when keeping it off the seabed. */
 export const WHALE_GIRTH = 0.14;
 
-/**
- * The breach pose at time t. `landRoll` is the roll (degrees, signed) it lands with: about 90 on
- * its side, 180 on its back; it always finishes a whole turn upright.
- */
-export function sampleBreach(t: number, landRoll = 170): BreachPose {
+/** The rise pose at time t. `lean` is the roll (degrees, signed) it leans to as its head comes out. */
+export function sampleRise(t: number, lean = 12): RisePose {
   const K = KEYS;
-  const tt = Math.min(Math.max(t, 0), BREACH_T.end);
+  const tt = Math.min(Math.max(t, 0), RISE_T.end);
   let i = 0;
   while (i < K.length - 2 && tt > K[i + 1].t) i++;
   const a = K[Math.max(0, i - 1)], b = K[i], c = K[i + 1], d = K[Math.min(K.length - 1, i + 2)];
   const f = (tt - b.t) / (c.t - b.t);
-  const full = Math.sign(landRoll || 1) * 360;
-  const get = (k: BreachKey, key: keyof BreachPose) => (key !== 'roll' ? k[key] : k.roll <= 1 ? k.roll * landRoll : landRoll + (k.roll - 1) * (full - landRoll));
+  const get = (k: RiseKey, key: keyof RisePose) => (key === 'roll' ? k.roll * lean : k[key]);
   // Time-aware Hermite tangents keep velocity continuous across unequal key intervals.
-  const value = (key: keyof BreachPose) => {
+  const value = (key: keyof RisePose) => {
     const m0 = ((get(c, key) - get(a, key)) / (c.t - a.t || 1)) * (c.t - b.t);
     const m1 = ((get(d, key) - get(b, key)) / (d.t - b.t || 1)) * (c.t - b.t);
     return (2 * f * f * f - 3 * f * f + 1) * get(b, key) + (f * f * f - 2 * f * f + f) * m0 + (-2 * f * f * f + 3 * f * f) * get(c, key) + (f * f * f - f * f) * m1;
   };
-  return { y: value('y'), h: value('h'), pitch: value('pitch'), roll: value('roll'), fin: value('fin'), flap: value('flap'), arch: value('arch'), stroke: value('stroke') };
+  return { y: value('y'), h: value('h'), pitch: value('pitch'), roll: value('roll'), fin: value('fin'), arch: value('arch'), stroke: value('stroke') };
 }
 
 /** Lowest point of a straight whale body (in whale lengths, relative to its centre) at a pitch. */
@@ -93,7 +82,7 @@ export function whaleDrop(pitch: number): number {
   return 0.5 * Math.abs(Math.cos(THREE.MathUtils.degToRad(pitch))) + WHALE_GIRTH;
 }
 
-/** Share of the body's length above the water (centre height y and pitch as in a breach pose). */
+/** Share of the body's length above the water (centre height y and pitch as in a rise pose). */
 export function clearOfWater(y: number, pitch: number): number {
   const up = Math.abs(Math.cos(THREE.MathUtils.degToRad(pitch)));
   if (up < 1e-4) return y > 0 ? 1 : 0;
@@ -101,13 +90,13 @@ export function clearOfWater(y: number, pitch: number): number {
 }
 
 /**
- * Is there room to breach here, heading along `yaw`? The seabed must lie below `maxBed` under
- * the whole run (from behind the tail to beyond the re-entry, a body width either side), and
+ * Is there room to come up here, heading along `yaw`? The seabed must lie below `maxBed` under
+ * the whole run (from behind the tail to beyond where it dives, a body width either side), and
  * nothing shallower than the deep sea (land, the reef shelf, coral) within `clear` of it.
  */
-export function breachSiteOk(bed: (x: number, z: number) => number, x: number, z: number, yaw: number, L: number, maxBed: number, clear: number): boolean {
+export function riseSiteOk(bed: (x: number, z: number) => number, x: number, z: number, yaw: number, L: number, maxBed: number, clear: number): boolean {
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
-  const reach = BREACH_REACH * L;
+  const reach = RISE_REACH * L;
   for (let s = -0.6 * L; s <= reach + 0.8 * L; s += 1.5) {
     for (const o of [-0.7 * L, 0, 0.7 * L]) {
       if (bed(x + fx * s + fz * o, z + fz * s - fx * o) > maxBed) return false;
@@ -134,7 +123,7 @@ export interface WhaleDrive {
   /** Turn rate (radians a second, + = toward its left): the head leads into it, and `turnLag` (the same, lagging) bends the tail after it. */
   turn: number;
   turnLag: number;
-  /** Positive hollows the back (the bow of a breach), negative humps it (rolling into a dive). */
+  /** Positive hollows the back, negative humps it (rolling into a dive). */
   arch: number;
   /** Flippers: 0 held back along the flanks .. 1 flung out wide; how hard they beat, and the beat's phase. */
   fin: number;

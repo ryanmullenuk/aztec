@@ -6,7 +6,7 @@ import { RNG } from '../world/rng';
 import { World } from '../world/World';
 import { Water } from '../water/Water';
 import { Particles } from './Boats';
-import { poseWhale, sampleBreach, breachSiteOk, BREACH_T, WHALE_GIRTH, type WhaleDrive } from './WhaleMotion';
+import { poseWhale, sampleRise, riseSiteOk, RISE_T, WHALE_GIRTH, type WhaleDrive } from './WhaleMotion';
 import { createWhale, type WhaleRig } from './WhaleModel';
 import { Whitewater, whitewaterTexture } from './Whitewater';
 
@@ -152,7 +152,7 @@ function spiralFoamTexture(): THREE.Texture {
   grd.addColorStop(1, 'rgba(230,250,255,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
-  // Swirling streaks, like the whirl of foam after a breach.
+  // Swirling streaks, like the whirl of foam where a whale went down.
   g.lineCap = 'round';
   for (let k = 0; k < 90; k++) {
     const r0 = 10 + Math.random() * 110;
@@ -258,15 +258,14 @@ interface Whale {
   /** Flipper beat phase, and the turn rate as the tail follows it (lagging the head). */
   flapPhase: number;
   turnLag: number;
-  /** Last frame's body centre, axis and flipper / fluke tips (world): how fast water leaves them. */
-  track: { c: THREE.Vector3; ax: THREE.Vector3; finL: THREE.Vector3; finR: THREE.Vector3; lobeL: THREE.Vector3; lobeR: THREE.Vector3; ok: boolean };
-  /** The landing: it spreads along the body for a moment, then a jet shoots up where it went in. */
-  slam: { t: number; x: number; z: number; ax: number; az: number; jet: boolean } | null;
+  /** Last frame's body centre, axis and fluke tips (world): how fast water leaves them. */
+  track: { c: THREE.Vector3; ax: THREE.Vector3; lobeL: THREE.Vector3; lobeR: THREE.Vector3; ok: boolean };
   x: number;
   z: number;
   heading: number;
   route: { x: number; z: number; r: number; a: number; dir: number };
-  state: 'swim' | 'breach' | 'surface';
+  /** Cruising, breathing quietly at the surface, or coming right up for air (head and back out). */
+  state: 'swim' | 'rise' | 'surface';
   /** Surfacing to breathe: start depth, time gliding at the surface, whether the flukes lift on the dive. */
   surf: { y0: number; glide: number; fluke: boolean };
   /** Current pose: tilt from vertical toward yaw (90 = level), spin, depth. */
@@ -274,19 +273,17 @@ interface Whale {
   turnRate: number;
   wanderSeed: number;
   t: number;
-  nextBreach: number;
+  nextRise: number;
   nextSpout: number;
   nextPrint: number;
-  /** Breach: the roll it lands with (signed degrees), how it was swimming when it began (eased out), travel so far (lengths). */
-  landRoll: number;
+  /** Rising: the way it leans as its head comes out (signed degrees), how it was swimming when it began (eased out), travel so far (lengths). */
+  lean: number;
   from: { y: number; pitch: number; roll: number };
   travelled: number;
-  /** A breach is wanted: head for this deep, open water first (gives up at `until`). */
+  /** A rise is wanted: head for this deep, open water first (gives up at `until`). */
   seek: { x: number; z: number; until: number } | null;
-  /** Tapped while busy: breach as soon as it can. */
-  wantBreach: boolean;
-  /** Just breached: the next breath ends in a fluke-up dive. */
-  afterBreach: boolean;
+  /** Tapped while busy: come up as soon as it can. */
+  wantRise: boolean;
   length: number;
   flags: Set<string>;
   ring: THREE.Mesh;
@@ -329,9 +326,9 @@ interface Dolphin {
 }
 
 /**
- * Humpback whales that cruise the deep water, spout and breach (an airborne spin,
- * broadside landing, huge swirling splash, fluke
- * flip as it dives), and dolphin pods porpoising in leaping arcs.
+ * Humpback whales that cruise the deep water, breathing quietly at the surface now and then and
+ * sometimes coming right up for air (head and back out, a big blow, a fluke-up dive, the sea
+ * moving all round them), and dolphin pods porpoising in leaping arcs.
  */
 export class Marine {
   readonly group = new THREE.Group();
@@ -341,10 +338,10 @@ export class Marine {
   private dolphinMesh: THREE.InstancedMesh;
   private dolphinBend: THREE.InstancedBufferAttribute;
   private spray = new Particles(3200, 0xf2fcff);
-  /** Heaving clumps of white water, and the mist that hangs after a breach (textured sprites). */
+  /** Heaving clumps of white water, and soft drifting mist (textured sprites). */
   private white: Whitewater;
   private fog: Whitewater;
-  /** Fine misty spray of a whale's blow (its own pool, so a breach never steals it). */
+  /** Fine misty spray of a whale's blow (its own pool, so other splashes never steal it). */
   private blowMist = new Particles(1100, 0xf4fbff, 0.32);
   private rings: { mesh: THREE.Mesh; t: number; life: number; r0: number; r1: number; alpha: number }[] = [];
   private rng: RNG;
@@ -406,12 +403,12 @@ export class Marine {
       foam.renderOrder = 15;
       const a = this.rng.range(0, Math.PI * 2);
       this.whales.push({
-        root, rig, x: s.x, z: s.z, heading: 0, flapPhase: 0, turnLag: 0, slam: null,
-        track: { c: new THREE.Vector3(), ax: new THREE.Vector3(), finL: new THREE.Vector3(), finR: new THREE.Vector3(), lobeL: new THREE.Vector3(), lobeR: new THREE.Vector3(), ok: false },
+        root, rig, x: s.x, z: s.z, heading: 0, flapPhase: 0, turnLag: 0,
+        track: { c: new THREE.Vector3(), ax: new THREE.Vector3(), lobeL: new THREE.Vector3(), lobeR: new THREE.Vector3(), ok: false },
         route: { x: s.x, z: s.z, r: 10 + this.rng.next() * 10, a, dir: this.rng.chance(0.5) ? 1 : -1 },
         state: 'swim', surf: { y0: -MARINE.swimDepth, glide: 3, fluke: false }, t: 0,
-        nextBreach: MARINE.firstBreach + k * 9 + this.rng.next() * 10, nextSpout: MARINE.firstSurface + k * 5 + this.rng.next() * 8, nextPrint: 1 + this.rng.next() * 3,
-        landRoll: 170, from: { y: 0, pitch: 0, roll: 0 }, travelled: 0, seek: null, wantBreach: false, afterBreach: false, length: L, flags: new Set(), ring, glow, patch, foam,
+        nextRise: MARINE.firstRise + k * 9 + this.rng.next() * 10, nextSpout: MARINE.firstSurface + k * 5 + this.rng.next() * 8, nextPrint: 1 + this.rng.next() * 3,
+        lean: 12, from: { y: 0, pitch: 0, roll: 0 }, travelled: 0, seek: null, wantRise: false, length: L, flags: new Set(), ring, glow, patch, foam,
         swimPhase: 0, pose: { y: -MARINE.swimDepth, pitch: 90, roll: 0, yaw: a }, turnRate: 0, wanderSeed: this.rng.next() * 100,
       });
     });
@@ -502,36 +499,37 @@ export class Marine {
     return w.heightAt(x, z) < bed;
   }
 
-  /** Room to breach from here along a heading: deep water under the whole run, well clear of any shallows. */
-  private canBreach(w: Whale, x = w.x, z = w.z, yaw = w.pose.yaw): boolean {
-    return breachSiteOk((bx, bz) => this.bedAt(bx, bz), x, z, yaw, w.length, MARINE.breachBed, MARINE.breachClear);
+  /** Room to come up from here along a heading: deep water under the whole run, clear of any shallows. */
+  private canRise(w: Whale, x = w.x, z = w.z, yaw = w.pose.yaw): boolean {
+    return riseSiteOk((bx, bz) => this.bedAt(bx, bz), x, z, yaw, w.length, MARINE.riseBed, MARINE.riseClear);
   }
 
   /**
-   * Breach (e.g. when the player taps a whale). Only ever in deep, open water: from anywhere else
-   * the whale first swims out to the nearest spot with room, and breaches when it gets there.
+   * Come right up for air (e.g. when the player taps a whale): head and back out, a big blow, and
+   * a dive with the flukes lifting. Only in deep, open water: from anywhere else the whale first
+   * swims out to the nearest spot with room, and comes up when it gets there.
    */
-  breach(w: Whale): void {
+  rise(w: Whale): void {
     if (w.state !== 'swim') {
-      if (w.state === 'surface') w.wantBreach = true;
+      if (w.state === 'surface') w.wantRise = true;
       return;
     }
-    if (this.canBreach(w)) {
-      this.startBreach(w);
+    if (this.canRise(w)) {
+      this.startRise(w);
       return;
     }
     if (w.seek) return;
-    // Nowhere in reach: just head straight out to sea, and breach once there's room.
-    let to = this.findBreachWater(w);
+    // Nowhere in reach: just head straight out to sea, and come up once there's room.
+    let to = this.findRiseWater(w);
     if (!to) {
       const a = Math.atan2(w.x, w.z), r = this.world.half * 1.2;
       to = { x: Math.sin(a) * r, z: Math.cos(a) * r };
     }
-    w.seek = { ...to, until: this.time + MARINE.breachSeek };
+    w.seek = { ...to, until: this.time + MARINE.riseSeek };
   }
 
-  /** Nearest deep, open water to breach in, reachable without crossing the shallows. */
-  private findBreachWater(w: Whale): { x: number; z: number } | null {
+  /** Nearest deep, open water to come up in, reachable without crossing the shallows. */
+  private findRiseWater(w: Whale): { x: number; z: number } | null {
     for (let r = 10; r <= 70; r += 10) {
       let best: { x: number; z: number } | null = null, bestTurn = Infinity;
       const n = Math.ceil(r / 2.5);
@@ -543,7 +541,7 @@ export class Marine {
         if (turn >= bestTurn || Math.hypot(x, z) > this.world.half * 1.25) continue;
         let clear = true;
         for (let d = 4; d < r && clear; d += 4) clear = this.bedAt(w.x + Math.sin(a) * d, w.z + Math.cos(a) * d) < MARINE.whaleBed;
-        if (clear && this.canBreach(w, x, z, a)) {
+        if (clear && this.canRise(w, x, z, a)) {
           best = { x, z };
           bestTurn = turn;
         }
@@ -553,21 +551,21 @@ export class Marine {
     return null;
   }
 
-  private startBreach(w: Whale): void {
+  private startRise(w: Whale): void {
     const L = w.length, P = w.pose;
-    w.state = 'breach';
+    w.state = 'rise';
     w.t = 0;
     w.seek = null;
-    w.wantBreach = false;
+    w.wantRise = false;
     w.travelled = 0;
-    // Lands on its side or (mostly) on its back, twisting either way.
-    w.landRoll = (this.rng.chance(0.5) ? 1 : -1) * this.rng.range(115, 190);
-    // Start from exactly how it is swimming; the difference eases out over the run-up.
-    const k0 = sampleBreach(0, w.landRoll);
+    // Leans a little to one side or the other as the head comes out.
+    w.lean = (this.rng.chance(0.5) ? 1 : -1) * this.rng.range(6, 16);
+    // Start from exactly how it is swimming; the difference eases out as it angles up.
+    const k0 = sampleRise(0, w.lean);
     P.roll -= Math.round(P.roll / 360) * 360;
     w.from = { y: P.y - k0.y * L, pitch: P.pitch - k0.pitch, roll: P.roll - k0.roll };
     w.flags.clear();
-    // Don't come up to breathe straight after it: the breach ends with a breath a little later.
+    // No quiet breath straight after it (it has just breathed deeply).
     w.nextSpout = Infinity;
   }
 
@@ -578,9 +576,7 @@ export class Marine {
     w.t = 0;
     w.nextSpout = MARINE.surfaceEvery[0] + this.rng.next() * (MARINE.surfaceEvery[1] - MARINE.surfaceEvery[0]);
     // Only lift the flukes clear where the water is deep enough for the steep dive.
-    // (Always after a breach, if there's room.)
-    w.surf = { y0: w.pose.y, glide: 2.6 + this.rng.next() * 1.6, fluke: w.afterBreach ? this.bedAt(w.x, w.z) < -5 : this.bedAt(w.x, w.z) < -5.4 && this.rng.chance(0.55) };
-    w.afterBreach = false;
+    w.surf = { y0: w.pose.y, glide: 2.6 + this.rng.next() * 1.6, fluke: this.bedAt(w.x, w.z) < -5.4 && this.rng.chance(0.55) };
     w.flags.clear();
   }
 
@@ -663,9 +659,10 @@ export class Marine {
       }
     };
     once('break', SURF_RISE * 0.8, () => {
-      // The back breaks the surface: a soft swirl and ripple.
+      // The back breaks the surface: a soft swirl, and waves spreading round it.
       this.ring(w.x, w.z, L * 0.15, L * 0.55, 2.6, 0, 0.35);
       this.burst(w.x + fx * L * 0.2, w.z + fz * L * 0.2, 24, 1.2, L * 0.12);
+      this.water.disturb(w.x + fx * L * 0.15, w.z + fz * L * 0.15, 0.55);
     });
     // The blow: a bushy column of fine mist shooting up a couple of units, then hanging and drifting.
     if (t >= SURF_BLOW && t < SURF_BLOW + SURF_BLOW_LEN) {
@@ -677,16 +674,7 @@ export class Marine {
         this.burst(bh.x, bh.z, 14, 1.3, 0.18);
         this.ring(bh.x, bh.z, 0.2, 1.4, 1.6, 0, 0.3);
       });
-      const v = (t - SURF_BLOW) / SURF_BLOW_LEN;
-      // Strongest at the start of the exhale.
-      // Fine mist: many small, faint droplets that billow out as they rise.
-      const n = Math.floor(dt * 420 * (1.3 - v) + this.rng.next());
-      for (let k = 0; k < n; k++) {
-        const up = (2.0 + this.rng.next() * 1.1) * (1 - 0.3 * v);
-        const sx = (this.rng.next() - 0.5) * 0.5, sz = (this.rng.next() - 0.5) * 0.5;
-        this.blowMist.spawn(bh.x + (this.rng.next() - 0.5) * 0.12, by + this.rng.next() * 0.15, bh.z + (this.rng.next() - 0.5) * 0.12,
-          sx + 0.3, up, sz + 0.12, 1.6 + this.rng.next() * 1.1, 0.04 + this.rng.next() * 0.05, 0.3 + this.rng.next() * 0.3);
-      }
+      this.blow(bh.x, by, bh.z, (t - SURF_BLOW) / SURF_BLOW_LEN, dt, (L / MARINE.whaleLength) * 0.9);
     }
     if (S.fluke && t > diveAt) this.flukeStream(w, dt);
     if (S.fluke) {
@@ -702,6 +690,7 @@ export class Marine {
       const tx = w.x - fx * L * 0.45, tz = w.z - fz * L * 0.45;
       this.ring(tx, tz, L * 0.1, L * 0.4, 3.0, 0, 0.35);
       this.burst(tx, tz, S.fluke ? 40 : 18, S.fluke ? 1.8 : 1.1, L * 0.1);
+      this.water.disturb(tx, tz, S.fluke ? 0.5 : 0.3);
       if (S.fluke) this.sfx('splash', tx, tz);
     });
     if (t >= end) {
@@ -713,7 +702,7 @@ export class Marine {
     }
   }
 
-  /** Whale near a world point (for tap-to-breach). */
+  /** Whale near a world point (for tap-to-rise). */
   whaleNear(x: number, z: number, r = 4): Whale | null {
     let best: Whale | null = null, bd = r;
     for (const w of this.whales) {
@@ -830,13 +819,11 @@ export class Marine {
     poseWhale(w.rig, d);
   }
 
-  /** Remember where the body and the flipper and fluke tips are, for how fast water leaves them next frame. */
+  /** Remember where the body and the fluke tips are, for how fast water leaves them next frame. */
   private track(w: Whale): void {
     const tr = w.track;
     tr.c.copy(w.root.position);
     tr.ax.set(0, 0, 1).applyQuaternion(w.root.quaternion);
-    w.rig.finTipL.getWorldPosition(tr.finL);
-    w.rig.finTipR.getWorldPosition(tr.finR);
     w.rig.lobeTipL.getWorldPosition(tr.lobeL);
     w.rig.lobeTipR.getWorldPosition(tr.lobeR);
     tr.ok = true;
@@ -877,7 +864,7 @@ export class Marine {
     if (w.state === 'swim') {
       // Wander in long, natural curves through deep water, fully submerged.
       let want = Math.sin(this.time * 0.07 + w.wanderSeed) * 0.35 + Math.sin(this.time * 0.023 + w.wanderSeed * 2) * 0.25;
-      // Heading out to open water to breach.
+      // Heading out to open water to come up.
       if (w.seek) want = THREE.MathUtils.clamp(Marine.turnTo(P.yaw, Math.atan2(w.seek.x - w.x, w.seek.z - w.z)) * 0.8, -0.45, 0.45);
       // Don't wander off beyond the horizon: circle back toward the island's waters.
       if (Math.hypot(w.x, w.z) > this.world.half * 1.3) want = Math.sign(Marine.turnTo(P.yaw, Math.atan2(-w.x, -w.z))) * 0.4;
@@ -895,27 +882,27 @@ export class Marine {
       P.y += (-MARINE.swimDepth + Math.sin(this.time * 0.3 + w.wanderSeed) * 0.25 - P.y) * Math.min(1, dt * 0.8);
       this.applyPose(w, w.x, P.y, w.z);
       this.animateBody(w, dt, 1);
-      // Breach once it's out in open water (or give up if it can't find any in time).
+      // Come up once it's out in open water (or give up if it can't find any in time).
       if (w.seek) {
         if (this.time > w.seek.until) w.seek = null;
-        else if (Math.floor(this.time * 3) !== Math.floor((this.time - dt) * 3) && this.canBreach(w)) this.startBreach(w);
-      } else if (w.wantBreach) {
-        w.wantBreach = false;
-        this.breach(w);
+        else if (Math.floor(this.time * 3) !== Math.floor((this.time - dt) * 3) && this.canRise(w)) this.startRise(w);
+      } else if (w.wantRise) {
+        w.wantRise = false;
+        this.rise(w);
       }
-      w.nextBreach -= dt;
-      if (w.state === 'swim' && !w.seek && w.nextBreach <= 0) {
-        w.nextBreach = MARINE.breachEvery[0] + this.rng.next() * (MARINE.breachEvery[1] - MARINE.breachEvery[0]);
-        // Prefer breaching where the player is looking.
+      w.nextRise -= dt;
+      if (w.state === 'swim' && !w.seek && w.nextRise <= 0) {
+        w.nextRise = MARINE.riseEvery[0] + this.rng.next() * (MARINE.riseEvery[1] - MARINE.riseEvery[0]);
+        // Prefer coming up where the player is looking.
         const near = Math.hypot(w.x - camTarget.x, w.z - camTarget.z) < 90;
-        if (near || this.rng.chance(0.4)) this.breach(w);
+        if (near || this.rng.chance(0.4)) this.rise(w);
       }
       w.nextSpout -= dt;
       if (w.state === 'swim' && !w.seek && w.nextSpout <= 0) {
         if (this.bedAt(w.x, w.z) < -4.2) {
           this.surface(w);
-          // Never breach in the middle of (or right after) a breath.
-          w.nextBreach = Math.max(w.nextBreach, 22);
+          // Never come right up in the middle of (or just after) a quiet breath.
+          w.nextRise = Math.max(w.nextRise, 22);
         } else w.nextSpout = 4;
       }
       if (w.state !== 'swim') {
@@ -939,25 +926,49 @@ export class Marine {
       this.track(w);
       return;
     }
-    this.updateBreach(w, dt);
+    this.updateRise(w, dt);
     this.fadeFoam(w, dt);
     this.track(w);
   }
 
   /**
-   * The breach, one continuous move from cruising back to cruising (see WhaleMotion): run-up and
-   * J-turn under water, burst out, hang, topple and slam down, flukes over, level out. Splashes
-   * are set off by where the body actually meets the water, and water streams off the body,
-   * flippers and flukes at the speed they're moving.
+   * One moment (`v` 0..1 through it) of a blow from the blowholes at (x, y, z): a bushy column of
+   * mist that shoots up and billows out, fine spray through it, heavier drops raining back, all
+   * drifting downwind. `size` scales it (1 a quiet breath, more for a big one).
    */
-  private updateBreach(w: Whale, dt: number): void {
-    const L = w.length, P = w.pose, T = BREACH_T, Ls = L / MARINE.whaleLength;
+  private blow(x: number, y: number, z: number, v: number, dt: number, size: number): void {
+    // Soft puffs of vapour filling out the column, strongest at the start of the breath.
+    let n = Math.floor(dt * 90 * size * (1.3 - v) + this.rng.next());
+    for (let m = 0; m < n; m++) {
+      const up = (1.7 + this.rng.next() * 1.3) * size * (1 - 0.4 * v), sx = (this.rng.next() - 0.5) * 0.6, sz = (this.rng.next() - 0.5) * 0.6;
+      this.fog.spawn(x + (this.rng.next() - 0.5) * 0.12, y + this.rng.next() * 0.2, z + (this.rng.next() - 0.5) * 0.12,
+        sx + 0.3, up, sz + 0.12, 1.7 + this.rng.next() * 1.4, (0.36 + this.rng.next() * 0.4) * size, (0.75 + this.rng.next() * 0.55) * size, 0.5, 1.3, 3);
+    }
+    // Fine mist through it, and heavier drops raining back down round it.
+    n = Math.floor(dt * 300 * size * (1.3 - v) + this.rng.next());
+    for (let m = 0; m < n; m++) {
+      const up = (2.0 + this.rng.next() * 1.2) * size * (1 - 0.3 * v), sx = (this.rng.next() - 0.5) * 0.5, sz = (this.rng.next() - 0.5) * 0.5;
+      this.blowMist.spawn(x + (this.rng.next() - 0.5) * 0.12, y + this.rng.next() * 0.15, z + (this.rng.next() - 0.5) * 0.12,
+        sx + 0.3, up, sz + 0.12, 1.6 + this.rng.next() * 1.1, 0.04 + this.rng.next() * 0.05, 0.3 + this.rng.next() * 0.3);
+      if (this.rng.next() < 0.1) this.spray.spawn(x, y + 0.1, z, sx * 1.5, up * 0.6, sz * 1.5, 1.0 + this.rng.next() * 0.5, 0.03 + this.rng.next() * 0.04, 0);
+    }
+  }
+
+  /**
+   * Coming right up for air (see WhaleMotion): it angles up and its head bursts through the
+   * surface, heaving up a mound of water that pours off it; it blows; the back rolls up through the
+   * surface with water sheeting off it; then it arches into a dive with the flukes lifting clear.
+   * The sea moves all round it: a white collar and bow wave where it meets the water, rings of
+   * waves spreading out, and a smooth footprint where it goes down. Only the head and the front of
+   * its back ever leave the water.
+   */
+  private updateRise(w: Whale, dt: number): void {
+    const L = w.length, P = w.pose, T = RISE_T, Ls = L / MARINE.whaleLength;
     w.t += dt;
     const t = w.t;
-    const k = sampleBreach(t, w.landRoll);
+    const k = sampleRise(t, w.lean);
     // Ease out of how it was swimming, and let any turn it was making die away.
     const ease = 1 - THREE.MathUtils.smoothstep(t, 0, 1.6);
-    const roll0 = P.roll;
     P.y = k.y * L + w.from.y * ease;
     P.pitch = k.pitch + w.from.pitch * ease;
     P.roll = k.roll + w.from.roll * ease;
@@ -969,19 +980,14 @@ export class Marine {
     w.z += fz * (k.h - w.travelled) * L;
     w.travelled = k.h;
     const q = this.applyPose(w, w.x, P.y, w.z);
-    // Flippers flung out wide and beating through the leap (one up, one down as it twists).
-    w.flapPhase += dt * (2.4 + 2.2 * k.flap);
-    this.animateBody(w, dt, k.stroke, k.arch, k.fin, k.flap, (P.roll - roll0) / dt);
+    this.animateBody(w, dt, k.stroke, k.arch, k.fin);
     w.root.updateMatrixWorld(true);
 
-    // Where the body is: centre, axis, head and tail heights, and where it crosses the surface.
+    // Where the body is: centre, axis, head and tail heights; how fast the skin moves.
     const cx = w.root.position.x, cy = w.root.position.y, cz = w.root.position.z;
     const axis = _ax.set(0, 0, 1).applyQuaternion(q);
     const headY = cy + axis.y * 0.5 * L, tailY = cy - axis.y * 0.5 * L;
     const hx = cx + axis.x * 0.5 * L, hz = cz + axis.z * 0.5 * L;
-    const cross = Math.abs(axis.y) > 0.15 ? -cy / axis.y : Infinity;
-    const wx = cx + axis.x * cross, wz = cz + axis.z * cross;
-    // How fast the skin is moving: the centre, and the turn of the axis (a point s along it moves at vc + va * s).
     const tr = w.track;
     const vc = _v1.set(cx, cy, cz).sub(tr.c).divideScalar(dt);
     const va = _v2.copy(axis).sub(tr.ax).divideScalar(dt);
@@ -993,187 +999,142 @@ export class Marine {
       }
     };
     const out = w.flags.has('break');
-    const down = w.flags.has('impact');
+    // Across the body (horizontal), and the stretch of back above the water (axis offsets, in lengths).
+    const hl = Math.hypot(axis.x, axis.z) || 1;
+    const px = -axis.z / hl, pz = axis.x / hl;
+    let s0 = Infinity, s1 = -Infinity;
+    for (let s = -0.5; s <= 0.5001; s += 0.05) {
+      const top = cy + axis.y * s * L + 0.09 * L * Math.sqrt(Math.max(0, 1 - (s / 0.52) ** 2));
+      if (top > 0.02) {
+        s0 = Math.min(s0, s);
+        s1 = Math.max(s1, s);
+      }
+    }
+    const exposed = s1 >= s0;
+    const halfW = (s: number) => 0.11 * L * Math.sqrt(Math.max(0.05, 1 - (s / 0.55) ** 2));
 
-    // A pale patch and a glow in the water where the head is about to burst out.
-    const rising = !out ? THREE.MathUtils.smoothstep(headY, -0.5 * L, -0.05 * L) * THREE.MathUtils.smoothstep(t, T.breakout - 1.6, T.breakout - 0.9) : THREE.MathUtils.clamp(1 - (t - T.breakout) / 0.6, 0, 1);
-    w.glow.visible = rising > 0.01;
-    w.patch.visible = rising > 0.01;
+    // A pale patch and a glow in the water where the head is about to come up.
+    const rising = !out ? THREE.MathUtils.smoothstep(headY, -0.5 * L, -0.05 * L) * THREE.MathUtils.smoothstep(t, T.breakout - 1.8, T.breakout - 0.9) : THREE.MathUtils.clamp(1 - (t - T.breakout) / 0.8, 0, 1);
+    w.glow.visible = w.patch.visible = rising > 0.01;
     if (rising > 0.01) {
-      const px = out ? w.glow.position.x : hx, pz = out ? w.glow.position.z : hz;
-      w.glow.position.set(px, -0.06, pz);
-      w.glow.scale.set(L * 0.35, L * 1.1, L * 0.35);
-      (w.glow.material as THREE.ShaderMaterial).uniforms.uA.value = rising * 0.4;
-      w.patch.position.set(px, -0.02, pz);
-      w.patch.scale.set(L * 0.42, 1, L * 0.7);
+      const gx = out ? w.glow.position.x : hx, gz = out ? w.glow.position.z : hz;
+      w.glow.position.set(gx, -0.06, gz);
+      w.glow.scale.set(L * 0.3, L * 0.9, L * 0.3);
+      (w.glow.material as THREE.ShaderMaterial).uniforms.uA.value = rising * 0.3;
+      w.patch.position.set(gx, -0.02, gz);
+      w.patch.scale.set(L * 0.36, 1, L * 0.62);
       w.patch.rotation.y = P.yaw;
-      (w.patch.material as THREE.MeshBasicMaterial).opacity = rising * 0.9;
+      (w.patch.material as THREE.MeshBasicMaterial).opacity = rising * 0.8;
     }
 
-    // Breakout: the head bursts through the surface, heaving up a dome of white water.
-    once('break', headY > 0 && t < T.peak, () => {
+    // The head bursts through: a mound of water heaves up round it and pours off, and rings of
+    // waves spread out across the sea.
+    once('break', headY > -0.02 * L && t > T.breakout - 1, () => {
       this.sfx('splash', hx, hz);
-      for (const [r1, life, delay] of [[L * 0.45, 1.6, 0], [L * 0.7, 2.2, 0.35], [L * 0.95, 2.6, 0.8], [L * 1.1, 2.8, 1.3]]) this.ring(hx, hz, 0.3, r1, life, delay);
-      this.burst(hx, hz, 150, 3.4, 0.6);
-      for (let m = 0; m < 50; m++) {
-        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * 0.15 * L, o = 0.4 + this.rng.next() * 1.6;
-        this.white.spawn(hx + Math.cos(a) * r, 0.05, hz + Math.sin(a) * r, Math.cos(a) * o, (3 + this.rng.next() * 4) * Ls, Math.sin(a) * o, 1 + this.rng.next() * 0.7, (0.45 + this.rng.next() * 0.65) * Ls, 0.4 * Ls, 0.9, 0.6);
+      this.water.disturb(hx, hz, 1.1);
+      for (const [r1, life, delay] of [[L * 0.4, 1.8, 0], [L * 0.7, 2.6, 0.4]]) this.ring(hx, hz, 0.3, r1, life, delay, 0.45);
+      this.burst(hx, hz, 90, 2.4, 0.5);
+      for (let m = 0; m < 44; m++) {
+        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * 0.14 * L, o = 0.5 + this.rng.next() * 1.4;
+        this.white.spawn(hx + Math.cos(a) * r, 0.05, hz + Math.sin(a) * r, Math.cos(a) * o + fx * 0.8, (1.8 + this.rng.next() * 2.4) * Ls, Math.sin(a) * o + fz * 0.8, 0.9 + this.rng.next() * 0.6, (0.4 + this.rng.next() * 0.55) * Ls, 0.4 * Ls, 0.9, 0.7);
       }
-      this.skirt(hx, hz, L * 0.14, 2.2 * Ls, 36, P.yaw, 1.2, Ls);
     });
 
-    // Rising through the surface: a white collar at the waterline, water dragged up round the body
-    // that falls back as a skirt, and sheets of water streaming off the skin.
-    let collar = false;
-    if (out && !down && Math.abs(cross) < 0.5 * L) {
-      collar = true;
-      const r = THREE.MathUtils.clamp((0.13 * L) / Math.max(0.35, Math.abs(axis.y)), 0.1 * L, 0.3 * L) + 0.15;
-      w.ring.position.set(wx, 0.04, wz);
-      w.ring.rotation.y = 0;
-      w.ring.scale.set(r, 1, r);
-      (w.ring.material as THREE.MeshBasicMaterial).opacity = 0.85;
-      const rise = Math.max(0, vc.y + va.y * cross);
-      let n = Math.floor(dt * (25 + rise * 14) + this.rng.next());
+    // While it's up: a white collar where the body meets the sea, pushed out on both sides, a bow
+    // wave off the head as it surges forward, and water sheeting off the exposed head and back.
+    w.ring.visible = exposed && out;
+    if (exposed && out) {
+      const sm = (s0 + s1) / 2, len = (s1 - s0) * L + 0.4 * L * 0.25;
+      w.ring.position.set(cx + axis.x * sm * L, 0.04, cz + axis.z * sm * L);
+      w.ring.rotation.y = Math.atan2(axis.x, axis.z);
+      w.ring.scale.set(halfW(sm) * 1.35 + 0.2, 1, Math.max(0.3, len * 0.55));
+      (w.ring.material as THREE.MeshBasicMaterial).opacity = 0.7;
+      const speed = Math.hypot(vc.x, vc.z);
+      let n = Math.floor(dt * (34 + speed * 20) + this.rng.next());
       for (let m = 0; m < n; m++) {
-        const a = this.rng.next() * Math.PI * 2, rr = r * (0.75 + this.rng.next() * 0.4), o = 0.4 + this.rng.next() * 1.2;
-        this.white.spawn(wx + Math.cos(a) * rr, 0.06, wz + Math.sin(a) * rr, Math.cos(a) * o, rise * (0.25 + this.rng.next() * 0.5) + this.rng.next(), Math.sin(a) * o, 0.7 + this.rng.next() * 0.5, (0.3 + this.rng.next() * 0.45) * Ls, 0.35 * Ls, 0.85, 0.8);
+        // A point on the waterline down one side of the exposed stretch, water pushed out from it.
+        const s = s0 - 0.04 + this.rng.next() * (s1 - s0 + 0.08), side = this.rng.chance(0.5) ? 1 : -1;
+        const wx = cx + axis.x * s * L + px * side * halfW(s), wz = cz + axis.z * s * L + pz * side * halfW(s);
+        const o = 0.6 + this.rng.next() * 1.6;
+        this.white.spawn(wx, 0.06, wz, px * side * o + vc.x * 0.4, 0.4 + this.rng.next() * 1.3, pz * side * o + vc.z * 0.4, 0.7 + this.rng.next() * 0.5, (0.26 + this.rng.next() * 0.34) * Ls, 0.3 * Ls, 0.8, 1);
       }
-      if (this.rng.next() < dt * 40) this.spray.spawn(wx + (this.rng.next() - 0.5) * r * 2, 0.05, wz + (this.rng.next() - 0.5) * r * 2, (this.rng.next() - 0.5) * 0.8, 0.8 + this.rng.next() * 1.2, (this.rng.next() - 0.5) * 0.8, 0.6, 0.12);
-      n = Math.floor(dt * 80 + this.rng.next());
+      // Bow wave: foam thrown forward and out at the front of the exposed stretch.
+      const bs = s1 + 0.03;
+      const bx = cx + axis.x * bs * L, bz = cz + axis.z * bs * L;
+      n = Math.floor(dt * speed * 16 + this.rng.next());
       for (let m = 0; m < n; m++) {
-        // A point on the exposed skin (between the waterline and the head), moving with it.
-        const s = cross + this.rng.next() * (0.5 * L - cross);
-        const a = this.rng.next() * Math.PI * 2, rr = 0.1 * L;
-        const x = cx + axis.x * s + Math.cos(a) * rr, y = cy + axis.y * s, z = cz + axis.z * s + Math.sin(a) * rr;
-        if (y < 0.15) continue;
-        const vx = (vc.x + va.x * s) * 0.85, vy = (vc.y + va.y * s) * 0.85, vz = (vc.z + va.z * s) * 0.85;
-        if (this.rng.next() < 0.15) this.white.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.4, vy, vz + (this.rng.next() - 0.5) * 0.4, 0.5 + this.rng.next() * 0.4, (0.1 + this.rng.next() * 0.14) * Ls, 0.12 * Ls, 0.5, 0.3);
-        else this.spray.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.5, vy - 0.2, vz + (this.rng.next() - 0.5) * 0.5, 0.5 + this.rng.next() * 0.4, 0.05 + this.rng.next() * 0.07, 0.02);
+        const side = this.rng.chance(0.5) ? 1 : -1, o = 0.8 + this.rng.next() * 1.2;
+        this.white.spawn(bx + px * side * 0.2, 0.06, bz + pz * side * 0.2, fx * speed * 0.6 + px * side * o, 0.6 + this.rng.next() * 0.8, fz * speed * 0.6 + pz * side * o, 0.7 + this.rng.next() * 0.4, (0.24 + this.rng.next() * 0.3) * Ls, 0.3 * Ls, 0.8, 1);
+      }
+      // Water pouring off the skin: droplets and little clumps, falling off the head and back.
+      n = Math.floor(dt * 90 + this.rng.next());
+      for (let m = 0; m < n; m++) {
+        const s = s0 + this.rng.next() * (s1 - s0), side = (this.rng.next() - 0.5) * 2;
+        const x = cx + axis.x * s * L + px * side * halfW(s) * 0.8, z = cz + axis.z * s * L + pz * side * halfW(s) * 0.8;
+        const y = cy + axis.y * s * L + 0.07 * L * (1 - Math.abs(side) * 0.6);
+        if (y < 0.08) continue;
+        const vx = (vc.x + va.x * s * L) * 0.8 + px * side * 0.8, vy = (vc.y + va.y * s * L) * 0.8, vz = (vc.z + va.z * s * L) * 0.8 + pz * side * 0.8;
+        if (this.rng.next() < 0.2) this.white.spawn(x, y, z, vx, vy, vz, 0.5 + this.rng.next() * 0.4, (0.12 + this.rng.next() * 0.16) * Ls, 0.12 * Ls, 0.6, 0.3);
+        else this.spray.spawn(x, y, z, vx + (this.rng.next() - 0.5) * 0.4, vy - 0.3, vz + (this.rng.next() - 0.5) * 0.4, 0.45 + this.rng.next() * 0.35, 0.04 + this.rng.next() * 0.06, 0.02);
+      }
+      // Wave rings keep spreading from where it surges along.
+      w.nextPrint -= dt;
+      if (w.nextPrint <= 0) {
+        w.nextPrint = 0.9;
+        this.ring(bx, bz, L * 0.12, L * 0.5, 2.4, 0, 0.3);
       }
     }
-    w.ring.visible = collar;
 
-    // Water flung off the flippers as they beat, and a slap as each comes down on the sea.
-    this.finSpray(w, dt, out && !down);
+    // The blow: a tall, bushy column of mist blasts out of the blowholes, then hangs and drifts.
+    if (t >= T.blow && t < T.blow + 0.9) {
+      const bh = w.rig.blowhole.getWorldPosition(_bh);
+      const by = Math.max(0.1, bh.y);
+      once('blow', true, () => {
+        this.sfx('blow', bh.x, bh.z);
+        this.water.disturb(bh.x, bh.z, 0.35);
+        this.burst(bh.x, bh.z, 30, 1.8, 0.25);
+        this.ring(bh.x, bh.z, 0.2, 1.6, 1.8, 0, 0.3);
+      });
+      this.blow(bh.x, by, bh.z, (t - T.blow) / 0.9, dt, 1.25 * Ls);
+    }
 
-    // Re-entry: it slams down along its whole length (see updateSlam).
-    once('impact', out && t > T.peak && (headY < 0.35 || t > T.impact + 0.3), () => {
-      const hl = Math.hypot(axis.x, axis.z) || 1;
-      const ax = axis.x / hl, az = axis.z / hl, yaw = Math.atan2(ax, az);
-      const ix = cx + ax * 0.1 * L, iz = cz + az * 0.1 * L;
-      this.sfx('bigsplash', ix, iz);
-      this.burst(ix, iz, 700, 8.2, L * 0.42);
-      w.slam = { t: 0, x: cx, z: cz, ax, az, jet: false };
-      // A low, ragged skirt of water thrown out round the body.
-      this.skirt(ix, iz, L * 0.2, 4 * Ls, 90, yaw, 1.6, Ls);
-      // The first blast of white water, out and up along both sides of the body.
-      for (let m = 0; m < 130; m++) {
-        const along = (-0.3 + this.rng.next() * 0.8) * L, side = this.rng.chance(0.5) ? 1 : -1;
-        const x = cx + ax * along - az * side * 0.1 * L, z = cz + az * along + ax * side * 0.1 * L;
-        const o = (1 + this.rng.next() * 4) * Ls, up = (4 + this.rng.next() * 7) * Ls;
-        this.white.spawn(x, 0.15, z, -az * side * o + (this.rng.next() - 0.5) * 1.5, up, ax * side * o + (this.rng.next() - 0.5) * 1.5, 1.5 + this.rng.next() * 1.2, (0.9 + this.rng.next() * 1.6) * Ls, 0.8 * Ls, 0.95, 0.45);
-      }
-      // Mist hangs over it and drifts downwind before fading.
-      for (let m = 0; m < 24; m++) {
-        const along = (this.rng.next() - 0.35) * L, side = (this.rng.next() - 0.5) * L * 0.5;
-        this.fog.spawn(ix + ax * along - az * side, 0.5 + this.rng.next() * L * 0.35, iz + az * along + ax * side,
-          (this.rng.next() - 0.5) * 1.2 + 0.35, 0.5 + this.rng.next() * 1.4, (this.rng.next() - 0.5) * 1.2 + 0.2,
-          2.6 + this.rng.next() * 2.2, (3 + this.rng.next() * 2.5) * Ls, 1.1 * Ls, 0.28, 0.9, 3);
-      }
-      for (const [r1, life, delay] of [[L * 1.0, 2.2, 0], [L * 1.5, 3.2, 0.25], [L * 2.0, 4.2, 0.6]]) this.ring(ix, iz, L * 0.3, r1, life, delay);
-      w.foam.visible = true;
-      w.foam.position.set(ix, 0.03, iz);
-      w.foam.rotation.y = yaw;
-      w.foam.userData = { t: 0, x: ix, z: iz };
+    // The back rolls under: the last of the water slides off and the sea closes over it.
+    once('backunder', out && t > T.blow + 1 && !exposed, () => {
+      const bx = cx + axis.x * 0.1 * L, bz = cz + axis.z * 0.1 * L;
+      this.water.disturb(bx, bz, 0.7);
+      this.ring(bx, bz, L * 0.15, L * 0.6, 3, 0, 0.35);
+      this.skirt(bx, bz, L * 0.12, 1.4 * Ls, 22, P.yaw, 1.8, Ls * 0.8);
     });
-    if (w.slam) this.updateSlam(w, dt);
-
-    // The flukes swing up over it as it goes under: water pours off them, then they slip in.
-    once('flukeup', down && tailY > 0.3, () => {
+    // The flukes lift clear, streaming water, then slip in leaving a smooth "footprint".
+    if (w.flags.has('break')) this.flukeStream(w, dt);
+    once('flukeup', t > T.flukes - 1.2 && tailY > 0.15, () => {
       const tail = w.rig.fluke.getWorldPosition(_bh);
-      for (let m = 0; m < 60; m++) this.spray.spawn(tail.x + (this.rng.next() - 0.5) * L * 0.3, Math.max(0.1, tail.y) + this.rng.next() * 0.4, tail.z + (this.rng.next() - 0.5) * L * 0.3, (this.rng.next() - 0.5) * 0.4, this.rng.next() * 0.5, (this.rng.next() - 0.5) * 0.4, 0.8 + this.rng.next() * 0.6, 0.06 + this.rng.next() * 0.1, 0);
+      for (let m = 0; m < 50; m++) this.spray.spawn(tail.x + (this.rng.next() - 0.5) * L * 0.3, Math.max(0.1, tail.y) + this.rng.next() * 0.4, tail.z + (this.rng.next() - 0.5) * L * 0.3, (this.rng.next() - 0.5) * 0.4, this.rng.next() * 0.5, (this.rng.next() - 0.5) * 0.4, 0.8 + this.rng.next() * 0.6, 0.06 + this.rng.next() * 0.1, 0);
     });
-    if (down) this.flukeStream(w, dt);
-    once('flukedown', w.flags.has('flukeup') && tailY < 0.05, () => {
+    once('flukedown', w.flags.has('flukeup') && tailY < 0.02, () => {
       const tx = cx - axis.x * 0.45 * L, tz = cz - axis.z * 0.45 * L;
       this.sfx('splash', tx, tz);
-      this.burst(tx, tz, 110, 2.8, 0.5);
-      for (let m = 0; m < 30; m++) {
-        const a = this.rng.next() * Math.PI * 2, o = 0.4 + this.rng.next() * 1.2;
-        this.white.spawn(tx + Math.cos(a) * 0.3, 0.05, tz + Math.sin(a) * 0.3, Math.cos(a) * o, (1.8 + this.rng.next() * 2.4) * Ls, Math.sin(a) * o, 0.9 + this.rng.next() * 0.5, (0.35 + this.rng.next() * 0.4) * Ls, 0.3 * Ls, 0.85, 0.7);
-      }
-      this.ring(tx, tz, L * 0.1, L * 0.45, 2.8, 0, 0.45);
+      this.water.disturb(tx, tz, 0.6);
+      this.burst(tx, tz, 70, 2.2, 0.45);
+      this.ring(tx, tz, L * 0.1, L * 0.45, 3, 0, 0.45);
+      // The smooth, glassy footprint the flukes leave behind.
+      w.foam.visible = true;
+      w.foam.position.set(tx, 0.03, tz);
+      w.foam.rotation.y = P.yaw;
+      w.foam.userData = { t: 0, x: tx, z: tz };
     });
 
     if (t >= T.end) {
-      // Cruising on from where it came out of the move (same pose: only the roll's whole turns go).
+      // Cruising on from where it came out of the move.
       w.state = 'swim';
       P.roll -= Math.round(P.roll / 360) * 360;
       w.turnRate = 0;
       w.glow.visible = w.patch.visible = w.ring.visible = false;
-      w.nextBreach = MARINE.breachEvery[0] + this.rng.next() * (MARINE.breachEvery[1] - MARINE.breachEvery[0]);
-      // Comes up to breathe a little later, lifting its flukes as it dives again.
-      w.nextSpout = 5 + this.rng.next() * 5;
-      w.afterBreach = true;
-    }
-  }
-
-  /**
-   * The landing, after the first slam: white water keeps bursting out sideways along the whole body
-   * for a moment as it sinks in, then the hole it made closes and throws up a tall jet.
-   */
-  private updateSlam(w: Whale, dt: number): void {
-    const s = w.slam!, L = w.length, Ls = L / MARINE.whaleLength;
-    s.t += dt;
-    const px = -s.az, pz = s.ax;
-    if (s.t < 0.4) {
-      const n = Math.floor(dt * 900 * (1 - s.t / 0.4) + this.rng.next());
-      for (let m = 0; m < n; m++) {
-        const along = (-0.35 + this.rng.next() * 0.9) * L, side = this.rng.chance(0.5) ? 1 : -1;
-        const x = s.x + s.ax * along + px * side * 0.12 * L, z = s.z + s.az * along + pz * side * 0.12 * L;
-        const o = (1.2 + this.rng.next() * 3.4) * Ls, up = (3.5 + this.rng.next() * 6.5) * Ls * (1 - (0.35 * Math.abs(along)) / L);
-        const drift = (this.rng.next() - 0.5) * 2;
-        this.white.spawn(x, 0.1, z, px * side * o + s.ax * drift, up, pz * side * o + s.az * drift, 1.4 + this.rng.next() * 1.1, (0.8 + this.rng.next() * 1.5) * Ls, 0.8 * Ls, 0.95, 0.5);
-      }
-    }
-    if (!s.jet && s.t > 0.45) {
-      s.jet = true;
-      const jx = s.x + s.ax * 0.1 * L, jz = s.z + s.az * 0.1 * L;
-      for (let m = 0; m < 70; m++) {
-        const a = this.rng.next() * Math.PI * 2, r = this.rng.next() * 0.12 * L, o = this.rng.next() * 0.8;
-        this.white.spawn(jx + Math.cos(a) * r, 0.1, jz + Math.sin(a) * r, Math.cos(a) * o, (6.5 + this.rng.next() * 4.5) * Ls, Math.sin(a) * o, 1.3 + this.rng.next() * 0.8, (0.6 + this.rng.next() * 0.7) * Ls, 0.35 * Ls, 0.95, 0.35);
-      }
-      this.burst(jx, jz, 220, 9.5, L * 0.1);
-    }
-    if (s.t > 3) w.slam = null;
-  }
-
-  /** Water flung off the flippers as they beat in the air, and a slap as each comes down on the sea. */
-  private finSpray(w: Whale, dt: number, airborne: boolean): void {
-    const tr = w.track, L = w.length, Ls = L / MARINE.whaleLength;
-    if (!tr.ok) return;
-    for (const right of [false, true]) {
-      const tip = (right ? w.rig.finTipR : w.rig.finTipL).getWorldPosition(right ? _t2 : _t1);
-      const prev = right ? tr.finR : tr.finL;
-      const vx = (tip.x - prev.x) / dt, vy = (tip.y - prev.y) / dt, vz = (tip.z - prev.z) / dt;
-      if (airborne && tip.y > 0.2) {
-        const n = Math.floor(dt * 45 + this.rng.next());
-        for (let m = 0; m < n; m++) {
-          const f = 0.6 + this.rng.next() * 0.4;
-          this.spray.spawn(tip.x + (this.rng.next() - 0.5) * 0.3 * Ls, tip.y, tip.z + (this.rng.next() - 0.5) * 0.3 * Ls, vx * f, vy * f, vz * f, 0.6 + this.rng.next() * 0.4, 0.05 + this.rng.next() * 0.07, 0.02);
-        }
-      }
-      const id = right ? 'slapR' : 'slapL';
-      if (prev.y > 0.12 && tip.y <= 0.12 && vy < -0.5 && !w.flags.has(id) && w.flags.has('break')) {
-        w.flags.add(id);
-        this.sfx('splash', tip.x, tip.z);
-        this.burst(tip.x, tip.z, 70, 3.2, 0.35 * Ls);
-        for (let m = 0; m < 22; m++) {
-          const a = this.rng.next() * Math.PI * 2, o = 0.5 + this.rng.next() * 1.5;
-          this.white.spawn(tip.x + Math.cos(a) * 0.2, 0.05, tip.z + Math.sin(a) * 0.2, Math.cos(a) * o + vx * 0.2, (2 + this.rng.next() * 3) * Ls, Math.sin(a) * o + vz * 0.2, 0.9 + this.rng.next() * 0.5, (0.35 + this.rng.next() * 0.45) * Ls, 0.3 * Ls, 0.9, 0.7);
-        }
-        this.ring(tip.x, tip.z, 0.2, L * 0.3, 2, 0, 0.45);
-      }
+      w.ring.rotation.y = 0;
+      w.nextRise = MARINE.riseEvery[0] + this.rng.next() * (MARINE.riseEvery[1] - MARINE.riseEvery[0]);
+      // Breathes quietly again a while later.
+      w.nextSpout = 18 + this.rng.next() * 12;
+      w.nextPrint = 2 + this.rng.next() * 2;
     }
   }
 
@@ -1212,7 +1173,7 @@ export class Marine {
     if (f >= 1) w.foam.visible = false;
   }
 
-  /** A splash of droplets (whales breaching, birds diving, a lunging alligator). */
+  /** A splash of droplets (whales surfacing, birds diving, a lunging alligator). */
   splash(x: number, z: number, n: number, speed: number, radius: number, y = 0.05): void {
     this.burst(x, z, n, speed, radius, y);
   }
