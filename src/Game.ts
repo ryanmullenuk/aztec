@@ -22,6 +22,7 @@ import { Wildflowers } from './vegetation/Wildflowers';
 import { PeakClouds } from './render/PeakClouds';
 import { DriftClouds } from './render/DriftClouds';
 import { CoastRocks } from './render/CoastRocks';
+import { SeaStacks } from './water/SeaStacks';
 import { Breeze } from './render/Breeze';
 import { Economy } from './economy/Economy';
 import { BuildingSystem, Building } from './buildings/Buildings';
@@ -115,6 +116,7 @@ export class Game {
   driftClouds: DriftClouds;
   /** Rock clusters along the rocky coasts, with waves breaking on them. */
   coastRocks: CoastRocks;
+  seaStacks: SeaStacks;
   breeze: Breeze;
   buildings: BuildingSystem;
   pathfinder: Pathfinder;
@@ -243,7 +245,7 @@ export class Game {
     this.scene.add(this.buildings.group);
     this.pathfinder = new Pathfinder(this.world);
     this.colony = new Colony(this.world, this.veg, this.eco, this.buildings, this.pathfinder, this.time, () => this.rng.next());
-    this.colony.hooks.notify = (t, at) => this.ui?.toast(t, 'info', at);
+    this.colony.hooks.notify = (t, at, kind) => this.ui?.toast(t, kind ?? 'info', at);
     this.colony.hooks.sfx = (n, x, z) => this.audio?.sfx(n, x, z);
     this.colony.hooks.viewer = () => {
       const c = this.rig.camera.position, t = this.rig.target;
@@ -277,6 +279,12 @@ export class Game {
     this.jaguars.dogs = this.dogs;
     this.scene.add(this.dogs.meshes.group, this.jaguars.meshes.group);
     this.boats.blockCells(this.wildlife.coral.cells());
+    // A few great sea stacks off the exposed coasts (clear of the reefs); boats steer round them.
+    const reefs = [...this.wildlife.coral.patches.map((p) => ({ x: p.x, z: p.z, r: p.r + 1 })), ...this.veg.plants.filter((p) => p.kind === 'reef' || p.kind === 'searock').map((p) => ({ x: p.x, z: p.z, r: 1.2 }))];
+    this.seaStacks = new SeaStacks(this.world, opts.seed, reefs);
+    this.seaStacks.refreshWater(this.water);
+    this.scene.add(this.seaStacks.group);
+    this.boats.blockCells(this.seaStacks.cells());
     this.marine = new Marine(this.world, this.water);
     this.scene.add(this.marine.group);
     this.waterBirds = new WaterBirds(this.world, this.veg.plants.filter((p) => p.kind === 'searock').map((p) => ({ x: p.x, z: p.z })));
@@ -1586,6 +1594,7 @@ export class Game {
     ws.uSkyCol.value.copy(this.lighting.hemi.color);
     this.water.update(realDt, t);
     this.coastRocks.update(realDt, t, this.water);
+    this.seaStacks.update(realDt, t, this.water);
     this.terrain.update(t);
 
     FX.uTime.value = t;

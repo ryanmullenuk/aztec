@@ -203,6 +203,8 @@ export const ISLANDER = {
   pathSpeed: 1.3,
   runSpeed: 2.3,
   childScale: 0.62,
+  /** Closest two adults stand to one another (world units; children take a little less). */
+  personalSpace: 0.26,
   childGrowDays: 4,
   /** Needs drain per game second (0..1 scale). */
   hungerDrain: 1 / 420,
@@ -244,7 +246,7 @@ export const ECONOMY = {
   varietyHappiness: 0.05,
 };
 
-export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall' | 'pigpen' | 'chickenpen';
+export type BuildingKey = 'campfire' | 'hut' | 'home' | 'temple' | 'farm' | 'maizefarm' | 'chinampa' | 'butcher' | 'smokehouse' | 'woodstore' | 'grainstore' | 'warroom' | 'jetty' | 'torch' | 'bonfire' | 'firepit' | 'well' | 'tradedock' | 'kennel' | 'greathall' | 'pigpen' | 'chickenpen' | 'healer';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -281,6 +283,7 @@ export const BUILDINGS: Record<BuildingKey, BuildingDef> = {
   firepit: { key: 'firepit', name: 'Firepit', description: 'A roasting pit with a pig turning on a spit. Meat meals become more filling and put villagers in a good mood.', size: [2, 2], cost: { wood: 12, stone: 8, belief: 0 }, buildTime: 18, builders: 1, workers: 0, placeable: true },
   well: { key: 'well', name: 'Well', description: 'A stone well of fresh, cool water with a little tiled roof. Villagers living nearby are happier.', size: [2, 2], cost: { wood: 6, stone: 20, belief: 0 }, buildTime: 25, builders: 2, workers: 0, placeable: true },
   greathall: { key: 'greathall', name: 'Great Hall', description: 'A raised stone hall under a striped canopy, with fire braziers and a bronze bell. Idle villagers come to rest on its benches; when a jaguar is spotted the bell rings and everyone runs to the hall or home for sanctuary.', size: [7, 7], cost: { wood: 70, stone: 60, belief: 20 }, buildTime: 110, builders: 5, workers: 0, placeable: true },
+  healer: { key: 'healer', name: 'Healing Centre', description: 'A walled sandstone courtyard with four beds and a herb table under a striped awning. The sick and the injured come here to be cared for: cure them with food before their time runs out.', size: [5, 5], cost: { wood: 40, stone: 30, belief: 0 }, buildTime: 60, builders: 3, workers: 0, placeable: true },
   kennel: { key: 'kennel', name: 'Kennel', description: 'A timber-and-adobe dog house with a shaded run. Village dogs sleep here, raise puppies and bark the alarm when a jaguar comes near. Each kennel holds up to 3 dogs.', size: [2, 2], cost: { wood: 18, stone: 6, belief: 0 }, buildTime: 20, builders: 2, workers: 0, placeable: true },
   smokehouse: { key: 'smokehouse', name: 'Smokehouse', description: 'Smokes raw fish and meat over a slow fire: 4 raw become 7 preserved (burns a little wood). Also stores food.', size: [3, 3], cost: { wood: 20, stone: 10, belief: 0 }, buildTime: 30, builders: 2, workers: 1, foodCap: 40, placeable: true },
   butcher: { key: 'butcher', name: 'Butcher', description: 'The butcher tracks down wild pigs and goats, leads them back on a leash to the pen, and turns them into meat.', size: [4, 3], cost: { wood: 22, stone: 6, belief: 0 }, buildTime: 35, builders: 2, workers: 1, placeable: true },
@@ -367,6 +370,9 @@ export const TRADE = {
   maxBoats: 2,
   /** Seconds a boat is away over the horizon trading (plus the sail out and back). */
   voyageSeconds: 55,
+  /** Sailing speed, and how far beyond the pier end the boats moor (so hulls clear the T-end). */
+  boatSpeed: 3,
+  berthOut: 1.1,
   offers: [
     { id: 'wood-stone', give: { wood: 20 }, get: { stone: 12 } },
     { id: 'stone-wood', give: { stone: 20 }, get: { wood: 26 } },
@@ -379,6 +385,28 @@ export const TRADE = {
   ] as TradeOffer[],
   /** Goods traders talk about but that aren't on the market yet. */
   comingSoon: ['Obsidian', 'Cacao', 'Cotton', 'Quetzal feathers', 'Jade', 'Copper'],
+  /**
+   * Foreign trade boats that now and then sail in to a finished Trade Dock with a few bargains,
+   * accepted from the dock's card. Only one visits at a time; visitors aren't saved.
+   */
+  visitors: {
+    /** Game seconds between visits (20-40 minutes), and how long they stay moored (4-6 minutes). */
+    every: [1200, 2400] as [number, number],
+    stay: [240, 360] as [number, number],
+    /** Bargains per visit; seconds they linger once every deal is done. */
+    deals: [1, 3] as [number, number],
+    leaveAfterDeals: 6,
+    /** They ask for goods the village has at least minGive of: this share of its stock (5..maxGive). */
+    minGive: 8,
+    giveShare: [0.15, 0.35] as [number, number],
+    maxGive: 60,
+    /** Rough worth of each good, and how much better than fair their offers are. */
+    values: { wood: 1, stone: 1.4, grain: 1, fruit: 1, meat: 1.8, fish: 1.2, belief: 1.4 } as Record<ResourceKey, number>,
+    rate: [1.1, 1.45] as [number, number],
+    /** Seconds before trying again if no sea route to the dock was found. */
+    retry: 60,
+    homes: ['Cozumel', 'Xicalango', 'Tulum', 'Chetumal', 'Potonchan', 'Cempoala', 'Champoton', 'Coatzacoalcos', 'Naco', 'Tamuin', 'the Jade Coast', 'the Cloud Isles', 'the Salt Lagoons', 'the Cacao Shore'],
+  },
 };
 
 /** Village comforts: evening gatherings at bonfires, wells and roasted meat. */
@@ -548,6 +576,28 @@ export const GREAT_HALL = {
   threatRadius: 45,
 };
 
+/**
+ * Sickness and injury. Anyone may fall sick now and then; a jaguar or alligator attack leaves its
+ * victim mauled. Either way they stop working and go to a Healing Centre (or rest at home), and
+ * die if they are not cured in time. Curing costs food, paid from the Healing Centre's card.
+ */
+export const HEALTH = {
+  /** Chance per islander (adults and children) per game day of falling sick. */
+  sickChancePerDay: 0.02,
+  /** Nobody falls sick while the village is smaller than this. */
+  minPopulation: 6,
+  /** How often (game seconds) the sickness rolls are made. */
+  checkSeconds: 10,
+  /** Game seconds a sick or mauled islander lives without treatment. */
+  deathSeconds: 3600,
+  /** A warning goes out when this many seconds are left. */
+  warnSeconds: 600,
+  /** Food to cure each condition. */
+  cureFood: { sick: 50, mauled: 100 },
+  /** Walking speed while unwell (the mauled also limp). */
+  sickSpeed: 0.75,
+};
+
 /** Smokehouse batches: raw fish or meat in, more (preserved) food out. */
 export const SMOKE = { batchSeconds: 20, input: 4, output: 7, wood: 1 };
 
@@ -567,6 +617,36 @@ export const WARRIOR = {
   scareRadius: 5,
 };
 
+/** How every boat rides the sea and keeps clear of others (fishing boats, canoes, trade boats, visitors). */
+export const BOATS = {
+  /** Share of the swell height a hull rises and falls by (the sea is drawn flat; the waves are in its shading). */
+  bob: 0.16,
+  /** Pitch and roll per unit of water slope bow to stern and side to side, and their limit (radians). */
+  pitch: 0.85,
+  roll: 0.6,
+  maxTilt: 0.14,
+  /** Moored boats lie in the lee of the pier: this share of the motion. */
+  mooredSway: 0.55,
+  /** Wake: foam puffs every this far travelled (so it scales with speed), and its overall opacity. */
+  wakeSpacing: 0.2,
+  wakeOpacity: 0.5,
+  /** Seconds between ripple rings round a boat lying still with its net out. */
+  rippleEvery: 1.4,
+  /** Keeping clear: side gap a boat wants past another hull, look-ahead per unit of speed, hardest avoiding turn (rad/s). */
+  clearance: 0.3,
+  lookAhead: 1.2,
+  avoidTurn: 1.4,
+  /** Hulls that touch are pushed this far apart. */
+  minGap: 0.06,
+  /** Mooring: turn round this far out from the berth (staggered per berth so neighbours don't swing into each other), then back in stern first. */
+  approach: 2.2,
+  approachStagger: 1.2,
+  backSpeed: 0.55,
+  pivotSpeed: 1.1,
+  /** Sea route cost for water right next to rocks, reefs, piers, bridges and shores (boats keep off them). */
+  edgeCost: 0.8,
+};
+
 export const JETTY = {
   length: 6,
   boatCost: { wood: 15, stone: 0, belief: 0 },
@@ -575,11 +655,23 @@ export const JETTY = {
   boatSpeed: 2.6,
   /** Seconds per net cast; boats cast again and again during a trip. */
   netSeconds: 16,
-  /** A fishing trip lasts this long out at sea (5 minutes) before heading home. */
+  /**
+   * A boat fishes this long (5 minutes) from reaching the grounds, casting again and again as it
+   * follows the school, then sails home with the catch.
+   */
   fishingSeconds: 300,
   catchPerCast: 2,
-  /** Most fish a boat can bring home from one trip. */
+  /** Most fish a boat can bring home from one trip (the hold; it keeps fishing out the time). */
   catchPerTrip: 45,
+  /** Moored boats lie this far beyond the pier end so their hulls clear the T-end. */
+  berthOut: 0.6,
+  /** Choosing a school: extra distance a boat will sail rather than work a school with another boat on it. */
+  shareCost: 40,
+  /** Boats on the same school hold stations this far out round it, spread evenly. */
+  stationRadius: 4.5,
+  /** Paddling pace keeping station on the school with the net out; after a cast, sail to the new station if it is further than this. */
+  followSpeed: 1.2,
+  rehop: 4,
 };
 
 export const POWERS = {
@@ -715,6 +807,14 @@ export const MARINE = {
   /** Seconds until the first breach, then a random gap between breaches per whale (rare). */
   firstBreach: 45,
   breachEvery: [100, 170] as [number, number],
+  /** Breaches only in deep, open water: seabed below this under the whole run... */
+  breachBed: -5.1,
+  /** ...and nothing shallower than the deep sea (land, reef shelf) within this of it. */
+  breachClear: 14,
+  /** Seconds a whale spends swimming out to open water to breach before giving up. */
+  breachSeek: 60,
+  /** Cruising whales turn away from water shallower than this ahead of them. */
+  whaleBed: -4.6,
   /** Seconds until a whale first comes up to breathe (back, blow, dive), then the gap between breaths. */
   firstSurface: 6,
   surfaceEvery: [20, 40] as [number, number],
@@ -725,6 +825,25 @@ export const MARINE = {
   /** Seconds per porpoising cycle (half leaping, half gliding under). */
   leapPeriod: 2.1,
   leapHeight: 0.85,
+};
+
+export const SEA_STACKS = {
+  /** How many great sea stacks stand off the exposed coasts. */
+  count: [3, 6] as [number, number],
+  /** Cells out from the shore they stand, and the least distance between two. */
+  offshore: [3, 6] as [number, number],
+  spacing: 30,
+  /** Radius of the main stack and its height above the sea (world units). */
+  radius: [1.6, 2.3] as [number, number],
+  height: [3.8, 6.2] as [number, number],
+  /** Kept this far beyond the village plain's edge, and off the settlers' canoe route. */
+  plainClear: 16,
+  canoeClear: 10,
+  /** Open water needed straight out to sea from a stack (exposed coast only). */
+  exposure: 30,
+  /** How high the biggest bursts of white water climb, and the distance within which they play. */
+  burstHeight: 5.5,
+  viewRange: 150,
 };
 
 export const AUDIO = {
