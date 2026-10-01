@@ -55,13 +55,6 @@ export class Building {
   growth = 0;
   stock = 0;
   tendTimer = 0;
-  /** Watchtower: someone is up on watch (set each frame by their task, fading when they leave), and who. */
-  manned = 0;
-  watchman = -1;
-  /** The tower's archer figure, turned toward its aim; draw (0..1) as it pulls the bow. */
-  archer: THREE.Group | null = null;
-  aim = 0;
-  draw = 0;
   blessTimer = 0;
   crops: THREE.Mesh | null = null;
   // Stores
@@ -649,21 +642,6 @@ export class BuildingSystem {
         b.group.add(m);
       }
     }
-    if (b.key === 'watchtower') {
-      // The archer up on the platform (shown while someone keeps watch), with an arrow nocked when drawing.
-      const g = (this.archerGeo ??= models.towerArcherGeometry());
-      const archer = new THREE.Group();
-      archer.position.set(0, models.TOWER.platform, models.TOWER.archerZ);
-      const body = new THREE.Mesh(g.body, mat);
-      body.castShadow = true;
-      const nock = new THREE.Mesh(g.arrow, mat);
-      nock.position.set(0.07, 0.56, 0.12);
-      nock.name = 'nock';
-      archer.add(body, nock);
-      archer.visible = false;
-      b.archer = archer;
-      b.group.add(archer);
-    }
     if (b.key === 'greathall') {
       const pivot = new THREE.Group();
       pivot.position.copy(models.HALL.bell);
@@ -708,7 +686,6 @@ export class BuildingSystem {
     }
   }
 
-  private archerGeo: { body: THREE.BufferGeometry; arrow: THREE.BufferGeometry } | null = null;
 
   private cropGeo(w: number, d: number, ripe: boolean, crop: 'veg' | 'maize' | 'chinampa'): THREE.BufferGeometry {
     const k = `${w}x${d}${ripe}${crop}`;
@@ -885,16 +862,6 @@ export class BuildingSystem {
       if (b.key === 'smokehouse') {
         b.tendTimer = Math.max(0, b.tendTimer - dt);
         this.smokeFrom(b, dt);
-      }
-      if (b.archer) {
-        // Up on watch: turned toward where the archer is aiming (world yaw), leaning into the draw.
-        b.manned = Math.max(0, b.manned - dt * 3);
-        b.archer.visible = b.manned > 0;
-        if (b.archer.visible) {
-          b.archer.rotation.y = b.aim - (b.rot * Math.PI) / 2;
-          b.archer.rotation.x = -0.06 * b.draw;
-          b.archer.getObjectByName('nock')!.visible = b.draw > 0.25;
-        }
       }
       const ft = FARM_TYPES[b.key];
       if (ft) {

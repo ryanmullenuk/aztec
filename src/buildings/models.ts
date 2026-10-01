@@ -1976,12 +1976,17 @@ export function healingCentreModel(): BuildingModel {
 // ---------------- Watchtower ----------------
 
 /** Watchtower layout (local): the platform's floor height, and where the archer stands on it. */
-export const TOWER = { platform: 2.42, archerZ: -0.05 };
+/**
+ * Watchtower layout (local, door side +z): the watch room's floor height, the half-width of its
+ * walls, and the height of its window openings above the floor (arrows fly out of these).
+ */
+export const TOWER = { platform: 2.42, half: 0.67, windowY: 0.42 };
 
 /**
- * Watchtower: four leaning timber legs on a stone footing, cross-braced and lashed, a plank
- * platform with a wattle parapet (open to the sky, so the archer shows from above), a ladder up
- * the front, and a torch basket on a tall corner post that burns at night.
+ * Watchtower: four leaning timber legs on a stone footing, cross-braced and lashed, carrying a
+ * closed plank watch room with a shuttered window on every side (arrows fly out of them), a
+ * steep thatched roof with a torch basket burning on its peak at night, a red-and-gold banner,
+ * and a ladder up to a trapdoor.
  */
 export function watchtowerModel(): BuildingModel {
   const b = new GeoBuilder();
@@ -2020,66 +2025,77 @@ export function watchtowerModel(): BuildingModel {
       brace(s * at(1, y0), at(1, y0), s * at(1, y1), -at(1, y1), y0, y1);
     }
   }
-  // Plank platform with a beam under its edge.
-  b.add(P.box(1.34, 0.1, 1.34), { color: K.timberDark }, M.t(0, P0 - 0.12, 0));
-  for (let k = 0; k < 7; k++) {
-    b.add(P.box(0.18, 0.05, 1.3), { color: k % 2 ? K.timber : c(0x8a6038) }, M.t(-0.57 + k * 0.19, P0 - 0.03, 0));
-  }
-  // Wattle parapet round three sides and the back of the front, a gap at the ladder.
-  const wall = (x: number, z: number, w: number, d: number) => {
-    b.add(P.box(w, 0.3, d), { color: (p) => ((p.x * 11 + p.z * 11 + p.y * 16) % 1 < 0.5 ? K.rope : c(0xa9864f)).clone() }, M.t(x, P0 + 0.15, z));
+  // Plank floor on a beam frame, overhanging the legs a little.
+  const H = TOWER.half, room = 0.78;
+  b.add(P.box(H * 2 + 0.1, 0.12, H * 2 + 0.1), { color: K.timberDark }, M.t(0, P0 - 0.06, 0));
+  // Walls of upright planks, each with a window: built round the opening (sill, lintel, jambs).
+  const plank = (p: THREE.Vector3) => (((p.x + p.z) * 9) % 1 < 0.12 ? K.timberDark : (((p.x + p.z) * 4.5) % 1 < 0.5 ? K.timber : c(0x8a6038))).clone();
+  const WW = 0.34, WH = 0.28, wy = TOWER.windowY;
+  const sideWall = (rotY: number) => {
+    const rot = (x: number, z: number): [number, number] => [x * Math.cos(rotY) + z * Math.sin(rotY), -x * Math.sin(rotY) + z * Math.cos(rotY)];
+    const part = (x: number, y: number, w: number, h: number) => {
+      const [px, pz] = rot(x, H);
+      b.add(P.box(w, h, 0.07), { color: plank }, M.t(px, P0 + y, pz, 0, rotY, 0));
+    };
+    const side = (H * 2 - WW) / 2;
+    part(-(WW / 2 + side / 2), room / 2, side, room);
+    part(WW / 2 + side / 2, room / 2, side, room);
+    part(0, (wy - WH / 2) / 2, WW, wy - WH / 2);
+    part(0, (wy + WH / 2 + room) / 2, WW, room - (wy + WH / 2));
+    // Window frame and a shutter propped open above it.
+    const [fx, fz] = rot(0, H + 0.045);
+    b.add(P.box(WW + 0.08, 0.04, 0.04), { color: K.timberDark }, M.t(fx, P0 + wy - WH / 2 - 0.02, fz, 0, rotY, 0));
+    b.add(P.box(WW + 0.08, 0.04, 0.04), { color: K.timberDark }, M.t(fx, P0 + wy + WH / 2 + 0.02, fz, 0, rotY, 0));
+    const [sx, sz] = rot(0, H + 0.13);
+    b.add(P.box(WW + 0.04, WH * 0.9, 0.03), { color: c(0x8a6038) }, M.t(sx, P0 + wy + WH / 2 + 0.11, sz, 0, rotY, 0, 1, 1, 1).multiply(M.t(0, 0, 0, -0.9, 0, 0)));
   };
-  wall(0, -0.64, 1.34, 0.06);
-  wall(-0.64, 0, 0.06, 1.34);
-  wall(0.64, 0, 0.06, 1.34);
-  wall(-0.42, 0.64, 0.5, 0.06);
-  wall(0.42, 0.64, 0.5, 0.06);
-  for (const [sx, sz] of legs) b.add(P.cyl(0.04, 0.045, 0.5, 6), { color: K.timber }, M.t(sx * 0.64, P0 + 0.25, sz * 0.64));
-  // A red-and-gold banner on the front rail.
-  b.add(P.box(0.24, 0.3, 0.02), { color: K.red }, M.t(-0.42, P0 + 0.02, 0.68));
-  b.add(P.box(0.24, 0.05, 0.022), { color: K.gold }, M.t(-0.42, P0 - 0.1, 0.68));
-  // Ladder up the front.
-  for (const sx of [-0.14, 0.14]) b.add(P.cyl(0.025, 0.025, P0 + 0.2, 5), { color: K.timber }, M.t(sx, (P0 + 0.2) / 2, 0.86, -0.2, 0, 0));
-  for (let k = 0; k < 9; k++) {
-    const y = 0.25 + k * 0.26;
-    b.add(P.cyl(0.018, 0.018, 0.3, 5), { color: K.timberDark }, M.t(0, y, 0.86 - Math.tan(0.2) * (y - (P0 + 0.2) / 2), 0, 0, Math.PI / 2));
+  for (const r of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) sideWall(r);
+  // Corner posts, and the dark inside seen through the windows.
+  for (const [sx, sz] of legs) b.add(P.box(0.1, room + 0.06, 0.1), { color: K.timberDark }, M.t(sx * H, P0 + room / 2, sz * H));
+  b.add(P.box(H * 2 - 0.1, room - 0.02, H * 2 - 0.1), { color: c(0x1c140e) }, M.t(0, P0 + room / 2, 0));
+  // A steep four-sided thatched roof with a wide overhang, and a ridge cap.
+  const RH = 0.85;
+  // (Several rings up the slope so the thatch bands show.)
+  b.add(new THREE.ConeGeometry(H * 1.62, RH, 4, 10), { color: (p) => (((P0 + room + RH - p.y) * 9) % 1 < 0.35 ? K.thatchDark : K.thatch).clone().lerp(K.thatch, 0.25), leaf: 0.2 }, M.t(0, P0 + room + RH / 2 - 0.04, 0, 0, Math.PI / 4, 0));
+  // A ragged fringe of thatch hanging off the eaves.
+  for (let k = 0; k < 40; k++) {
+    const side = k % 4, u = ((k >> 2) + 0.5) / 10 - 0.5;
+    const e = H * 1.62 * Math.SQRT1_2 * 1.02;
+    const [fx, fz] = side === 0 ? [u * 2 * e, e] : side === 1 ? [e, -u * 2 * e] : side === 2 ? [-u * 2 * e, -e] : [-e, u * 2 * e];
+    b.add(P.cone(0.07, 0.12 + rng.next() * 0.06, 4), { color: K.thatchDark, leaf: 0.2 }, M.t(fx, P0 + room - 0.1, fz, Math.PI, Math.PI / 4, 0));
   }
-  // The torch: a tall post at the back corner with a basket of burning pitch pine.
-  const tx = -0.6, tz = -0.6;
-  b.add(P.cyl(0.03, 0.04, 0.95, 6), { color: K.timberDark }, M.t(tx, P0 + 0.47, tz));
-  b.add(P.cyl(0.09, 0.055, 0.14, 7), { color: (p) => ((p.y * 40) % 1 < 0.5 ? K.timberDark : K.rope).clone() }, M.t(tx, P0 + 0.98, tz));
-  // Quiver rack and a spare bundle of arrows.
-  b.add(P.cyl(0.05, 0.05, 0.32, 6), { color: c(0x6e4a2c) }, M.t(0.48, P0 + 0.16, -0.48));
-  for (let k = 0; k < 5; k++) b.add(P.cyl(0.006, 0.006, 0.42, 3), { color: K.timber }, M.t(0.46 + (k % 3) * 0.02, P0 + 0.3, -0.48 + (k % 2) * 0.02));
-  return { finished: b.build(), torches: [new THREE.Vector3(tx, P0 + 1.1, tz)], height: P0 + 0.9 };
+  b.add(P.cone(H * 1.66, 0.08, 4), { color: K.thatchDark, leaf: 0.2 }, M.t(0, P0 + room - 0.02, 0, 0, Math.PI / 4, 0));
+  // A red-and-gold banner under the front window.
+  b.add(P.box(0.3, 0.2, 0.02), { color: K.red }, M.t(0, P0 + 0.12, H + 0.05));
+  b.add(P.box(0.3, 0.04, 0.022), { color: K.gold }, M.t(0, P0 + 0.01, H + 0.05));
+  // Ladder up the front to a trapdoor in the floor.
+  for (const sx of [-0.14, 0.14]) b.add(P.cyl(0.025, 0.025, P0 + 0.05, 5), { color: K.timber }, M.t(sx + 0.36, (P0 + 0.05) / 2, 0.82, -0.12, 0, 0));
+  for (let k = 0; k < 8; k++) {
+    const y = 0.25 + k * 0.27;
+    b.add(P.cyl(0.018, 0.018, 0.3, 5), { color: K.timberDark }, M.t(0.36, y, 0.82 - Math.tan(0.12) * (y - (P0 + 0.05) / 2), 0, 0, Math.PI / 2));
+  }
+  // The torch: a short post through the roof peak with a basket of burning pitch pine.
+  const peak = P0 + room + RH - 0.06;
+  b.add(P.cyl(0.035, 0.045, 0.34, 6), { color: K.timberDark }, M.t(0, peak + 0.12, 0));
+  b.add(P.cyl(0.1, 0.06, 0.14, 7), { color: (p) => ((p.y * 40) % 1 < 0.5 ? K.timberDark : K.rope).clone() }, M.t(0, peak + 0.32, 0));
+  return { finished: b.build(), torches: [new THREE.Vector3(0, peak + 0.44, 0)], height: peak + 0.3 };
 }
 
-/** The archer on a watchtower (local: standing on the platform floor, facing +z with the bow held out). */
-export function towerArcherGeometry(): { body: THREE.BufferGeometry; arrow: THREE.BufferGeometry } {
-  const b = new GeoBuilder();
-  const skin = c(0xa86a44), cloth = c(0xc0392b), dark = c(0x2a1c14);
-  for (const sx of [-1, 1]) b.add(P.cyl(0.028, 0.034, 0.3, 6), { color: skin }, M.t(sx * 0.045, 0.15, 0));
-  b.add(P.cyl(0.085, 0.07, 0.16, 7), { color: cloth }, M.t(0, 0.34, 0));
-  b.add(P.box(0.18, 0.04, 0.12), { color: K.gold }, M.t(0, 0.27, 0));
-  b.add(P.cyl(0.075, 0.08, 0.18, 7), { color: skin }, M.t(0, 0.5, 0));
-  b.add(P.sphere(0.068, 1), { color: skin }, M.t(0, 0.66, 0.01));
-  b.add(P.cyl(0.07, 0.07, 0.03, 8), { color: dark }, M.t(0, 0.7, 0.005));
-  // Feather headdress: jade, gold and red plumes fanned behind.
-  const plumes = [K.jade, K.gold, K.red, K.gold, K.jade];
-  plumes.forEach((col, k) => b.add(P.cone(0.02, 0.2, 5), { color: col }, M.t((k - 2) * 0.03, 0.8, -0.04, -0.35, 0, (k - 2) * 0.22)));
-  // Arms: the left held out gripping the bow, the right drawn back to the cheek.
-  b.add(P.cyl(0.022, 0.022, 0.26, 5), { color: skin }, M.t(0.07, 0.56, 0.12, Math.PI / 2 - 0.1, 0, 0));
-  b.add(P.cyl(0.022, 0.022, 0.2, 5), { color: skin }, M.t(-0.07, 0.58, 0.05, Math.PI / 2 + 0.25, 0, 0.3));
-  // Bow: a tall curved stave with its string.
-  const bow = new THREE.TorusGeometry(0.24, 0.012, 4, 14, Math.PI * 0.75).rotateZ(Math.PI / 2 - Math.PI * 0.375).rotateY(Math.PI / 2);
-  b.add(bow, { color: c(0x5a3a20) }, M.t(0.07, 0.56, 0.02));
-  b.add(P.cyl(0.003, 0.003, 0.44, 3), { color: K.white }, M.t(0.07, 0.56, 0.09));
-  // Quiver on the back.
-  b.add(P.cyl(0.035, 0.03, 0.26, 6), { color: c(0x6e4a2c) }, M.t(-0.05, 0.55, -0.09, 0.3, 0, 0.25));
+/**
+ * Window centres of a watchtower (local), with their outward directions: arrows are loosed from
+ * whichever faces the target.
+ */
+export function towerWindows(): { at: THREE.Vector3; out: THREE.Vector3 }[] {
+  const H = TOWER.half + 0.06, y = TOWER.platform + TOWER.windowY;
+  return [[0, 1], [1, 0], [0, -1], [-1, 0]].map(([x, z]) => ({ at: new THREE.Vector3(x * H, y, z * H), out: new THREE.Vector3(x, 0, z) }));
+}
+
+/** An arrow (shaft along +z, head forward, fletching at the back). */
+export function arrowGeometry(): THREE.BufferGeometry {
   const a = new GeoBuilder();
   a.add(P.cyl(0.006, 0.006, 0.5, 3), { color: K.timber }, M.t(0, 0, 0, Math.PI / 2, 0, 0));
   a.add(P.cone(0.016, 0.05, 4), { color: K.stoneDark }, M.t(0, 0, 0.27, Math.PI / 2, 0, 0));
   a.add(P.box(0.03, 0.002, 0.07), { color: K.white }, M.t(0, 0, -0.22));
   a.add(P.box(0.002, 0.03, 0.07), { color: K.white }, M.t(0, 0, -0.22));
-  return { body: b.build(), arrow: a.build() };
+  return a.build();
 }
