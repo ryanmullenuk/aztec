@@ -32,6 +32,8 @@ export interface SaveData {
   name?: string;
   /** Land animals: [alive, x, z, pen building id, respawn]. */
   animals?: number[][];
+  /** The player's garden plants: [variant, x, z, rotation, scale] flattened (hundredths). */
+  garden?: number[];
   /** Village dogs, and whether the first kennel's strays have arrived. */
   dogs?: number[][];
   dogsFounded?: boolean;
@@ -122,6 +124,7 @@ export function serialize(g: Game): SaveData {
     animals: g.wildlife?.animals.serialize() ?? [],
     dogs: g.dogs?.serialize() ?? [],
     dogsFounded: g.dogs?.founded ?? false,
+    garden: g.garden?.serialize() ?? [],
     name: g.islandName,
   };
 }
@@ -191,6 +194,12 @@ export function applyRest(g: Game, d: SaveData): void {
     i.home = idMap.get(i.home) ?? -1;
     i.workplace = idMap.get(i.workplace) ?? -1;
     if (i.role === 'warrior' && !i.warrior) i.role = 'idle' as Role;
+    // Watchtowers used to be manned by an archer; they need nobody now.
+    if ((i.role as string) === 'archer') {
+      i.role = 'idle';
+      i.workplace = -1;
+      i.manualRole = false;
+    }
   }
   Object.assign(g.eco.res, d.res);
   g.buildings.recomputeCaps();
@@ -205,6 +214,7 @@ export function applyRest(g: Game, d: SaveData): void {
   if (g.dogs) g.dogs.restore(d.dogs ?? [], idMap, d.dogsFounded ?? (d.dogs?.length ?? 0) > 0);
   if (g.wildlife) d.schools.forEach((s, i) => g.wildlife!.schools[i] && (g.wildlife!.schools[i].stock = s));
   if (g.powers && d.weather.state === 'storm') g.powers.startStorm();
+  g.garden?.restore(d.garden ?? []);
 }
 
 /** Set when the game failed to start: a half-loaded island must never overwrite the real save. */
