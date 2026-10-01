@@ -4,7 +4,13 @@ import { World } from '../src/world/World';
 import { generateIsland } from '../src/world/generator';
 import { growIslets } from '../src/world/islets';
 import { WORLD } from '../src/config';
+import * as THREE from 'three';
 import { GARDEN, Garden, VARIANTS } from '../src/vegetation/Garden';
+import { PlantState, Vegetation } from '../src/vegetation/Vegetation';
+
+// Vegetation draws one small canvas texture (contact shadows): a stand-in canvas for node.
+const ctx2d = { createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, fillStyle: '' };
+(globalThis as any).document ??= { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
 
 function island(): World {
   const w = new World();
@@ -104,4 +110,58 @@ test('garden: keeps off water and paths, clears what is paved over, digs up, and
   for (let k = 0; k < 30; k++) G.update(1 / 30);
   assert.ok(G.count < before);
   assert.ok(!G.plants.some((q: any) => Math.hypot(q.x - at.x, q.z - at.z) < GARDEN.radius.unplant - 0.01));
+});
+
+test('trees: planted for Belief, real trees that pop up, keep their spacing, and come back from a save', () => {
+  const w = island();
+  const veg = new Vegetation(w, 'low');
+  veg.build();
+  const G = new Garden(w) as any;
+  G.veg = veg;
+  let belief = 4 * 6 + 2;
+  G.pay = (n: number) => (belief >= n ? ((belief -= n), true) : false);
+  const at = meadow(w);
+  const base = veg.plants.length;
+  for (let r = 0; r < 4; r++) for (let k = 0; k <= 30; k++) G.paint(at.x - 6 + (12 * k) / 30, at.z + (r - 1.5) * 1.5, 'trees', k === 0 && r === 0);
+  const mine = veg.plants.slice(base);
+  // Six trees bought, then out of Belief.
+  assert.equal(mine.length, 6);
+  assert.equal(belief, 2);
+  assert.equal(G.short, true);
+  // Well spaced from each other.
+  for (const a of mine) for (const b of mine) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.z - b.z) > 1, 'spaced');
+  // Hidden until each pops, then springing past full size, then real standing trees.
+  const m = new THREE.Matrix4();
+  const tree = mine[0];
+  const key = `${tree.kind}${tree.variant}`;
+  (veg as any).plantMatrix(tree, key, m);
+  assert.equal(m.elements[0], 0, 'not up yet');
+  let started = 0, peak = 0;
+  for (let k = 0; k < 90; k++) {
+    started += veg.updatePops(1 / 30).length;
+    (veg as any).plantMatrix(tree, key, m);
+    peak = Math.max(peak, m.elements[5] / tree.scale);
+  }
+  assert.equal(started, 6);
+  assert.ok(peak > 1.15, `bounce ${peak}`);
+  assert.equal(veg.poppingCount, 0);
+  (veg as any).plantMatrix(tree, key, m);
+  assert.ok(Math.abs(m.elements[5] - tree.scale) < 1e-6, 'settled at full size');
+  assert.ok(mine.every((p) => p.state === PlantState.Alive));
+  // No room for another right beside one.
+  assert.equal(veg.roomForTree(tree.x + 0.3, tree.z, 0.8), false);
+  // Saved and replanted in order on a fresh island.
+  const data = veg.serializePlanted();
+  assert.equal(data.length, 6 * 6);
+  const again = new Vegetation(island(), 'low');
+  again.build();
+  again.restorePlanted(data);
+  const back = again.plants.slice(base);
+  assert.equal(back.length, 6);
+  back.forEach((p, i) => {
+    assert.equal(p.kind, mine[i].kind);
+    assert.equal(p.variant, mine[i].variant);
+    assert.ok(Math.abs(p.x - mine[i].x) < 0.01 && Math.abs(p.z - mine[i].z) < 0.01);
+  });
+  assert.equal(again.poppingCount, 0, 'loaded trees stand at once');
 });

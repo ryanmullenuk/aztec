@@ -101,7 +101,7 @@ function snapshot(person: any) {
   const n = WORLD.size ** 2;
   const world = { seed: WORLD.islandSeed, layer: new Int8Array(n), sandy: new Float32Array(n), forest: new Float32Array(n), rocky: new Float32Array(n),
     wear: new Float32Array(n), path: new Uint8Array(n), bridge: new Uint8Array(n), canal: new Uint8Array(n) };
-  return serialize({ world, veg: { plants: [] }, time: { elapsed: 0, day: 0, t: 0.5, speed: 1 }, rig: { goal: { x: 0, z: 0, dist: 30, yaw: 0 } },
+  return serialize({ world, veg: { plants: [], serializePlanted: () => [] }, time: { elapsed: 0, day: 0, t: 0.5, speed: 1 }, rig: { goal: { x: 0, z: 0, dist: 30, yaw: 0 } },
     eco: { res: { wood: 1, stone: 1, grain: 1, fruit: 1, meat: 1, fish: 1, belief: 1 } }, milestones: new Set(), stats: { sculpted: 0, marked: 0, boats: 0 },
     powers: { state: 'clear' }, buildings: { list: [] }, colony: { list: [person], savePos: (i: any) => ({ x: i.x, z: i.z }) },
     wildlife: { schools: [], animals: { serialize: () => [] } }, dogs: { serialize: () => [], founded: false } } as any);

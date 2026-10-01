@@ -13,7 +13,7 @@ function snapshot() {
   world.layer[12] = 7; world.path[43] = 1;
   const person = makeIslander(1, 'Test', 'f', 3, 5, () => 0.5, false);
   person.warrior = 'eagle';
-  return serialize({ world, veg: { plants: [{ state: 1, marked: true, growth: 0.5, amount: 2, fruit: 1 }] },
+  return serialize({ world, veg: { plants: [{ state: 1, marked: true, growth: 0.5, amount: 2, fruit: 1 }], serializePlanted: () => [] },
     time: { elapsed: 400, day: 2, t: 0.4, speed: 2 }, rig: { goal: { x: 4, z: 5, dist: 30, yaw: 1 } },
     eco: { res: { wood: 20, stone: 30, grain: 40, fruit: 50, meat: 60, fish: 70, belief: 80 } },
     milestones: new Set(['firstHut']), stats: { sculpted: 2, marked: 1, boats: 0 }, powers: { state: 'rain' },
