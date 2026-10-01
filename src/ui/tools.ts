@@ -4,7 +4,7 @@ export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harve
 
 /** The drag-to-paint Build tools (paths, bridges, canals, and planting the garden). */
 export const PAINT_TOOLS: ToolId[] = ['path', 'dirtpath', 'unpath', 'bridge', 'canal', 'regrass', 'flowers', 'bushes', 'shrubs', 'trees', 'unplant'];
-/** The garden planting brushes among them. */
+/** The garden planting brushes among them (offered together in the Flora slot's popup). */
 export const GARDEN_TOOLS: ToolId[] = ['flowers', 'bushes', 'shrubs', 'trees', 'unplant'];
 
 export interface ToolDef {
@@ -34,12 +34,14 @@ export const BUILD_MENU: BuildingKey[] = ['hut', 'home', 'farm', 'maizefarm', 'c
 /** The land-shaping tools, offered together in the Terrain slot's popup. */
 export const TERRAIN_TOOLS: ToolId[] = ['raise', 'lower', 'flatten'];
 
-/** A toolbar slot: a tool, or the Terrain slot that opens Raise / Lower / Flatten. */
-export type SlotId = ToolId | 'terrain';
+/** A toolbar slot: a tool, the Terrain slot that opens Raise / Lower / Flatten, or the Flora slot of planting brushes. */
+export type SlotId = ToolId | 'terrain' | 'flora';
 
 /** The toolbar (number keys 1–7). */
 export const TOOLBAR: { id: SlotId; name: string; icon: string; hint: string; cost?: number }[] = [
   ...TOOLS.filter((t) => t.id === 'select' || t.id === 'build'),
   { id: 'terrain', name: 'Terrain', icon: 'terrain', hint: 'Shape the land: raise, lower or flatten it. Hold and drag to sculpt.', cost: POWERS.sculptCostPerCell },
-  ...TOOLS.filter((t) => !['select', 'build', 'raise', 'lower', 'flatten'].includes(t.id)),
+  { id: 'flora', name: 'Flora', icon: 'flora', hint: 'Plant flowers, bushes, shrubs and trees: hold and drag over open ground, like laying a path. Trees cost Belief; the rest are free.' },
+  // (Harvesting is left to the islanders: they fell, mine and pick by themselves.)
+  ...TOOLS.filter((t) => !['select', 'build', 'raise', 'lower', 'flatten', 'harvest'].includes(t.id)),
 ];

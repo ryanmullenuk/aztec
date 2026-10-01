@@ -12,7 +12,7 @@ import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
 import type { Where } from './where';
-import { BUILD_MENU, PAINT_TOOLS, TERRAIN_TOOLS, TOOLBAR, TOOLS, ToolId } from './tools';
+import { BUILD_MENU, GARDEN_TOOLS, PAINT_TOOLS, TERRAIN_TOOLS, TOOLBAR, TOOLS, ToolId } from './tools';
 import { GARDEN } from '../vegetation/Garden';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -207,6 +207,9 @@ export class UI {
   private terrainSlot!: HTMLButtonElement;
   private terrainPop!: HTMLDivElement;
   private terrainItems: HTMLButtonElement[] = [];
+  private floraSlot!: HTMLButtonElement;
+  private floraPop!: HTMLDivElement;
+  private floraItems: HTMLButtonElement[] = [];
 
   /** Show a small popup menu next to the button that opened it (toggles if already open). */
   private openPopup(pop: HTMLElement, from: HTMLElement, side: 'above' | 'below'): void {
@@ -235,7 +238,7 @@ export class UI {
 
   closePopups(): boolean {
     let closed = false;
-    for (const p of [this.speedPop, this.terrainPop]) {
+    for (const p of [this.speedPop, this.terrainPop, this.floraPop]) {
       if (p && !p.classList.contains('hidden')) {
         p.classList.add('hidden');
         closed = true;
@@ -247,6 +250,11 @@ export class UI {
   /** The Terrain slot's popup: Raise, Lower, Flatten (number key 3 too). */
   toggleTerrain(): void {
     this.openPopup(this.terrainPop, this.terrainSlot, 'above');
+  }
+
+  /** The Flora slot's popup: Flowers, Bushes, Shrubs & ferns, Trees, Dig up plants (number key 4 too). */
+  toggleFlora(): void {
+    this.openPopup(this.floraPop, this.floraSlot, 'above');
   }
 
   private buildBottom(): void {
@@ -271,9 +279,12 @@ export class UI {
       if (id === 'terrain') {
         this.terrainSlot = b;
         b.onclick = () => this.toggleTerrain();
+      } else if (id === 'flora') {
+        this.floraSlot = b;
+        b.onclick = () => this.toggleFlora();
       } else b.onclick = () => {
         this.closePopups();
-        this.game.setTool(id);
+        this.game.setTool(id as ToolId);
       };
       this.addTip(b, `<b>${t.name}</b> <span class="kbd">${i + 1}</span><br>${t.hint}${t.cost ? `<br><span class="c">${icon('belief')} ${t.cost}${id === 'terrain' ? ' per cell' : ''}</span>` : ''}`);
       this.slots.push(b);
@@ -294,10 +305,31 @@ export class UI {
       this.terrainPop.appendChild(b);
     }
     this.root.appendChild(this.terrainPop);
+    // Flora: the planting brushes, the same way.
+    this.floraPop = el('div', 'panel popup terrain-pop flora-pop hidden');
+    const flora: { id: ToolId; name: string; ic: string; cost: string; tip: string }[] = [
+      { id: 'flowers', name: 'Flowers', ic: 'b_flowers', cost: 'Free', tip: '<b>Plant flowers</b><br>Hold and drag to plant garden flowers: red, yellow, orange, purple, pink, white, blue and orchids. Each stroke favours one or two colours, so beds grow in drifts. They pop up as you go.' },
+      { id: 'bushes', name: 'Bushes', ic: 'b_bushes', cost: 'Free', tip: '<b>Plant bushes</b><br>Hold and drag to plant small bushes: green, hibiscus, bougainvillea, golden allamanda and white gardenia.' },
+      { id: 'shrubs', name: 'Shrubs & ferns', ic: 'b_shrubs', cost: 'Free', tip: '<b>Plant shrubs and ferns</b><br>Hold and drag to plant ferns, broad-leaved tropical plants, colourful crotons, agaves and feathery grasses.' },
+      { id: 'trees', name: 'Trees', ic: 'b_trees', cost: `${icon('belief')}${GARDEN.treeCost}`, tip: `<b>Plant trees</b><br>Hold and drag to plant real trees that spring up out of the ground: palms, jungle and meadow trees, and orange and banana trees. Woodcutters can fell them for wood (they regrow from the stump), and fruit trees feed your gatherers. Palms grow on the beach.<br><span class="c">${icon('belief')} ${GARDEN.treeCost} Belief per tree</span>` },
+      { id: 'unplant', name: 'Dig up plants', ic: 'b_unplant', cost: '', tip: '<b>Dig up plants</b><br>Hold and drag over garden plants, or trees you planted, to dig them up.' },
+    ];
+    for (const f of flora) {
+      const b = el('button', 'tp-item', `${icon(f.ic)}<span class="nm">${f.name}</span><span class="cost">${f.cost}</span>`) as HTMLButtonElement;
+      b.dataset.tool = f.id;
+      b.onclick = () => {
+        this.closePopups();
+        if (this.game.tool !== f.id) this.game.setTool(f.id);
+      };
+      this.addTip(b, f.tip);
+      this.floraItems.push(b);
+      this.floraPop.appendChild(b);
+    }
+    this.root.appendChild(this.floraPop);
     // Tapping anywhere else closes an open popup.
     document.addEventListener('pointerdown', (e) => {
       const t = e.target as Node;
-      if ([this.speedPop, this.terrainPop, this.speedBtn, this.terrainSlot].some((el2) => el2?.contains(t))) return;
+      if ([this.speedPop, this.terrainPop, this.floraPop, this.speedBtn, this.terrainSlot, this.floraSlot].some((el2) => el2?.contains(t))) return;
       this.closePopups();
     }, true);
     bottom.append(this.hint, bb, this.toolbar);
@@ -334,12 +366,6 @@ export class UI {
     pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
     pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path, bridge or canal</b><br>Hold and drag over a path, bridge or canal to take it away (canals are filled back in).');
     pathItem('regrass', 'Restore grass', 'b_regrass', 'Free', '<b>Restore grass</b><br>Hold and drag over bare, trodden earth or old dirt tracks to grow the grass back. Stone paths stay (use Remove path for those).');
-    // The garden: drag to plant, like laying a path.
-    pathItem('flowers', 'Flowers', 'b_flowers', 'Free', '<b>Plant flowers</b><br>Hold and drag to plant garden flowers: red, yellow, orange, purple, pink, white, blue and orchids. Each stroke favours one or two colours, so beds grow in drifts. They pop up as you go.');
-    pathItem('bushes', 'Bushes', 'b_bushes', 'Free', '<b>Plant bushes</b><br>Hold and drag to plant small bushes: green, hibiscus, bougainvillea, golden allamanda and white gardenia.');
-    pathItem('shrubs', 'Shrubs & ferns', 'b_shrubs', 'Free', '<b>Plant shrubs and ferns</b><br>Hold and drag to plant ferns, broad-leaved tropical plants, colourful crotons, agaves and feathery grasses.');
-    pathItem('trees', 'Trees', 'b_trees', `${icon('belief')}${GARDEN.treeCost}`, `<b>Plant trees</b><br>Hold and drag to plant real trees that spring up out of the ground: palms, jungle and meadow trees, and orange and banana trees. Woodcutters can fell them for wood (they regrow from the stump), and fruit trees feed your gatherers. Palms grow on the beach.<br><span class="c">${icon('belief')} ${GARDEN.treeCost} Belief per tree</span>`);
-    pathItem('unplant', 'Dig up plants', 'b_unplant', '', '<b>Dig up plants</b><br>Hold and drag over garden plants to dig them up.');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
     // Drop the bottom fade once scrolled to the end (or when everything fits).
@@ -603,8 +629,8 @@ export class UI {
         <li>New settlers arrive by canoe when you have spare beds and food.</li>
         <li>Now and then someone falls sick, and jaguars and alligators maul people. Build a <b>Healing Centre</b> and cure them with food from its card before their time runs out, or they die.</li>
         <li>A <b>Watchtower</b> near the jungle or the swamps guards the village by itself, day and night, with no villager needed (a torch burns on its roof after dark). Arrows fly from its windows at jaguars and alligators that come in range: wounded ones flee, and a few hits kill one. The island is never emptied of them, though: new jaguars swim over from beyond the map, and new alligators turn up in the swamps.</li>
-        <li>Plant a garden: in the Build menu, pick <b>Flowers</b>, <b>Bushes</b> or <b>Shrubs &amp; ferns</b> and hold and drag over open ground, like laying a path. Plants pop up as you go, each stroke in its own colours. <b>Dig up plants</b> clears them again. It's free, and just for looks.</li>
-        <li><b>Trees</b> (Build menu) plants real trees by dragging, for a little Belief each: they burst up out of the ground, grow wood for your woodcutters (and regrow from the stump), and fruit trees feed your gatherers.</li>
+        <li>Plant a garden: open <b>Flora</b> (4), pick <b>Flowers</b>, <b>Bushes</b> or <b>Shrubs &amp; ferns</b> and hold and drag over open ground, like laying a path. Plants pop up as you go, each stroke in its own colours. <b>Dig up plants</b> clears them again. It's free, and just for looks. (No need to harvest: your islanders fell, mine and pick by themselves.)</li>
+        <li><b>Trees</b> (in Flora) plants real trees by dragging, for a little Belief each: they burst up out of the ground, grow wood for your woodcutters (and regrow from the stump), and fruit trees feed your gatherers.</li>
         <li>At night in first-person view, look up: the stars and the Milky Way are out on a clear night.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and come up for air now and then, with a tall blow. Tap one to bring it up.</li>
@@ -857,9 +883,15 @@ export class UI {
     this.slots.forEach((b, i) => {
       const tool = TOOLBAR[i];
       const terrain = tool.id === 'terrain' && TERRAIN_TOOLS.includes(g.tool);
-      b.classList.toggle('on', g.tool === tool.id || terrain || (tool.id === 'build' && PAINT_TOOLS.includes(g.tool)));
+      const flora = tool.id === 'flora' && GARDEN_TOOLS.includes(g.tool);
+      b.classList.toggle('on', g.tool === tool.id || terrain || flora || (tool.id === 'build' && PAINT_TOOLS.includes(g.tool) && !GARDEN_TOOLS.includes(g.tool)));
       b.classList.toggle('dim', !!tool.cost && e.res.belief < tool.cost);
-      if (tool.id === 'harvest') b.querySelector('.cost')!.textContent = g.stats.marked ? `${g.stats.marked}` : '';
+      // The Flora slot names the brush in use.
+      if (tool.id === 'flora') {
+        const nm = b.querySelector('.nm')!;
+        const want = flora ? this.floraItems.find((x) => x.dataset.tool === g.tool)!.querySelector('.nm')!.textContent! : 'Flora';
+        if (nm.textContent !== want) nm.textContent = want;
+      }
       // The Terrain slot names the sculpt tool in use.
       if (tool.id === 'terrain') {
         const nm = b.querySelector('.nm')!;
@@ -868,6 +900,7 @@ export class UI {
       }
     });
     for (const b of this.terrainItems) b.classList.toggle('on', g.tool === b.dataset.tool);
+    for (const b of this.floraItems) b.classList.toggle('on', g.tool === b.dataset.tool);
     const ffx = this.speedBtn.querySelector('.ff-x')!;
     const sp = t.paused ? '' : `${t.speed}×`;
     if (ffx.textContent !== sp) ffx.textContent = sp;
