@@ -21,7 +21,8 @@ export const WILDFLOWERS = {
   drawDistance: 70,
 };
 
-type Kind = 'orchid' | 'red' | 'yellow' | 'orange' | 'purple' | 'pink' | 'fern' | 'tropical';
+/** Wild kinds, plus garden-only flower colours (white, blue). */
+export type Kind = 'orchid' | 'red' | 'yellow' | 'orange' | 'purple' | 'pink' | 'fern' | 'tropical' | 'white' | 'blue';
 const KINDS: { k: Kind; w: number }[] = [
   { k: 'orchid', w: 1.2 }, { k: 'red', w: 1.3 }, { k: 'yellow', w: 1.3 }, { k: 'orange', w: 1.0 },
   { k: 'purple', w: 0.9 }, { k: 'pink', w: 0.8 }, { k: 'fern', w: 1.6 }, { k: 'tropical', w: 1.2 },
@@ -29,11 +30,12 @@ const KINDS: { k: Kind; w: number }[] = [
 const PETAL: Record<string, [number, number]> = {
   orchid: [0xd8233a, 0xf05a78], red: [0xc9272b, 0xe8483e], yellow: [0xf2c21c, 0xffe05a],
   orange: [0xe8701a, 0xffa13d], purple: [0x8e44c9, 0xb877e6], pink: [0xe0629e, 0xf59ac4],
+  white: [0xeee9df, 0xffffff], blue: [0x3f6fd6, 0x7fa4f0],
 };
-const LEAF = new THREE.Color(0x3f7a31), LEAF_LIGHT = new THREE.Color(0x6aa33f), STEM = new THREE.Color(0x4a7a2c);
+export const LEAF = new THREE.Color(0x3f7a31), LEAF_LIGHT = new THREE.Color(0x6aa33f), STEM = new THREE.Color(0x4a7a2c);
 
 /** A flower head: petals radiating round a small centre, facing up and a little outward. */
-function flowerHead(b: GeoBuilder, at: THREE.Vector3, size: number, c0: THREE.Color, c1: THREE.Color, rng: RNG, petals = 5, cup = 0.5): void {
+export function flowerHead(b: GeoBuilder, at: THREE.Vector3, size: number, c0: THREE.Color, c1: THREE.Color, rng: RNG, petals = 5, cup = 0.5): void {
   const q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), ax = new THREE.Vector3(), z = new THREE.Vector3(0, 0, 1);
   const tilt = rng.range(0, Math.PI * 2);
   for (let k = 0; k < petals; k++) {
@@ -59,7 +61,7 @@ function rosette(b: GeoBuilder, n: number, len: number, rng: RNG, up = 0.35): vo
   }
 }
 
-function plantGeometry(kind: Kind, seed: number): THREE.BufferGeometry {
+export function plantGeometry(kind: Kind, seed: number): THREE.BufferGeometry {
   const rng = new RNG(seed);
   if (kind === 'fern') {
     const g = fernGeometry(false, seed).clone();
