@@ -310,6 +310,8 @@ export class Garden {
         this.dig(p, this.rng.range(0, 0.12));
         n++;
       }
+      // Trees the player planted come up too (never the island's own forest).
+      n += this.veg?.digPlanted(x, z, R) ?? 0;
       if (n) this.sound('unplant', x, z);
       return n;
     }

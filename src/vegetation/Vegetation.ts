@@ -91,6 +91,8 @@ const _e = new THREE.Euler();
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
 const TREE_KINDS: PlantKind[] = ['palm', 'broadleaf', 'banana'];
+/** Seconds a dug-up tree takes to shrink away. */
+const TREE_SINK = 0.45;
 
 /**
  * All plants and rocks: generated from the seed, rendered as instanced meshes split into
@@ -120,6 +122,8 @@ export class Vegetation {
   private baseCount = 0;
   /** Planted trees popping up: seconds since each began (negative: still waiting its turn). */
   private popping = new Map<number, number>();
+  /** Planted trees being dug up: seconds into shrinking away. */
+  private sinking = new Map<number, number>();
   private plantRng = new RNG(977);
 
   constructor(private world: World, preset: PresetName) {
@@ -575,6 +579,16 @@ export class Vegetation {
    */
   updatePops(dt: number): Plant[] {
     const started: Plant[] = [];
+    for (const [id, t] of this.sinking) {
+      const p = this.plants[id];
+      const t1 = t + dt;
+      if (t1 >= TREE_SINK) {
+        this.sinking.delete(id);
+        p.state = PlantState.Gone;
+      } else this.sinking.set(id, t1);
+      this.touch(p);
+      this.boundsOf(p);
+    }
     for (const [id, t] of this.popping) {
       const p = this.plants[id];
       const t1 = t + dt;
@@ -593,6 +607,24 @@ export class Vegetation {
       if (cm) cm.bounds = true;
     }
     this.contactBounds = true;
+  }
+
+  /**
+   * Dig up trees the player planted within `r` of (x, z) (never the island's own forest): they
+   * shrink back into the ground and are gone. Returns how many.
+   */
+  digPlanted(x: number, z: number, r: number): number {
+    let n = 0;
+    for (let i = this.baseCount; i < this.plants.length; i++) {
+      const p = this.plants[i];
+      if (p.state === PlantState.Gone || this.sinking.has(p.id)) continue;
+      if ((p.x - x) ** 2 + (p.z - z) ** 2 > r * r) continue;
+      this.popping.delete(p.id);
+      this.sinking.set(p.id, 0);
+      p.reservedBy = -1;
+      n++;
+    }
+    return n;
   }
 
   /** Trees still popping up. */
@@ -713,6 +745,13 @@ export class Vegetation {
       const k = springPop(pop, TREE_POP.dur, TREE_POP.freq, TREE_POP.damp);
       if (k.s <= 0.001) return out.copy(ZERO);
       _s.set(s * k.s, s * k.sy, s * k.s);
+    }
+    // Being dug up: shrinking back into the ground.
+    const sink = this.sinking.get(p.id);
+    if (sink !== undefined) {
+      const u = 1 - Math.min(1, sink / TREE_SINK);
+      if (u <= 0.001) return out.copy(ZERO);
+      _s.multiplyScalar(u * u);
     }
     return out.compose(_p, _q, _s);
   }
