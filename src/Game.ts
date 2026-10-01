@@ -241,6 +241,8 @@ export class Game {
     this.scene.add(this.flowers.group);
     this.garden = new Garden(this.world);
     this.garden.sfx = (n, x, z) => this.audio?.sfx(n, x, z);
+    this.garden.veg = this.veg;
+    this.garden.pay = (belief) => this.eco.spend({ wood: 0, stone: 0, belief });
     this.scene.add(this.garden.group);
     this.clouds = new PeakClouds(this.world);
     this.scene.add(this.clouds.group);
@@ -834,6 +836,7 @@ export class Game {
       flowers: 'Hold and drag to <b>plant flowers</b> · each stroke picks its own colours · free · Esc to finish',
       bushes: 'Hold and drag to <b>plant bushes</b>: hibiscus, bougainvillea and more · free · Esc to finish',
       shrubs: 'Hold and drag to <b>plant shrubs</b>: ferns, crotons, agaves and grasses · free · Esc to finish',
+      trees: `Hold and drag to <b>plant trees</b>: palms, jungle and meadow trees, orange and banana trees · ${GARDEN.treeCost} Belief each · Esc to finish`,
       unplant: 'Hold and drag over garden plants to <b>dig them up</b> · Esc to finish',
       canal: `Hold and drag outward from water to dig a <b>canal</b> into the village · ${PATHS.canalWood} wood per section · Esc to finish`,
       bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
@@ -1204,7 +1207,8 @@ export class Game {
   /** Plant (or dig up) the garden under the brush. */
   private paintGarden(p: THREE.Vector3, start: boolean): void {
     this.garden.paint(p.x, p.z, this.tool as GardenBrush, start);
-    if (this.garden.full && this.tool !== 'unplant') this.ui.setHint(`<b>The garden is full</b> (${GARDEN.max} plants): dig some up to plant more`);
+    if (this.tool === 'trees' && this.garden.short) this.ui.setHint(`<b>Not enough Belief</b> to plant more trees (${GARDEN.treeCost} each)`);
+    else if (this.garden.full && this.tool !== 'unplant') this.ui.setHint(`<b>The garden is full</b> (${GARDEN.max} plants): dig some up to plant more`);
   }
 
   /**
