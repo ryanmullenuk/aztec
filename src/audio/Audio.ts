@@ -401,6 +401,8 @@ export class AudioEngine {
       case 'bow': tone('triangle', 190, 150, 0.16, 0.2); burst('highpass', 2600, 0.8, 0.22, 0.12, 5200, 0.02); break;
       // A garden plant popping up out of the soil, and a rustle as one is dug up.
       case 'plant': tone('sine', 360 + Math.random() * 120, 820 + Math.random() * 160, 0.09, 0.09); burst('bandpass', 2200, 2, 0.05, 0.06); break;
+      // A tree bursting up out of the ground: a soft whump and a rush of leaves.
+      case 'treepop': tone('sine', 110, 230, 0.22, 0.22); burst('bandpass', 1500, 0.9, 0.35, 0.12, 700, 0.05); break;
       case 'unplant': burst('bandpass', 1200, 1.2, 0.14, 0.12, 500); break;
       case 'arrowhit': burst('lowpass', 900, 1.5, 0.08, 0.35); tone('sine', 140, 90, 0.08, 0.2); break;
       // The Great Hall's bronze bell: three slow strikes, each a cluster of inharmonic partials
