@@ -70,19 +70,20 @@ test('jaguars: an arrow drives one off, enough of them kill it, and a new one sw
   assert.equal(nj.hp, DEFENCE.jaguarHits);
 });
 
-function tower(manned = 1) {
+function tower(rot = 0) {
   const group = new THREE.Group();
-  const b = { id: 9, key: 'watchtower', complete: true, archer: new THREE.Group(), manned, aim: 0, draw: 0, x: 0, z: 0, rot: 0, group } as any;
-  return b;
+  group.position.set(0, 1, 0);
+  return { id: 9, key: 'watchtower', complete: true, x: 0, z: 0, rot, group } as any;
 }
 
-test('watchtower archer: shoots only at predators within range, and only while someone is on watch', () => {
+test('watchtower: needs nobody to man it, shoots only at predators within range, from the window facing them', () => {
   const w = { seed: 3, cellIndexAt: () => 0, heightAt: () => 0.5 } as any;
-  const b = tower();
+  const b = tower(1);
   const D = new Defence(w, { list: [b] } as any) as any;
   const near: Quarry = { x: 8, y: 0.5, z: 3 }, far: Quarry = { x: -DEFENCE.range - 4, y: 0.5, z: 0 };
   const hits: Quarry[] = [];
   const sounds: string[] = [];
+  const starts: THREE.Vector3[] = [];
   D.hooks = {
     quarry: () => [
       { kind: 'jaguar', ref: near, aimY: 0.8 },
@@ -91,28 +92,32 @@ test('watchtower archer: shoots only at predators within range, and only while s
     hit: (_k: string, r: Quarry) => (hits.push(r), 'hurt'),
     sfx: (n: string) => sounds.push(n),
   };
-  // Keep the archer up the tower (the colony does this each frame for the one on watch).
   for (let k = 0; k < 30 * 30; k++) {
-    b.manned = 1;
+    const n = D.arrows.length;
     D.update(1 / 30);
+    if (D.arrows.length > n) starts.push(D.arrows[D.arrows.length - 1].p.clone().addScaledVector(D.arrows[D.arrows.length - 1].v, -1 / 30));
   }
   const st = D.stats(b);
   assert.ok(st.shots >= 8 && st.shots <= 30 / (DEFENCE.reload * 0.85) + 1, `shots ${st.shots}`);
   assert.ok(hits.length > 0 && hits.every((r) => r === near), 'hits only the one in range');
   assert.ok(hits.length >= st.shots * 0.45, `mostly on target (${hits.length}/${st.shots})`);
   assert.ok(sounds.includes('bow') && sounds.includes('arrowhit'));
-  // Turned to face it.
-  assert.ok(Math.abs(b.aim - Math.atan2(near.x, near.z)) < 0.1);
-  // Nobody up there: no more arrows.
-  const before = st.shots;
-  for (let k = 0; k < 30 * 10; k++) {
-    b.manned = 0;
-    D.update(1 / 30);
-  }
-  assert.equal(D.stats(b).shots, before);
+  // Out of the window on the +x side (the tower is turned a quarter, so that is a side window), high up.
+  const win = D.windowFor(b, near.x, near.z);
+  assert.ok(win.x > 0.6 && Math.abs(win.z) < 0.1 && win.y > 3, `window ${win.toArray()}`);
+  for (const p of starts) assert.ok(p.distanceTo(win) < 0.05, 'arrows leave from that window');
+  // A predator behind it: the opposite window.
+  assert.ok(D.windowFor(b, -8, -1).x < -0.6);
+  // Not yet built: no arrows.
+  const u = tower();
+  u.complete = false;
+  const D2 = new Defence(w, { list: [u] } as any) as any;
+  D2.hooks = D.hooks;
+  for (let k = 0; k < 30 * 10; k++) D2.update(1 / 30);
+  assert.equal(D2.stats(u).shots, 0);
 });
 
-test('watchtower archer: a kill is counted and reported', () => {
+test('watchtower: a kill is counted and reported', () => {
   const w = { seed: 5, cellIndexAt: () => 0, heightAt: () => 0 } as any;
   const b = tower();
   const D = new Defence(w, { list: [b] } as any) as any;
@@ -125,16 +130,13 @@ test('watchtower archer: a kill is counted and reported', () => {
     sfx: () => {},
     killed: (k: string) => killed.push(k),
   };
-  for (let k = 0; k < 30 * 30 && alive; k++) {
-    b.manned = 1;
-    D.update(1 / 30);
-  }
+  for (let k = 0; k < 30 * 30 && alive; k++) D.update(1 / 30);
   assert.equal(alive, false);
   assert.deepEqual(killed, ['jaguar']);
   assert.equal(D.stats(b).kills, 1);
 });
 
-test('a finished watchtower gets one villager as its archer', () => {
+test('a finished watchtower takes nobody off their work', () => {
   const world = { half: 100, layerY: () => 0, groundY: () => 0 } as any;
   const eco = new Economy();
   Object.assign(eco.res, { grain: 80, fruit: 80 });
@@ -145,7 +147,5 @@ test('a finished watchtower gets one villager as its archer', () => {
   const colony = new Colony(world, {} as any, eco, bld, {} as any, {} as any, () => 0.5);
   colony.list = [1, 2, 3, 4, 5].map((id) => makeIslander(id, `V${id}`, id % 2 ? 'm' : 'f', 0, 0, () => 0.5));
   (colony as any).assignJobs();
-  const archers = colony.list.filter((i) => i.role === 'archer');
-  assert.equal(archers.length, 1);
-  assert.equal(archers[0].workplace, t.id);
+  assert.ok(colony.list.every((i) => i.workplace !== t.id));
 });
