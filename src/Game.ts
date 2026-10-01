@@ -1389,6 +1389,7 @@ export class Game {
     if (k >= '1' && k <= '9') {
       const t = TOOLBAR[parseInt(k, 10) - 1];
       if (t?.id === 'terrain') this.ui.toggleTerrain();
+      else if (t?.id === 'flora') this.ui.toggleFlora();
       else if (t) {
         this.ui.closePopups();
         this.setTool(t.id);
