@@ -32,6 +32,8 @@ export interface SaveData {
   name?: string;
   /** Land animals: [alive, x, z, pen building id, respawn]. */
   animals?: number[][];
+  /** Trees the player planted, in order: [kind, variant, x, z, rotation, scale] flattened (hundredths). */
+  trees?: number[];
   /** The player's garden plants: [variant, x, z, rotation, scale] flattened (hundredths). */
   garden?: number[];
   /** Village dogs, and whether the first kennel's strays have arrived. */
@@ -125,6 +127,7 @@ export function serialize(g: Game): SaveData {
     dogs: g.dogs?.serialize() ?? [],
     dogsFounded: g.dogs?.founded ?? false,
     garden: g.garden?.serialize() ?? [],
+    trees: g.veg.serializePlanted(),
     name: g.islandName,
   };
 }
@@ -165,6 +168,8 @@ export function applyWorld(w: World, d: SaveData): void {
 /** Step 2 of loading: plants, buildings, islanders, economy and time. */
 export function applyRest(g: Game, d: SaveData): void {
   if (d.name) g.setIslandName(d.name);
+  // Planted trees first: their states follow the island's own plants in the saved list.
+  g.veg.restorePlanted(d.trees ?? []);
   const u = fromB64(d.plants);
   g.veg.plants.forEach((p, i) => {
     if (i * 4 + 3 >= u.length) return;

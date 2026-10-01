@@ -64,6 +64,7 @@ export function parseIslandFile(raw: string): SaveData {
     ids.add(i.id);
     for (const key of Object.keys(i)) if (!islanderKeys.includes(key)) delete i[key];
   }
+  if (d.trees !== undefined && (!list(d.trees, 6 * 20000) || d.trees.length % 6 !== 0 || !d.trees.every(number))) return fail();
   if (d.garden !== undefined && (!list(d.garden, 5 * 5000) || d.garden.length % 5 !== 0 || !d.garden.every(number))) return fail();
   for (const [rows, width] of [[d.animals, 5], [d.dogs, 13]] as const) {
     if (rows !== undefined && (!list(rows, 10000) || !rows.every((r: any) => Array.isArray(r) && r.length === width && r.every(number)))) return fail();
