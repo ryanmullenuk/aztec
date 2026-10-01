@@ -113,6 +113,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 **Garden**
 - Plant a garden by dragging, like laying a path: the Build menu has Flowers (red, yellow, orange, purple, pink, white, blue and orchids), Bushes (green, hibiscus, bougainvillea, golden allamanda and white gardenia) and Shrubs & ferns (ferns, broad-leaved tropical plants, crotons, agaves and feathery grasses). Dig up plants clears them again.
 - Each plant pops out of the soil with a springy bounce (overshooting, squashing and settling) and a puff of earth and leaves, in a ripple along the stroke. Each stroke favours one or two kinds, so beds grow in drifts of colour. Plants keep their spacing, so going over a bed again only fills its gaps.
+- Trees, for 4 Belief each: drag to plant real trees (palms, jungle and meadow trees, orange and banana trees) that burst up out of the ground with a slow, heavy bounce, a puff of earth and a shower of leaves. They join the forest: woodcutters fell them for wood and they regrow from the stump, fruit trees feed the gatherers, and palms take to the beach. Each stroke favours one or two kinds, and trees keep a natural spacing from other trees, rocks and bushes. They are saved with the island.
 - Plants keep off water, paths, fields, rocks and buildings, and anything built or paved over them is cleared. They are saved with the island. Free, and for decoration only. Tuning lives in `GARDEN` in `src/vegetation/Garden.ts`.
 
 **Health**
