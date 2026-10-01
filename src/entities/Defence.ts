@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { DEFENCE } from '../config';
 import type { Building, BuildingSystem } from '../buildings/Buildings';
-import { TOWER, towerArcherGeometry } from '../buildings/models';
+import { arrowGeometry, towerWindows } from '../buildings/models';
 import { buildingMaterial } from '../render/materials';
 import { RNG } from '../world/rng';
 import type { World } from '../world/World';
 
-/** Anything an archer can shoot at: a jaguar or an alligator (its own object, by reference). */
+/** Anything a watchtower can shoot at: a jaguar or an alligator (its own object, by reference). */
 export interface Quarry {
   x: number;
   y: number;
@@ -54,13 +54,14 @@ const _m = new THREE.Matrix4();
 /** Drawn a little larger than life so they read at game zoom. */
 const _s = new THREE.Vector3(1.5, 1.5, 1.5);
 const FWD = new THREE.Vector3(0, 0, 1);
+const _e = new THREE.Euler();
+const WINDOWS = towerWindows();
 
 /**
- * Watchtower archers. While a villager keeps watch up a finished tower, the archer turns to face
- * the nearest jaguar or alligator within range, draws, and looses an arrow on a real ballistic arc,
- * leading a moving target. Most fly true; a hit sends the beast fleeing (or kills it after a few);
- * a miss sticks quivering in the ground for a while. With no predator about, the archer scans the
- * jungle edge.
+ * Watchtowers defend themselves: a finished tower needs nobody to man it. Whenever a jaguar or an
+ * alligator comes within range, arrows fly out of whichever of its windows faces the beast, on a
+ * real ballistic arc that leads a moving target. Most fly true; a hit sends the beast fleeing (or
+ * kills it after a few); a miss sticks quivering in the ground for a while.
  */
 export class Defence {
   readonly mesh: THREE.InstancedMesh;
@@ -69,14 +70,11 @@ export class Defence {
   /** Where each quarry was last frame, to lead a moving target. */
   private last = new WeakMap<Quarry, { x: number; z: number; vx: number; vz: number }>();
   private rng: RNG;
-  private time = 0;
   hooks: DefenceHooks | null = null;
 
   constructor(private world: World, private buildings: BuildingSystem) {
     this.rng = new RNG(world.seed * 59 + 17);
-    const g = towerArcherGeometry();
-    g.body.dispose();
-    this.mesh = new THREE.InstancedMesh(g.arrow, buildingMaterial(), MAX_ARROWS);
+    this.mesh = new THREE.InstancedMesh(arrowGeometry(), buildingMaterial(), MAX_ARROWS);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
     this.mesh.name = 'arrows';
@@ -88,18 +86,24 @@ export class Defence {
     return { shots: w?.shots ?? 0, kills: w?.kills ?? 0 };
   }
 
-  /** The archer's bow hand, in the world: up on the platform, a little in front of the archer. */
-  private bowAt(b: Building, out: THREE.Vector3): THREE.Vector3 {
-    const a = (b.rot * Math.PI) / 2;
-    out.set(Math.sin(a) * TOWER.archerZ, TOWER.platform + 0.5, Math.cos(a) * TOWER.archerZ).add(b.group.position);
-    out.x += Math.sin(b.aim) * 0.22;
-    out.z += Math.cos(b.aim) * 0.22;
+  /** Where an arrow leaves the tower for a target at (tx, tz): the window facing it most nearly (world). */
+  windowFor(b: Building, tx: number, tz: number, out = new THREE.Vector3()): THREE.Vector3 {
+    _e.set(0, (b.rot * Math.PI) / 2, 0);
+    const dx = tx - b.x, dz = tz - b.z, d = Math.hypot(dx, dz) || 1;
+    let best = -Infinity;
+    for (const w of WINDOWS) {
+      _v.copy(w.out).applyEuler(_e);
+      const f = (_v.x * dx + _v.z * dz) / d;
+      if (f > best) {
+        best = f;
+        out.copy(w.at).applyEuler(_e).add(b.group.position);
+      }
+    }
     return out;
   }
 
   update(dt: number): void {
     if (dt <= 0) return this.draw();
-    this.time += dt;
     const h = this.hooks;
     const quarry = h ? h.quarry() : [];
     // Track how each predator is moving, to aim where it will be.
@@ -113,14 +117,10 @@ export class Defence {
       } else this.last.set(q.ref, { x: q.ref.x, z: q.ref.z, vx: 0, vz: 0 });
     }
     for (const b of this.buildings.list) {
-      if (b.key !== 'watchtower' || !b.complete || !b.archer) continue;
+      if (b.key !== 'watchtower' || !b.complete) continue;
       let w = this.watch.get(b.id);
       if (!w) this.watch.set(b.id, (w = { reload: 1, shots: 0, kills: 0 }));
       w.reload = Math.max(0, w.reload - dt);
-      if (b.manned <= 0) {
-        b.draw = 0;
-        continue;
-      }
       // The nearest predator within range.
       let best: (typeof quarry)[number] | null = null, bd = DEFENCE.range;
       for (const q of quarry) {
@@ -130,24 +130,15 @@ export class Defence {
           best = q;
         }
       }
+      // Nothing about: the first arrow waits a moment once something comes into range.
       if (!best) {
-        // Nothing about: lower the bow and look out over the jungle.
-        b.draw = Math.max(0, b.draw - dt * 3);
-        b.aim += Math.sin(this.time * 0.23 + b.id * 1.7) * 0.35 * dt;
+        w.reload = Math.max(w.reload, 0.6);
         continue;
       }
-      const want = Math.atan2(best.ref.x - b.x, best.ref.z - b.z);
-      let da = want - b.aim;
-      while (da > Math.PI) da -= Math.PI * 2;
-      while (da < -Math.PI) da += Math.PI * 2;
-      b.aim += da * Math.min(1, dt * 6);
-      // Draws over the last second before it can loose again, and holds at full draw till on target.
-      b.draw = Math.min(1, Math.max(b.draw, 1 - w.reload));
-      if (w.reload <= 0 && Math.abs(da) < 0.12 && this.arrows.length < MAX_ARROWS && h) {
+      if (w.reload <= 0 && this.arrows.length < MAX_ARROWS && h) {
         this.loose(b, best.kind, best.ref, best.aimY);
         w.reload = DEFENCE.reload * this.rng.range(0.85, 1.2);
         w.shots++;
-        b.draw = 0;
         h.sfx('bow', b.x, b.z);
       }
     }
@@ -156,7 +147,7 @@ export class Defence {
   }
 
   private loose(b: Building, kind: QuarryKind, ref: Quarry, aimY: number): void {
-    const from = this.bowAt(b, new THREE.Vector3());
+    const from = this.windowFor(b, ref.x, ref.z);
     const l = this.last.get(ref);
     const d0 = Math.hypot(ref.x - from.x, aimY - from.y, ref.z - from.z);
     const T = Math.max(0.15, d0 / DEFENCE.arrowSpeed);

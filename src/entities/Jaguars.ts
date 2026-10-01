@@ -74,7 +74,7 @@ export interface JaguarHooks {
 const STATE_TEXT: Record<JState, string> = {
   rest: 'Resting in the shade', prowl: 'Prowling its territory', stalk: 'Stalking toward the village', charge: 'Charging!',
   confront: 'Snarling at the dogs', fight: 'Fighting the dogs', retreat: 'Retreating into the jungle',
-  dead: 'Brought down by the watchtower archer', arrive: 'Swimming over from the mainland',
+  dead: 'Brought down by a watchtower', arrive: 'Swimming over from the mainland',
 };
 
 /**
