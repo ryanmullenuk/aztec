@@ -321,7 +321,7 @@ export class UI {
       this.buildItems.set(key, b);
     }
     // Paths: drag-to-paint tools rather than a building.
-    const pathItem = (id: 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal' | 'regrass', name: string, iconKey: string, cost: string, tip: string) => {
+    const pathItem = (id: ToolId, name: string, iconKey: string, cost: string, tip: string) => {
       const b = el('button', 'bm-item', `<span class="bm-ic">${ICONS[iconKey]}</span><span class="bm-nm">${name}</span><span class="bm-cost">${cost}</span>`);
       b.onclick = () => this.game.setTool(id);
       this.addTip(b, tip);
@@ -333,6 +333,11 @@ export class UI {
     pathItem('bridge', 'Rope bridge', 'b_bridge', `${icon('wood')}${PATHS.bridgeWood}`, `<b>Rope bridge</b><br>Hold and drag from the shore across shallow water, like the strait to the wild island, to build a plank bridge islanders can cross.<br><span class="c">${icon('wood')} ${PATHS.bridgeWood} per section</span>`);
     pathItem('unpath', 'Remove path', 'b_unpath', '', '<b>Remove path, bridge or canal</b><br>Hold and drag over a path, bridge or canal to take it away (canals are filled back in).');
     pathItem('regrass', 'Restore grass', 'b_regrass', 'Free', '<b>Restore grass</b><br>Hold and drag over bare, trodden earth or old dirt tracks to grow the grass back. Stone paths stay (use Remove path for those).');
+    // The garden: drag to plant, like laying a path.
+    pathItem('flowers', 'Flowers', 'b_flowers', 'Free', '<b>Plant flowers</b><br>Hold and drag to plant garden flowers: red, yellow, orange, purple, pink, white, blue and orchids. Each stroke favours one or two colours, so beds grow in drifts. They pop up as you go.');
+    pathItem('bushes', 'Bushes', 'b_bushes', 'Free', '<b>Plant bushes</b><br>Hold and drag to plant small bushes: green, hibiscus, bougainvillea, golden allamanda and white gardenia.');
+    pathItem('shrubs', 'Shrubs & ferns', 'b_shrubs', 'Free', '<b>Plant shrubs and ferns</b><br>Hold and drag to plant ferns, broad-leaved tropical plants, colourful crotons, agaves and feathery grasses.');
+    pathItem('unplant', 'Dig up plants', 'b_unplant', '', '<b>Dig up plants</b><br>Hold and drag over garden plants to dig them up.');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
     // Drop the bottom fade once scrolled to the end (or when everything fits).
@@ -595,7 +600,8 @@ export class UI {
         <li>Across the strait to the east lies a wild island with thick jungle, more fruit and most of the game. Build a <b>Rope bridge</b> (Build menu) across the shallows to reach it.</li>
         <li>New settlers arrive by canoe when you have spare beds and food.</li>
         <li>Now and then someone falls sick, and jaguars and alligators maul people. Build a <b>Healing Centre</b> and cure them with food from its card before their time runs out, or they die.</li>
-        <li>A <b>Watchtower</b> near the jungle or the swamps keeps a villager on watch as an archer, day and night (a torch burns on top after dark). Jaguars and alligators that come in range are shot at: wounded ones flee, and a few hits kill one. The island is never emptied of them, though: new jaguars swim over from beyond the map, and new alligators turn up in the swamps.</li>
+        <li>A <b>Watchtower</b> near the jungle or the swamps guards the village by itself, day and night, with no villager needed (a torch burns on its roof after dark). Arrows fly from its windows at jaguars and alligators that come in range: wounded ones flee, and a few hits kill one. The island is never emptied of them, though: new jaguars swim over from beyond the map, and new alligators turn up in the swamps.</li>
+        <li>Plant a garden: in the Build menu, pick <b>Flowers</b>, <b>Bushes</b> or <b>Shrubs &amp; ferns</b> and hold and drag over open ground, like laying a path. Plants pop up as you go, each stroke in its own colours. <b>Dig up plants</b> clears them again. It's free, and just for looks.</li>
         <li>At night in first-person view, look up: the stars and the Milky Way are out on a clear night.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and come up for air now and then, with a tall blow. Tap one to bring it up.</li>
@@ -975,7 +981,7 @@ export class UI {
         <div class="actions"><button class="btn small" data-a="capture" ${free && (!d.needsPen || hasPen) ? '' : 'disabled'}>${ICONS.harvest} ${label}</button></div>
         <p class="muted small">Tip: select an islander first, then tap an animal to send them after it.</p>`;
     } else if (b) {
-      key = `b${b.id}|${b.key === 'tradedock' ? g.trade.visitKey(b) : ''}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'healer' ? g.colony.patients(b).map((p) => `${p.id}:${p.condition}:${Math.ceil(p.conditionT / 60)}:${p.task?.slot}:${g.colony.canCure(p)}`).join(',') : ''}|${b.key === 'watchtower' ? `${b.manned > 0}|${g.defence.stats(b).shots}|${g.defence.stats(b).kills}|` : ''}${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
+      key = `b${b.id}|${b.key === 'tradedock' ? g.trade.visitKey(b) : ''}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'healer' ? g.colony.patients(b).map((p) => `${p.id}:${p.condition}:${Math.ceil(p.conditionT / 60)}:${p.task?.slot}:${g.colony.canCure(p)}`).join(',') : ''}|${b.key === 'watchtower' ? `${g.defence.stats(b).shots}|${g.defence.stats(b).kills}|` : ''}${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
       html = this.buildingHtml(b);
     }
     if (!force && key === this.infoKey) return;
@@ -1052,9 +1058,8 @@ export class UI {
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
     if (b.key === 'watchtower' && b.complete) {
       const st = g.defence.stats(b);
-      body += `<div class="kv"><span>On watch</span><b>${b.manned > 0 ? 'Archer up the tower' : 'Nobody up there now'}</b></div>
-        <div class="kv"><span>Arrows loosed</span><b>${st.shots}</b></div><div class="kv"><span>Predators brought down</span><b>${st.kills}</b></div>
-        <p class="muted small">The archer shoots at jaguars and alligators within ${DEFENCE.range} paces. Wounded beasts flee; a few hits kill one, but others will come in from beyond the island in time.</p>`;
+      body += `<div class="kv"><span>Arrows loosed</span><b>${st.shots}</b></div><div class="kv"><span>Predators brought down</span><b>${st.kills}</b></div>
+        <p class="muted small">Needs nobody to man it: arrows fly from its windows at jaguars and alligators within ${DEFENCE.range} paces, day and night. Wounded beasts flee; a few hits kill one, but others will come in from beyond the island in time.</p>`;
     }
     if (b.complete && (b.key === 'pigpen' || b.key === 'chickenpen')) body += `<div class="kv"><span>Animals in pen</span><b>${g.wildlife.penCount(b)}</b></div>`;
     let actions = '';
