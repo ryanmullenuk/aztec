@@ -1,11 +1,11 @@
 import { BuildingKey, POWERS } from '../config';
 
-export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal' | 'regrass' | 'flowers' | 'bushes' | 'shrubs' | 'unplant';
+export type ToolId = 'select' | 'build' | 'raise' | 'lower' | 'flatten' | 'harvest' | 'bless' | 'rain' | 'calm' | 'path' | 'dirtpath' | 'unpath' | 'bridge' | 'canal' | 'regrass' | 'flowers' | 'bushes' | 'shrubs' | 'trees' | 'unplant';
 
 /** The drag-to-paint Build tools (paths, bridges, canals, and planting the garden). */
-export const PAINT_TOOLS: ToolId[] = ['path', 'dirtpath', 'unpath', 'bridge', 'canal', 'regrass', 'flowers', 'bushes', 'shrubs', 'unplant'];
+export const PAINT_TOOLS: ToolId[] = ['path', 'dirtpath', 'unpath', 'bridge', 'canal', 'regrass', 'flowers', 'bushes', 'shrubs', 'trees', 'unplant'];
 /** The garden planting brushes among them. */
-export const GARDEN_TOOLS: ToolId[] = ['flowers', 'bushes', 'shrubs', 'unplant'];
+export const GARDEN_TOOLS: ToolId[] = ['flowers', 'bushes', 'shrubs', 'trees', 'unplant'];
 
 export interface ToolDef {
   id: ToolId;

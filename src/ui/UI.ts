@@ -13,6 +13,7 @@ import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
 import type { Where } from './where';
 import { BUILD_MENU, PAINT_TOOLS, TERRAIN_TOOLS, TOOLBAR, TOOLS, ToolId } from './tools';
+import { GARDEN } from '../vegetation/Garden';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -337,6 +338,7 @@ export class UI {
     pathItem('flowers', 'Flowers', 'b_flowers', 'Free', '<b>Plant flowers</b><br>Hold and drag to plant garden flowers: red, yellow, orange, purple, pink, white, blue and orchids. Each stroke favours one or two colours, so beds grow in drifts. They pop up as you go.');
     pathItem('bushes', 'Bushes', 'b_bushes', 'Free', '<b>Plant bushes</b><br>Hold and drag to plant small bushes: green, hibiscus, bougainvillea, golden allamanda and white gardenia.');
     pathItem('shrubs', 'Shrubs & ferns', 'b_shrubs', 'Free', '<b>Plant shrubs and ferns</b><br>Hold and drag to plant ferns, broad-leaved tropical plants, colourful crotons, agaves and feathery grasses.');
+    pathItem('trees', 'Trees', 'b_trees', `${icon('belief')}${GARDEN.treeCost}`, `<b>Plant trees</b><br>Hold and drag to plant real trees that spring up out of the ground: palms, jungle and meadow trees, and orange and banana trees. Woodcutters can fell them for wood (they regrow from the stump), and fruit trees feed your gatherers. Palms grow on the beach.<br><span class="c">${icon('belief')} ${GARDEN.treeCost} Belief per tree</span>`);
     pathItem('unplant', 'Dig up plants', 'b_unplant', '', '<b>Dig up plants</b><br>Hold and drag over garden plants to dig them up.');
     this.buildMenu.appendChild(grid);
     this.root.appendChild(this.buildMenu);
@@ -602,6 +604,7 @@ export class UI {
         <li>Now and then someone falls sick, and jaguars and alligators maul people. Build a <b>Healing Centre</b> and cure them with food from its card before their time runs out, or they die.</li>
         <li>A <b>Watchtower</b> near the jungle or the swamps guards the village by itself, day and night, with no villager needed (a torch burns on its roof after dark). Arrows fly from its windows at jaguars and alligators that come in range: wounded ones flee, and a few hits kill one. The island is never emptied of them, though: new jaguars swim over from beyond the map, and new alligators turn up in the swamps.</li>
         <li>Plant a garden: in the Build menu, pick <b>Flowers</b>, <b>Bushes</b> or <b>Shrubs &amp; ferns</b> and hold and drag over open ground, like laying a path. Plants pop up as you go, each stroke in its own colours. <b>Dig up plants</b> clears them again. It's free, and just for looks.</li>
+        <li><b>Trees</b> (Build menu) plants real trees by dragging, for a little Belief each: they burst up out of the ground, grow wood for your woodcutters (and regrow from the stump), and fruit trees feed your gatherers.</li>
         <li>At night in first-person view, look up: the stars and the Milky Way are out on a clear night.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and come up for air now and then, with a tall blow. Tap one to bring it up.</li>
