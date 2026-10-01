@@ -108,7 +108,12 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 - Ghost preview, then foundation, scaffolding and finished building.
 - Stores fill visibly and crops grow.
 - Healing Centre: a walled sandstone courtyard with four beds, a main hall behind a long striped awning and two small side rooms, reached by wide red-and-sandstone steps between flower planters.
-- Watchtower: a tall timber lookout on a stone footing, with a wattle parapet, a ladder, a red and gold banner and a torch burning on top at night.
+- Watchtower: a tall timber lookout on a stone footing, with a closed plank watch room with a shuttered window on each side, a steep thatched roof with a torch burning on its peak at night, a red and gold banner and a ladder.
+
+**Garden**
+- Plant a garden by dragging, like laying a path: the Build menu has Flowers (red, yellow, orange, purple, pink, white, blue and orchids), Bushes (green, hibiscus, bougainvillea, golden allamanda and white gardenia) and Shrubs & ferns (ferns, broad-leaved tropical plants, crotons, agaves and feathery grasses). Dig up plants clears them again.
+- Each plant pops out of the soil with a springy bounce (overshooting, squashing and settling) and a puff of earth and leaves, in a ripple along the stroke. Each stroke favours one or two kinds, so beds grow in drifts of colour. Plants keep their spacing, so going over a bed again only fills its gaps.
+- Plants keep off water, paths, fields, rocks and buildings, and anything built or paved over them is cleared. They are saved with the island. Free, and for decoration only. Tuning lives in `GARDEN` in `src/vegetation/Garden.ts`.
 
 **Health**
 - Now and then someone falls sick (adults and children alike), and jaguars and alligators maul people. The sick and the mauled stop working and walk to the nearest Healing Centre, where they lie on a bed (or are cared for indoors when the beds are full); with no Healing Centre they rest at home.
@@ -117,7 +122,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 
 **Defence**
 - Jaguars keep dens deep in the jungle and stalk the village now and then; alligators lie in wait in the swamps. Dogs and warriors drive jaguars off.
-- A Watchtower keeps one villager on watch as an archer, day and night. The archer turns to face the nearest jaguar or alligator within range, draws and looses an arrow on a real arc, leading a moving target. Most arrows fly true: a wounded beast flees, and a few hits kill it. Misses stick quivering in the ground. The tower's card shows who is on watch, the arrows loosed and the predators brought down.
+- A Watchtower guards the village by itself, day and night: it needs no villager. When a jaguar or alligator comes within range, arrows fly from whichever window faces it on a real arc, leading a moving target. Most arrows fly true: a wounded beast flees, and a few hits kill it. Misses stick quivering in the ground. The tower's card shows the arrows loosed and the predators brought down.
 - The predators never die out: a new jaguar swims over from beyond the edge of the map to take a dead one's den, and a new alligator turns up in the swamps a few minutes later. Tuning lives in `DEFENCE` in `config.ts`.
 
 **Economy and powers**
