@@ -164,4 +164,11 @@ test('trees: planted for Belief, real trees that pop up, keep their spacing, and
     assert.ok(Math.abs(p.x - mine[i].x) < 0.01 && Math.abs(p.z - mine[i].z) < 0.01);
   });
   assert.equal(again.poppingCount, 0, 'loaded trees stand at once');
+  // Digging up: planted trees shrink away and are gone; the island's own trees stay.
+  const wild = veg.plants.slice(0, base).find((p) => p.kind === 'broadleaf' && p.state === PlantState.Alive)!;
+  assert.equal(veg.digPlanted(wild.x, wild.z, 1.5) >= 0, true);
+  assert.equal(G.paint(tree.x, tree.z, 'unplant', true) >= 1, true);
+  for (let k = 0; k < 30; k++) veg.updatePops(1 / 30);
+  assert.equal(tree.state, PlantState.Gone);
+  assert.equal(wild.state, PlantState.Alive, 'wild trees are never dug up');
 });
