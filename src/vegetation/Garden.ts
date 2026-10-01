@@ -8,17 +8,21 @@ import { World } from '../world/World';
 import { leafGeometry } from './detail';
 import { bushGeometry, fernGeometry } from './models';
 import { Kind, LEAF, STEM, flowerHead, plantGeometry } from './Wildflowers';
+import { springPop } from './pop';
+import type { PlantKind, Vegetation } from './Vegetation';
 
 /** The planting brushes (and the one that digs plants up again). */
-export type GardenBrush = 'flowers' | 'bushes' | 'shrubs' | 'unplant';
-export const GARDEN_BRUSHES: GardenBrush[] = ['flowers', 'bushes', 'shrubs', 'unplant'];
+export type GardenBrush = 'flowers' | 'bushes' | 'shrubs' | 'trees' | 'unplant';
+export const GARDEN_BRUSHES: GardenBrush[] = ['flowers', 'bushes', 'shrubs', 'trees', 'unplant'];
 
 /** Tuning for the player's garden planting. */
 export const GARDEN = {
   /** Brush radius (world units) for each brush. */
-  radius: { flowers: 0.8, bushes: 1.0, shrubs: 0.9, unplant: 1.1 } as Record<GardenBrush, number>,
+  radius: { flowers: 0.8, bushes: 1.0, shrubs: 0.9, trees: 1.6, unplant: 1.1 } as Record<GardenBrush, number>,
   /** Planting attempts per brush step (a step every ~0.4 units of drag). */
-  tries: { flowers: 5, bushes: 1.4, shrubs: 2.2, unplant: 0 } as Record<GardenBrush, number>,
+  tries: { flowers: 5, bushes: 1.4, shrubs: 2.2, trees: 0.7, unplant: 0 } as Record<GardenBrush, number>,
+  /** Belief for each tree planted (garden plants are free). */
+  treeCost: 4,
   /** Most plants on the island. */
   max: 5000,
   /** Seconds a plant takes to pop up (springing past full size and settling), or to shrink away. */
@@ -26,8 +30,22 @@ export const GARDEN = {
   shrink: 0.3,
 };
 
+/**
+ * Trees the tree brush plants (real trees: chopped for wood, picked for fruit), by group: a stroke
+ * favours one or two. Radius is the room each needs (at scale 1).
+ */
+export const TREE_GROUPS: Record<string, { kind: PlantKind; variants: number[]; s: [number, number]; r: number }[]> = {
+  palms: [{ kind: 'palm', variants: [0, 1, 2], s: [0.8, 1.15], r: 0.75 }],
+  jungle: [{ kind: 'broadleaf', variants: [0, 1, 5, 6], s: [0.85, 1.15], r: 1.05 }],
+  meadow: [{ kind: 'broadleaf', variants: [2, 3, 4, 7], s: [0.8, 1.1], r: 0.95 }],
+  fruit: [
+    { kind: 'apple', variants: [1], s: [0.85, 1.05], r: 0.75 },
+    { kind: 'banana', variants: [0], s: [0.85, 1.05], r: 0.6 },
+  ],
+};
+
 interface Variant {
-  brush: Exclude<GardenBrush, 'unplant'>;
+  brush: Exclude<GardenBrush, 'unplant' | 'trees'>;
   /** Plants of one group read as one kind (a stroke favours one or two groups). */
   group: string;
   geo: () => THREE.BufferGeometry;
@@ -200,6 +218,14 @@ export class Garden {
   private lastSound = 0;
   private clock = 0;
   sfx: ((name: string, x: number, z: number) => void) | null = null;
+  /** The island's trees (the tree brush plants real ones). */
+  veg: Vegetation | null = null;
+  /** Pay Belief for a tree: false if there isn't enough. */
+  pay: ((belief: number) => boolean) | null = null;
+  /** The last tree stroke ran out of Belief. */
+  short = false;
+  /** Trees planted since the game was loaded. */
+  treesPlanted = 0;
 
   constructor(private world: World) {
     this.rng = new RNG(world.seed * 97 + 31);
@@ -256,7 +282,7 @@ export class Garden {
   }
 
   /** Choose this stroke's kinds: one or two favourites, the odd one of any other. */
-  private pickVariant(brush: Exclude<GardenBrush, 'unplant'>): number {
+  private pickVariant(brush: Exclude<GardenBrush, 'unplant' | 'trees'>): number {
     const all = VARIANTS.map((v, i) => i).filter((i) => VARIANTS[i].brush === brush);
     const st = this.stroke!;
     if (!st.groups.length) {
@@ -287,6 +313,7 @@ export class Garden {
       if (n) this.sound('unplant', x, z);
       return n;
     }
+    if (brush === 'trees') return this.paintTrees(x, z, R);
     let tries = Math.floor(GARDEN.tries[brush]) + (this.rng.chance(GARDEN.tries[brush] % 1) ? 1 : 0);
     let n = 0;
     while (tries-- > 0 && this.plants.length < GARDEN.max) {
@@ -299,6 +326,47 @@ export class Garden {
       n++;
     }
     return n;
+  }
+
+  /**
+   * Trees: one now and then along the stroke, each paid for in Belief, of the stroke's favourite
+   * kinds (palms on sand), well spaced from other trees, rocks and bushes and off garden plants.
+   */
+  private paintTrees(x: number, z: number, R: number): number {
+    const veg = this.veg;
+    if (!veg) return 0;
+    const st = this.stroke!;
+    if (!st.groups.length) {
+      const groups = Object.keys(TREE_GROUPS);
+      st.groups.push(this.rng.pick(groups));
+      if (this.rng.chance(0.5)) st.groups.push(this.rng.pick(groups));
+    }
+    let tries = Math.floor(GARDEN.tries.trees) + (this.rng.chance(GARDEN.tries.trees % 1) ? 1 : 0);
+    let n = 0;
+    while (tries-- > 0) {
+      const a = this.rng.range(0, Math.PI * 2), d = Math.sqrt(this.rng.next()) * R;
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      if (!this.canGrow(px, pz)) continue;
+      const sandy = this.world.sandy[this.world.cellIndexAt(px, pz)] > 0.4;
+      const g = sandy ? 'palms' : this.rng.chance(0.6) ? st.groups[0] : st.groups[st.groups.length - 1];
+      const o = this.rng.pick(TREE_GROUPS[g]);
+      const s = this.rng.range(o.s[0], o.s[1]);
+      if (!veg.roomForTree(px, pz, o.r * s) || !this.clearOfGarden(px, pz, 0.35)) continue;
+      if (this.pay && !this.pay(GARDEN.treeCost)) {
+        this.short = true;
+        return n;
+      }
+      this.short = false;
+      veg.plantTree(o.kind, this.rng.pick(o.variants), px, pz, this.rng.range(0, Math.PI * 2), s, this.rng.range(0.02, 0.15));
+      this.treesPlanted++;
+      n++;
+    }
+    return n;
+  }
+
+  /** No garden plant within `r` of here. */
+  private clearOfGarden(x: number, z: number, r: number): boolean {
+    return this.near(x, z, r + 0.6).every((p) => p.state === 2 || Math.hypot(p.x - x, p.z - z) >= r + VARIANTS[p.v].r * p.s * 0.5);
   }
 
   /** Garden full (the player is told). */
@@ -385,14 +453,7 @@ export class Garden {
 
   /** The plant's size now: springing up past full size and settling, or shrinking away. */
   static popScale(state: number, t: number): { s: number; sy: number } {
-    if (state === 1) {
-      if (t <= 0) return { s: 0, sy: 0 };
-      if (t >= GARDEN.pop) return { s: 1, sy: 1 };
-      const e = Math.exp(-6.5 * t), osc = Math.cos(13 * t), wob = Math.sin(13 * t) * e;
-      const s = 1 - e * osc;
-      // Squash and stretch: tall and thin shooting up, short and wide as it lands.
-      return { s: s * (1 - 0.14 * wob), sy: s * (1 + 0.3 * wob) };
-    }
+    if (state === 1) return springPop(t, GARDEN.pop, 13, 6.5);
     if (state === 2) {
       const u = Math.max(0, Math.min(1, t / GARDEN.shrink));
       const s = (1 - u) * (1 - u);
@@ -435,6 +496,20 @@ export class Garden {
 
   update(dt: number): void {
     this.clock += dt;
+    // Planted trees bursting out of the ground: a big puff of earth and leaves, and a whump.
+    if (this.veg) {
+      for (const t of this.veg.updatePops(dt)) {
+        for (let k = 0; k < 9; k++) {
+          const a = this.rng.range(0, Math.PI * 2), sp = this.rng.range(0.6, 1.5);
+          this.dust.spawn(t.x, t.y + 0.05, t.z, Math.cos(a) * sp, this.rng.range(0.6, 1.3), Math.sin(a) * sp, this.rng.range(0.5, 0.9), 0.16, 0.35);
+        }
+        for (let k = 0; k < 10; k++) {
+          const a = this.rng.range(0, Math.PI * 2), sp = this.rng.range(0.4, 1.2);
+          this.flecks.spawn(t.x + Math.cos(a) * 0.3, t.y + 1.2 * t.scale, t.z + Math.sin(a) * 0.3, Math.cos(a) * sp, this.rng.range(0.5, 1.6), Math.sin(a) * sp, this.rng.range(0.8, 1.4), 0.05, 0);
+        }
+        this.sfx?.('treepop', t.x, t.z);
+      }
+    }
     for (const p of [...this.moving]) {
       const before = p.t;
       p.t += dt;

@@ -3,6 +3,7 @@ import { RENDER, VEG, PresetName } from '../config';
 import { stylisedMaterial, stylisedMaterialDouble, treeMaterial, treeMaterialDouble } from '../render/materials';
 import { RNG } from '../world/rng';
 import { FINE } from './detail';
+import { TREE_POP, springPop } from './pop';
 import { Simplex2, clamp } from '../world/noise';
 import { World } from '../world/World';
 import {
@@ -75,7 +76,12 @@ interface ChunkMesh {
   dirty: boolean;
   center: THREE.Vector3;
   def: BatchDef;
+  /** Recompute the culling bounds on the next write (a tree was planted in it, or is popping up). */
+  bounds?: boolean;
 }
+
+/** Kinds the player can plant (index = saved code). */
+const PLANTABLE: PlantKind[] = ['palm', 'broadleaf', 'banana', 'apple'];
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -110,6 +116,12 @@ export class Vegetation {
   private contactDirty = false;
   private density: number;
 
+  /** Plants from the seed (and islets); any after these were planted by the player, in order. */
+  private baseCount = 0;
+  /** Planted trees popping up: seconds since each began (negative: still waiting its turn). */
+  private popping = new Map<number, number>();
+  private plantRng = new RNG(977);
+
   constructor(private world: World, preset: PresetName) {
     this.density = RENDER.presets[preset].vegDensity;
     this.makeDefs();
@@ -118,6 +130,7 @@ export class Vegetation {
 
   /** Build the meshes once every plant exists (after growIslets). */
   build(): void {
+    this.baseCount = this.plants.length;
     this.buildMeshes();
     this.syncRockBlock();
   }
@@ -414,33 +427,9 @@ export class Vegetation {
       if (p.kind === 'banana') push('fruit_banana', p.chunk, p.id);
       if (TREE_KINDS.includes(p.kind)) push('stump', p.chunk, p.id);
     }
-    const w = this.world;
     for (const [k, ids] of groups) {
       const [key, chunkS] = k.split('|');
-      const def = this.defs.get(key)!;
-      // Tall trees get the see-through material (they fade when in the way at close zoom).
-      const tall = /^(palm|broadleaf|banana|apple1)/.test(key);
-      const mat = tall ? (def.double ? treeMaterialDouble() : treeMaterial()) : def.double ? stylisedMaterialDouble() : stylisedMaterial();
-      const mesh = new THREE.InstancedMesh(def.hi, mat, ids.length);
-      mesh.castShadow = def.shadow;
-      mesh.receiveShadow = true;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      const chunk = +chunkS;
-      const ccx = chunk % this.C, ccz = Math.floor(chunk / this.C);
-      const size = w.N / this.C;
-      const cm: ChunkMesh = {
-        mesh,
-        ids,
-        dirty: true,
-        center: new THREE.Vector3((ccx + 0.5) * size - w.half, 0, (ccz + 0.5) * size - w.half),
-        def,
-      };
-      ids.forEach((id, slot) => (this.plants[id].slots[key] = slot));
-      mesh.setColorAt(0, new THREE.Color(1, 1, 1));
-      this.chunks.set(k, cm);
-      this.writeChunk(cm, key);
-      mesh.computeBoundingSphere();
-      this.group.add(mesh);
+      this.makeChunk(key, +chunkS, ids, ids.length);
     }
 
     for (const def of this.defs.values()) {
@@ -471,6 +460,167 @@ export class Vegetation {
     this.buildMarkers();
   }
 
+  /** An instanced mesh for one plant shape in one map chunk, holding up to `cap` plants. */
+  private makeChunk(key: string, chunk: number, ids: number[], cap: number): ChunkMesh {
+    const w = this.world;
+    const def = this.defs.get(key)!;
+    // Tall trees get the see-through material (they fade when in the way at close zoom).
+    const tall = /^(palm|broadleaf|banana|apple1)/.test(key);
+    const mat = tall ? (def.double ? treeMaterialDouble() : treeMaterial()) : def.double ? stylisedMaterialDouble() : stylisedMaterial();
+    const mesh = new THREE.InstancedMesh(def.hi, mat, Math.max(1, cap));
+    mesh.castShadow = def.shadow;
+    mesh.receiveShadow = true;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const ccx = chunk % this.C, ccz = Math.floor(chunk / this.C);
+    const size = w.N / this.C;
+    const cm: ChunkMesh = {
+      mesh,
+      ids,
+      dirty: true,
+      center: new THREE.Vector3((ccx + 0.5) * size - w.half, 0, (ccz + 0.5) * size - w.half),
+      def,
+    };
+    ids.forEach((id, slot) => (this.plants[id].slots[key] = slot));
+    mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+    this.chunks.set(`${key}|${chunk}`, cm);
+    this.writeChunk(cm, key);
+    mesh.computeBoundingSphere();
+    this.group.add(mesh);
+    return cm;
+  }
+
+  /** Swap a chunk's mesh for a bigger one (same shape, material and LOD state). */
+  private enlarge(cm: ChunkMesh, cap: number): void {
+    const old = cm.mesh;
+    const mesh = new THREE.InstancedMesh(old.geometry, old.material, cap);
+    mesh.castShadow = old.castShadow;
+    mesh.receiveShadow = old.receiveShadow;
+    mesh.visible = old.visible;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.setColorAt(0, new THREE.Color(1, 1, 1));
+    this.group.remove(old);
+    old.dispose();
+    this.group.add(mesh);
+    cm.mesh = mesh;
+    cm.dirty = true;
+  }
+
+  /** Give a newly added plant an instance in the mesh for one of its shapes. */
+  private slotIn(p: Plant, key: string): void {
+    let cm = this.chunks.get(`${key}|${p.chunk}`);
+    if (!cm) cm = this.makeChunk(key, p.chunk, [], 8);
+    else if (cm.ids.length >= cm.mesh.instanceMatrix.count) this.enlarge(cm, cm.ids.length * 2);
+    p.slots[key] = cm.ids.length;
+    cm.ids.push(p.id);
+    cm.dirty = true;
+    cm.bounds = true;
+  }
+
+  /**
+   * Plant a tree (palm, broadleaf, banana, or orange tree as apple variant 1): a real tree from
+   * then on, chopped for wood, picked for fruit, regrowing from its stump. `delay` seconds until
+   * it pops up out of the ground with a springy bounce (null: there at once, as when loading).
+   */
+  plantTree(kind: PlantKind, variant: number, x: number, z: number, rot: number, scale: number, delay: number | null): Plant {
+    const p = this.add(kind, variant, x, z, rot, scale, this.plantRng);
+    if (delay !== null) {
+      p.fruit = 0;
+      this.popping.set(p.id, -delay);
+    }
+    this.slotIn(p, this.mainKey(p));
+    if (kind === 'apple') this.slotIn(p, variant === 1 ? 'fruit_orange' : 'fruit_apple');
+    if (kind === 'banana') this.slotIn(p, 'fruit_banana');
+    if (TREE_KINDS.includes(kind)) this.slotIn(p, 'stump');
+    // Contact shadow underneath.
+    if (this.contactIds.length >= this.contact.instanceMatrix.count) {
+      const old = this.contact;
+      this.contact = new THREE.InstancedMesh(old.geometry, old.material, old.instanceMatrix.count * 2);
+      this.contact.renderOrder = old.renderOrder;
+      this.group.remove(old);
+      old.dispose();
+      this.group.add(this.contact);
+    }
+    p.slots['contact'] = this.contactIds.length;
+    this.contactIds.push(p.id);
+    this.contactDirty = true;
+    this.contactBounds = true;
+    return p;
+  }
+
+  /**
+   * Is there room for a new tree of trunk-and-canopy radius `r` here, clear of standing trees,
+   * stumps, saplings, rocks and bushes?
+   */
+  roomForTree(x: number, z: number, r: number): boolean {
+    const w = this.world;
+    const [cx, cz] = w.cellOf(x, z);
+    const n = Math.ceil(r + 1.2);
+    for (let dz = -n; dz <= n; dz++) {
+      for (let dx = -n; dx <= n; dx++) {
+        if (!w.inBounds(cx + dx, cz + dz)) continue;
+        for (const id of this.byCell.get(w.idx(cx + dx, cz + dz)) ?? []) {
+          const p = this.plants[id];
+          if (p.state === PlantState.Gone || p.kind === 'fern' || p.kind === 'reef' || p.kind === 'searock') continue;
+          const pr = (p.kind === 'broadleaf' ? CANOPY[p.variant].r * 0.55 : p.kind === 'palm' ? 0.7 : p.kind === 'rock' ? 0.6 : p.kind === 'bush' || p.kind === 'flowerbush' ? 0.4 : 0.55) * p.scale;
+          if ((p.x - x) ** 2 + (p.z - z) ** 2 < (r + pr) ** 2) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Advance planted trees' pop-up bounce (real seconds, so it plays while paused). Returns the
+   * trees that have just broken out of the ground (for a puff of earth and a sound).
+   */
+  updatePops(dt: number): Plant[] {
+    const started: Plant[] = [];
+    for (const [id, t] of this.popping) {
+      const p = this.plants[id];
+      const t1 = t + dt;
+      if (t <= 0 && t1 > 0) started.push(p);
+      if (t1 >= TREE_POP.dur || p.state !== PlantState.Alive) this.popping.delete(id);
+      else this.popping.set(id, t1);
+      this.touch(p);
+      this.boundsOf(p);
+    }
+    return started;
+  }
+
+  private boundsOf(p: Plant): void {
+    for (const key of Object.keys(p.slots)) {
+      const cm = this.chunks.get(`${key}|${p.chunk}`);
+      if (cm) cm.bounds = true;
+    }
+    this.contactBounds = true;
+  }
+
+  /** Trees still popping up. */
+  get poppingCount(): number {
+    return this.popping.size;
+  }
+
+  /** The player's planted trees, for saving: [kind, variant, x, z, rotation, scale] each (hundredths). */
+  serializePlanted(): number[] {
+    const out: number[] = [];
+    for (let i = this.baseCount; i < this.plants.length; i++) {
+      const p = this.plants[i];
+      out.push(PLANTABLE.indexOf(p.kind), p.variant, Math.round(p.x * 100), Math.round(p.z * 100), Math.round(p.rot * 100), Math.round(p.scale * 100));
+    }
+    return out;
+  }
+
+  /** Replant the player's trees from a save, in order (before their states are restored). */
+  restorePlanted(data: number[]): void {
+    for (let i = 0; i + 5 < data.length; i += 6) {
+      const kind = PLANTABLE[data[i]];
+      if (!kind) continue;
+      const variant = Math.max(0, Math.min(kind === 'broadleaf' ? 7 : kind === 'palm' ? 2 : kind === 'apple' ? 1 : 0, data[i + 1] | 0));
+      this.plantTree(kind, variant, data[i + 2] / 100, data[i + 3] / 100, data[i + 4] / 100, clamp(data[i + 5] / 100, 0.3, 2), null);
+    }
+  }
+
+  private contactBounds = false;
   private contactIds: number[] = [];
   private markers!: THREE.InstancedMesh;
   private markedIds: number[] = [];
@@ -557,6 +707,13 @@ export class Vegetation {
     _e.set(0, p.rot, 0);
     _q.setFromEuler(_e);
     _s.set(s, s, s);
+    // Planted trees spring up out of the ground.
+    const pop = this.popping.get(p.id);
+    if (pop !== undefined && !isStump) {
+      const k = springPop(pop, TREE_POP.dur, TREE_POP.freq, TREE_POP.damp);
+      if (k.s <= 0.001) return out.copy(ZERO);
+      _s.set(s * k.s, s * k.sy, s * k.s);
+    }
     return out.compose(_p, _q, _s);
   }
 
@@ -586,6 +743,10 @@ export class Vegetation {
     cm.mesh.instanceMatrix.needsUpdate = true;
     if (cm.mesh.instanceColor) cm.mesh.instanceColor.needsUpdate = true;
     cm.dirty = false;
+    if (cm.bounds) {
+      cm.mesh.computeBoundingSphere();
+      cm.bounds = false;
+    }
   }
 
   /** Choose the nearest plants of each detailed type for the full-detail layer. */
@@ -654,6 +815,8 @@ export class Vegetation {
       }
       let r = p.kind === 'broadleaf' ? CANOPY[p.variant].r * 2.1 : p.kind === 'palm' ? 1.6 : p.kind === 'rock' ? 1.7 : p.kind === 'apple' && p.variant === 1 ? 2 : 1.2;
       r *= p.scale * (p.state === PlantState.Sapling ? 0.3 + 0.7 * p.growth : p.state === PlantState.Stump ? 0.25 : 1);
+      const pop = this.popping.get(p.id);
+      if (pop !== undefined) r *= Math.max(0.001, springPop(pop, TREE_POP.dur, TREE_POP.freq, TREE_POP.damp).s);
       _p.set(p.x, p.y + 0.03, p.z);
       _q.identity();
       _s.set(r, 1, r);
@@ -661,6 +824,10 @@ export class Vegetation {
     }
     this.contact.instanceMatrix.needsUpdate = true;
     this.contactDirty = false;
+    if (this.contactBounds) {
+      this.contact.computeBoundingSphere();
+      this.contactBounds = false;
+    }
   }
 
   /** Mark all meshes containing this plant for re-upload. */
