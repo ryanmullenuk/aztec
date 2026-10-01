@@ -16,10 +16,11 @@ import { CameraRig } from './render/CameraRig';
 import { FX, setCanopyFade } from './render/materials';
 import { Input } from './ui/Input';
 import { UI } from './ui/UI';
-import { PAINT_TOOLS, TOOLBAR, TOOLS, ToolId } from './ui/tools';
+import { GARDEN_TOOLS, PAINT_TOOLS, TOOLBAR, TOOLS, ToolId } from './ui/tools';
 import { PlantState, Vegetation } from './vegetation/Vegetation';
 import { GrassTufts } from './vegetation/GrassTufts';
 import { Wildflowers } from './vegetation/Wildflowers';
+import { GARDEN, Garden, GardenBrush } from './vegetation/Garden';
 import { PeakClouds } from './render/PeakClouds';
 import { DriftClouds } from './render/DriftClouds';
 import { CoastRocks } from './render/CoastRocks';
@@ -115,6 +116,8 @@ export class Game {
   tufts: GrassTufts;
   /** Wildflowers, little ferns and small plants scattered in clumps. */
   flowers: Wildflowers;
+  /** The player's planted flowers, bushes and shrubs. */
+  garden: Garden;
   clouds: PeakClouds;
   /** High clouds passing below the camera when zoomed out. */
   driftClouds: DriftClouds;
@@ -236,6 +239,9 @@ export class Game {
     this.scene.add(this.tufts.group);
     this.flowers = new Wildflowers(this.world, cfg.vegDensity);
     this.scene.add(this.flowers.group);
+    this.garden = new Garden(this.world);
+    this.garden.sfx = (n, x, z) => this.audio?.sfx(n, x, z);
+    this.scene.add(this.garden.group);
     this.clouds = new PeakClouds(this.world);
     this.scene.add(this.clouds.group);
     this.driftClouds = new DriftClouds(opts.seed);
@@ -506,7 +512,7 @@ export class Game {
       sfx,
       godMode: () => this.eco.godMode,
     };
-    // Watchtower archers shoot at jaguars and alligators that come within range.
+    // Watchtowers shoot at jaguars and alligators that come within range.
     type GatorRef = Parameters<Alligators['hitByArrow']>[0];
     this.defence.hooks = {
       quarry: () => [
@@ -517,7 +523,7 @@ export class Game {
       sfx,
       killed: (kind, at) =>
         this.ui?.toast(
-          kind === 'jaguar' ? 'The watchtower archer has brought down a jaguar! Another will swim over from the mainland in time.' : 'The watchtower archer has killed an alligator. Another will come down the rivers to the swamp in time.',
+          kind === 'jaguar' ? 'The watchtower has brought down a jaguar! Another will swim over from the mainland in time.' : 'The watchtower has killed an alligator. Another will come down the rivers to the swamp in time.',
           'info',
           () => at,
         ),
@@ -825,6 +831,10 @@ export class Game {
       dirtpath: 'Hold and drag to tread a <b>dirt path</b> · free · Esc to finish',
       unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
       regrass: 'Hold and drag over bare earth to <b>restore the grass</b> · free · Esc to finish',
+      flowers: 'Hold and drag to <b>plant flowers</b> · each stroke picks its own colours · free · Esc to finish',
+      bushes: 'Hold and drag to <b>plant bushes</b>: hibiscus, bougainvillea and more · free · Esc to finish',
+      shrubs: 'Hold and drag to <b>plant shrubs</b>: ferns, crotons, agaves and grasses · free · Esc to finish',
+      unplant: 'Hold and drag over garden plants to <b>dig them up</b> · Esc to finish',
       canal: `Hold and drag outward from water to dig a <b>canal</b> into the village · ${PATHS.canalWood} wood per section · Esc to finish`,
       bridge: `Hold and drag from the shore across shallow water to build a <b>rope bridge</b> · ${PATHS.bridgeWood} wood per section · Esc to finish`,
     };
@@ -933,7 +943,7 @@ export class Game {
     const area = this.tool === 'harvest' || this.tool === 'bless' || PAINT_TOOLS.includes(this.tool);
     this.brush.visible = sculpt || area;
     if (this.brush.visible) {
-      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'regrass' ? PATHS.regrassRadius + 0.3 : PAINT_TOOLS.includes(this.tool) ? PATHS.radius + 0.4 : POWERS.sculptRadius;
+      const r = this.tool === 'bless' ? POWERS.bless.radius : this.tool === 'harvest' ? 2 : this.tool === 'regrass' ? PATHS.regrassRadius + 0.3 : GARDEN_TOOLS.includes(this.tool) ? GARDEN.radius[this.tool as GardenBrush] + 0.15 : PAINT_TOOLS.includes(this.tool) ? PATHS.radius + 0.4 : POWERS.sculptRadius;
       this.brush.scale.setScalar(r);
       this.brush.position.set(p.x, Math.max(0, p.y) + 0.08, p.z);
     }
@@ -1026,6 +1036,12 @@ export class Game {
         return;
       case 'regrass':
         if (p) this.paintGrass(p);
+        return;
+      case 'flowers':
+      case 'bushes':
+      case 'shrubs':
+      case 'unplant':
+        if (p) this.paintGarden(p, true);
         return;
       case 'bridge':
         if (p) this.paintBridge(p);
@@ -1185,6 +1201,12 @@ export class Game {
       this.audio?.sfx(add ? 'place' : 'click', p.x, p.z);
     }
   }
+  /** Plant (or dig up) the garden under the brush. */
+  private paintGarden(p: THREE.Vector3, start: boolean): void {
+    this.garden.paint(p.x, p.z, this.tool as GardenBrush, start);
+    if (this.garden.full && this.tool !== 'unplant') this.ui.setHint(`<b>The garden is full</b> (${GARDEN.max} plants): dig some up to plant more`);
+  }
+
   /**
    * Restore grass under the brush: trodden wear, dirt tracks and any stray bare soil grow back to
    * grass (the tufts and flowers return too). Stone paths are left alone.
@@ -1333,6 +1355,7 @@ export class Game {
         if (this.tool === 'bridge') this.paintBridge(_pathP);
         else if (this.tool === 'canal') this.paintCanal(_pathP);
         else if (this.tool === 'regrass') this.paintGrass(_pathP);
+        else if (GARDEN_TOOLS.includes(this.tool)) this.paintGarden(_pathP, start && k === 1);
         else this.paintPath(_pathP, this.tool !== 'unpath', this.tool === 'dirtpath');
       }
       this.pathLast = { x: p.x, z: p.z };
@@ -1681,6 +1704,7 @@ export class Game {
     this.sculptor.update(realDt);
     this.tufts.update(realDt);
     this.flowers.update(realDt);
+    this.garden.update(realDt);
     this.clouds.update(realDt, ls.day, this.rig.cur.dist);
     this.driftClouds.update(realDt, ls.day, this.rig.cur.dist, this.rig.camera.position);
     for (const s of this.systems) s(realDt, dt);
