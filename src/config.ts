@@ -425,6 +425,63 @@ export const TRADE = {
   },
 };
 
+/** Precious goods kept apart from the stores: pearls for trading, herbs and spices for healing. */
+export type GoodKey = 'pearls' | 'herbs' | 'spices';
+export const GOOD_KEYS: GoodKey[] = ['pearls', 'herbs', 'spices'];
+export const GOODS: Record<GoodKey, { name: string; one: string; value: number }> = {
+  pearls: { name: 'Pearls', one: 'pearl', value: 14 },
+  herbs: { name: 'Herbs', one: 'bundle of herbs', value: 6 },
+  spices: { name: 'Spices', one: 'pouch of spices', value: 8 },
+};
+
+/** Pearls: oyster shells washed up on the beaches (picked up by villagers or tapped), and now and then one in a fishing catch. */
+export const PEARLS = {
+  /** Game seconds between shells washing up, most lying on the beaches at once, and how long one lasts before the tide takes it back. */
+  every: [55, 120] as [number, number],
+  maxShells: 4,
+  shellLife: 360,
+  /** A villager passing this close picks it up. */
+  pickRadius: 0.7,
+  /** Chance a fishing boat's catch holds a pearl. */
+  fishChance: 0.12,
+};
+
+/**
+ * The voyage ship: one big ship, built at a Trade Dock, that the player loads with goods and sends
+ * off beyond the edge of the map with a crew. Out there the voyage meets storms, raiders, markets
+ * and islands; it comes back (or doesn't) with chickens, herbs, spices and goods.
+ */
+export const VOYAGE = {
+  shipCost: { wood: 80, stone: 24, belief: 0 },
+  buildSeconds: 60,
+  /** Villagers who sail with it, and how many adults must stay at home. */
+  crew: 2,
+  minHome: 2,
+  /** Game seconds away beyond the horizon. */
+  seconds: [170, 280] as [number, number],
+  speed: 3.2,
+  /** Least worth of cargo worth sending, and how many of each good a +/- click moves. */
+  minValue: 18,
+  step: { wood: 10, stone: 10, grain: 10, fruit: 10, meat: 5, fish: 10, pearls: 1, herbs: 1, spices: 1 } as Record<string, number>,
+  /** What the cargo is worth abroad, and how much better than fair a voyage does. */
+  values: { wood: 1, stone: 1.4, grain: 1, fruit: 1, meat: 1.8, fish: 1.2, pearls: 14, herbs: 6, spices: 8 } as Record<string, number>,
+  rate: [1.25, 1.7] as [number, number],
+  /** Worth of a chicken brought home, and the most chickens one voyage brings. */
+  chickenValue: 4,
+  maxChickens: 6,
+  /** Things that happen out there: how many per voyage, and the odds of each. */
+  events: [1, 3] as [number, number],
+  odds: { storm: 0.24, raiders: 0.16, market: 0.2, winds: 0.14, becalmed: 0.12, isle: 0.14 } as Record<string, number>,
+  /** A storm can be calmed from afar (Belief) within this many seconds of the news; if not, the odds of losing the ship. */
+  calmCost: 35,
+  calmWindow: 35,
+  stormLoss: 0.3,
+  raidLoss: 0.18,
+  /** Chance raiders carry off one of the crew. */
+  raidCrew: 0.3,
+  places: ['Cozumel', 'Xicalango', 'Tulum', 'Chetumal', 'Potonchan', 'the Jade Coast', 'the Cloud Isles', 'the Cacao Shore', 'the Salt Lagoons', 'the Turtle Keys'],
+};
+
 /** Village comforts: evening gatherings at bonfires, wells and roasted meat. */
 /**
  * Pelicans and herons. Numbers follow the habitat (beach and rock resting places for pelicans,

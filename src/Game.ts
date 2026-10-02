@@ -55,6 +55,8 @@ import { SeaTurtles } from './entities/SeaTurtles';
 import { Jellyfish } from './entities/Jellyfish';
 import { Alligators } from './entities/Alligators';
 import { Defence } from './entities/Defence';
+import { Voyages } from './entities/Voyage';
+import { BeachPearls } from './entities/Pearls';
 import { SwampView } from './water/Swamp';
 import { SEA_SURFACE } from './water/Water';
 import type { Islander } from './entities/Islander';
@@ -112,6 +114,9 @@ export class Game {
   water: Water;
   bridges: Bridges;
   trade!: TradeFleet;
+  /** The voyage ship (built at a Trade Dock) and pearl oysters on the beaches. */
+  voyage!: Voyages;
+  pearls!: BeachPearls;
   veg: Vegetation;
   tufts: GrassTufts;
   /** Wildflowers, little ferns and small plants scattered in clumps. */
@@ -292,6 +297,10 @@ export class Game {
     this.scene.add(this.boats.group);
     this.trade = new TradeFleet(this.world, this.water, this.buildings, this.eco, this.boats);
     this.scene.add(this.trade.group);
+    this.voyage = new Voyages(this.world, this.buildings, this.eco, this.boats, this.colony);
+    this.scene.add(this.voyage.group);
+    this.pearls = new BeachPearls(this.world);
+    this.scene.add(this.pearls.group);
     this.dogs = new Dogs(this.world, this.buildings, this.eco);
     this.jaguars = new Jaguars(this.world);
     this.dogs.jaguars = this.jaguars;
@@ -436,10 +445,29 @@ export class Game {
     this.powers.onStormEnd = (calmed) => this.stormPassed(calmed);
     this.buildings.onRemove = (b) => {
       this.wildlife.releasePen(b.id);
-      if (b.key === 'tradedock') this.trade.removeDock(b);
+      if (b.key === 'tradedock') {
+        this.trade.removeDock(b);
+        this.voyage.removeDock(b);
+      }
       if (b.key === 'kennel') this.dogs.onKennelRemoved(b);
     };
     this.trade.notify = (t, at) => this.ui?.toast(t, 'info', at);
+    this.voyage.hooks = {
+      notify: (m, kind, at) => this.ui?.toast(m, kind ?? 'info', at),
+      sfx: (n, x, z) => this.audio?.sfx(n, x, z),
+      addChicken: (x, z) => this.wildlife.animals.addChicken(x, z),
+      visitorOrbs: () => this.trade.visitors.filter((v) => v.state === 'moored' && v.deals.some((d) => !d.taken)).map((v) => ({ x: v.x, z: v.z, dock: v.dock })),
+    };
+    // Pearls: found on the beaches, or in an oyster in a fishing catch.
+    this.pearls.onFound = (who, x, z) => {
+      this.eco.goods.pearls += 1;
+      this.audio?.sfx('mark', x, z);
+      this.ui?.toast(who ? `${who.name} found a pearl in an oyster on the beach!` : 'You found a pearl in an oyster on the beach!', 'info', { x, z });
+    };
+    this.boats.onPearl = (fisher, x, z) => {
+      this.eco.goods.pearls += 1;
+      this.ui?.toast(`${fisher ? fisher.name : 'A fisher'} found a pearl in an oyster in the catch!`, 'info', { x, z });
+    };
     // Dogs and jaguars.
     const alarm = (x: number, z: number, r: number) => void this.colony.alarm(x, z, r);
     const danger = (j: Jaguar, by: 'dogs' | 'villagers') => {
@@ -598,6 +626,8 @@ export class Game {
       void realDt;
       this.boats.update(dt, this.time.elapsed);
       this.trade.update(dt, this.time.elapsed);
+      this.voyage.update(dt, this.time.elapsed);
+      this.pearls.update(dt, this.time.elapsed, this.colony.grid);
       this.marine.update(dt, this.rig.target);
       this.powers.update(dt, realDt, this.rig.target);
       // Add the gentle gust after weather sets its base wind, without accumulating it.
@@ -1059,6 +1089,15 @@ export class Game {
 
   private selectAt(x: number, y: number, p: THREE.Vector3 | null): void {
     const rect = this.canvas.getBoundingClientRect();
+    // A pearl oyster on the beach: tapping it finds the pearl.
+    if (this.pearls.tap(this.rig.camera, x, y, rect)) return;
+    // The voyage ship (or a green orb over goods or bargains waiting): its Trade Dock's card.
+    const vdock = this.voyage.pick(this.rig.camera, x, y, rect);
+    if (vdock) {
+      this.select({ building: vdock.id });
+      this.audio?.sfx('select', vdock.x, vdock.z);
+      return;
+    }
     const isl = this.colony.pick(this.rig.camera, x, y, rect);
     const current = this.selectedIslander >= 0 ? this.colony.byId(this.selectedIslander) : undefined;
     if (isl && isl !== current) {
