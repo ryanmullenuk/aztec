@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { GeoBuilder, M, P } from '../render/GeoBuilder';
 import { patchStylised } from '../render/materials';
+import { angularRockGeometry } from '../render/rocks';
 import { RNG } from '../world/rng';
 import { World } from '../world/World';
 
-type CoralKind = 'branch' | 'brain' | 'table' | 'fan' | 'tube' | 'soft' | 'weed';
+type CoralKind = 'branch' | 'brain' | 'table' | 'fan' | 'tube' | 'soft' | 'weed' | 'rock';
 
 const WHITE = 0xf4f0ea;
 
@@ -115,6 +116,7 @@ function seaweed(): THREE.BufferGeometry {
 }
 
 const PALETTE: Record<CoralKind, number[]> = {
+  rock: [0x756e62, 0x8b8576, 0x667873],
   weed: [0x4f8a3a, 0x6b8f2e, 0x3f7a4a, 0x8a7a2e, 0x7a4a3a],
   branch: [0xff8a5c, 0xff6f91, 0xc07bff, 0xffb347, 0x7fd6c8],
   brain: [0xd9c65a, 0xb8c96a, 0xe0a86a, 0x9ec27a],
@@ -143,7 +145,7 @@ export class Coral {
     const rng = new RNG(world.seed * 41 + 13);
     const w = world;
     // Reef sites: shallow sea a little way off the beaches, spread out around the island.
-    const want = rng.int(18, 26);
+    const want = rng.int(28, 36);
     for (let k = 0; k < 9000 && this.patches.length < want; k++) {
       const cx = rng.int(3, w.N - 4), cz = rng.int(3, w.N - 4);
       const x = w.centerX(cx) + rng.range(-0.5, 0.5), z = w.centerZ(cz) + rng.range(-0.5, 0.5);
@@ -152,12 +154,12 @@ export class Coral {
       if (this.patches.some((p) => Math.hypot(p.x - x, p.z - z) < 9)) continue;
       this.patches.push({ x, z, r: rng.range(2.5, 4.5) });
     }
-    const geos: Record<CoralKind, THREE.BufferGeometry> = { branch: branchCoral(), brain: brainCoral(), table: tableCoral(), fan: seaFan(), tube: tubeSponge(), soft: softCoral(), weed: seaweed() };
-    const items: Record<CoralKind, { m: THREE.Matrix4; c: THREE.Color }[]> = { branch: [], brain: [], table: [], fan: [], tube: [], soft: [], weed: [] };
+    const geos: Record<CoralKind, THREE.BufferGeometry> = { branch: branchCoral(), brain: brainCoral(), table: tableCoral(), fan: seaFan(), tube: tubeSponge(), soft: softCoral(), weed: seaweed(), rock: angularRockGeometry(913) };
+    const items: Record<CoralKind, { m: THREE.Matrix4; c: THREE.Color }[]> = { branch: [], brain: [], table: [], fan: [], tube: [], soft: [], weed: [], rock: [] };
     const tot = WEIGHTS.reduce((s, [, n]) => s + n, 0);
     const q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3();
     for (const patch of this.patches) {
-      const n = rng.int(40, 75);
+      const n = rng.int(50, 85);
       for (let k = 0; k < n; k++) {
         const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()) * patch.r;
         const x = patch.x + Math.cos(a) * d, z = patch.z + Math.sin(a) * d;
@@ -183,13 +185,13 @@ export class Coral {
       }
     }
     // Seaweed beds: clumps scattered in drifts across the whole shelf.
-    for (let c = 0; c < 4000 && items.weed.length < 900; c++) {
+    for (let c = 0; c < 6500 && items.weed.length < 1600; c++) {
       const cx = w.centerX(rng.int(3, w.N - 4)), cz = w.centerZ(rng.int(3, w.N - 4));
       const bed0 = w.heightAt(cx, cz);
       if (bed0 > -0.5 || bed0 < -2.6) continue;
-      const n = rng.int(6, 16);
+      const n = rng.int(9, 20);
       const pal = PALETTE.weed[Math.floor(rng.next() * PALETTE.weed.length)];
-      for (let k = 0; k < n; k++) {
+      for (let k = 0; k < n && items.weed.length < 1600; k++) {
         const x = cx + rng.range(-2.2, 2.2), z = cz + rng.range(-2.2, 2.2);
         const bed = w.heightAt(x, z);
         if (bed > -0.4 || bed < -2.8) continue;
@@ -197,6 +199,20 @@ export class Coral {
         q.setFromEuler(e);
         const m = new THREE.Matrix4().compose(p.set(x, bed - 0.02, z), q, sc.setScalar(rng.range(0.8, 1.6) * Math.min(1.4, -bed * 0.8)));
         items.weed.push({ m, c: new THREE.Color(pal).multiplyScalar(0.85 + rng.next() * 0.3) });
+      }
+    }
+    // Low submerged boulder clusters give reefs a rocky base without blocking the surface.
+    for (const patch of this.patches) {
+      for (let k = 0, n = rng.int(8, 14); k < n; k++) {
+        const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()) * (patch.r + 1);
+        const x = patch.x + Math.cos(a) * d, z = patch.z + Math.sin(a) * d;
+        const bed = w.heightAt(x, z);
+        if (bed > -0.8 || bed < -3.2) continue;
+        const size = rng.range(0.35, 0.85);
+        q.setFromEuler(e.set(0, rng.range(0, Math.PI * 2), 0));
+        const m = new THREE.Matrix4().compose(p.set(x, bed - 0.08, z), q,
+          sc.set(size, Math.min(size * 0.55, (-bed - 0.3) * 0.4), size * rng.range(0.7, 1.3)));
+        items.rock.push({ m, c: new THREE.Color(PALETTE.rock[rng.int(0, 2)]) });
       }
     }
     const mat = patchStylised(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 }), 0.2);

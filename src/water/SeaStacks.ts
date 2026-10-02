@@ -114,8 +114,10 @@ export function placeSeaStacks(w: World, seed: number, avoid: { x: number; z: nu
   const clearOf = (x: number, z: number, r: number) => avoid.every((a) => Math.hypot(a.x - x, a.z - z) > a.r + r);
   /** Every cell under a round footprint is open sea. */
   const inSea = (x: number, z: number, r: number) => {
+    const [cx, cz] = w.cellOf(x, z);
     for (let dz = -Math.ceil(r); dz <= Math.ceil(r); dz++) for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
-      if (dx * dx + dz * dz <= r * r + 0.5 && !isSea(x + dx, z + dz)) return false;
+      const px = w.centerX(cx + dx), pz = w.centerZ(cz + dz);
+      if (Math.hypot(px - x, pz - z) <= r + 0.2 && !isSea(px, pz)) return false;
     }
     return isSea(x, z);
   };
@@ -177,14 +179,14 @@ export function placeSeaStacks(w: World, seed: number, avoid: { x: number; z: nu
     const main = { x: c.x, z: c.z, r, top: rng.range(C.height[0], C.height[1]) };
     const rocks: StackRock[] = [];
     const n = rng.int(5, 9);
-    for (let k = 0; k < n; k++) {
+    for (let k = 0; k < 40 && rocks.length < n; k++) {
       const a = rng.range(0, Math.PI * 2);
       // More of the scatter lies on the seaward side, where the stack has broken away from.
       const d = r + rng.range(0.5, 3.4) * (Math.cos(a) * c.sx + Math.sin(a) * c.sz > 0 ? 1.2 : 0.8);
       const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
       const rr = rng.range(0.25, 0.85);
       const top = SEA_SURFACE + rng.range(-0.08, 0.35 + rr * 1.1);
-      if (!inSea(x, z, rr) || !clearOf(x, z, rr + 0.6) || rocks.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + rr)) continue;
+      if (!inSea(x, z, rr + 0.4) || !clearOf(x, z, rr + 0.6) || rocks.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + rr)) continue;
       rocks.push({ x, z, r: rr, top });
     }
     out.push({ x: c.x, z: c.z, sx: c.sx, sz: c.sz, main, rocks });

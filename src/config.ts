@@ -922,7 +922,7 @@ export const MARINE = {
 
 export const SEA_STACKS = {
   /** How many great sea stacks stand off the exposed coasts. */
-  count: [3, 6] as [number, number],
+  count: [5, 8] as [number, number],
   /** Cells out from the shore they stand, and the least distance between two. */
   offshore: [3, 6] as [number, number],
   spacing: 30,
