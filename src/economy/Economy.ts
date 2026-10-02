@@ -1,10 +1,12 @@
-import { ECONOMY, FOOD_KEYS, ResourceKey, TEMPLE } from '../config';
+import { ECONOMY, FOOD_KEYS, GoodKey, ResourceKey, TEMPLE } from '../config';
 
 export type Cost = { wood: number; stone: number; belief: number };
 
 /** Global stockpile. Physical delivery is simulated by carriers; this tracks the totals and capacities. */
 export class Economy {
   res: Record<ResourceKey, number> = { ...ECONOMY.start };
+  /** Precious goods (no store limit): pearls for trading, herbs and spices for healing. */
+  goods: Record<GoodKey, number> = { pearls: 0, herbs: 0, spices: 0 };
   woodCap = ECONOMY.baseWoodCap;
   foodCap = ECONOMY.baseFoodCap;
   beliefCap = ECONOMY.beliefBaseCap;
