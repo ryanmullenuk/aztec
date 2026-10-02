@@ -127,3 +127,21 @@ test('island files keep the condition and its timer, reject bad ones, and old fi
   // Healthy islanders save no health fields at all.
   assert.equal(snapshot(makeIslander(2, 'Well', 'm', 0, 0, () => 0.5)).islanders[0].condition, undefined);
 });
+
+test('herbs and spices from a voyage cure the sick and injured instead of food', () => {
+  const { colony, eco } = setup();
+  const [a, b] = colony.list;
+  colony.afflict(a, 'sick');
+  colony.afflict(b, 'mauled');
+  const food = eco.food;
+  assert.equal(colony.canCureWith(a, 'herbs'), false);
+  eco.goods.herbs = 1;
+  eco.goods.spices = 1;
+  assert.ok(colony.cureWith(a, 'herbs'));
+  assert.ok(colony.cureWith(b, 'spices'));
+  assert.equal(a.condition, 'well');
+  assert.equal(b.condition, 'well');
+  assert.equal(eco.goods.herbs, 0);
+  assert.equal(eco.goods.spices, 0);
+  assert.equal(eco.food, food, 'no food spent');
+});
