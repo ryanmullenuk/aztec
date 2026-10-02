@@ -124,6 +124,7 @@ Select an islander, then click a building, tree, rock or fruit bush to give them
 
 **Defence**
 - Jaguars keep dens deep in the jungle and stalk the village now and then; alligators lie in wait in the swamps. Dogs and warriors drive jaguars off.
+- Village dogs (bred at a Kennel) are lean pariah-type dogs, about as long as they are tall at the shoulder, with a short, upright neck, a fox-like head that closes neatly, prick or drop ears, and tan, brown, black, cream or tricolour coats. They walk, trot and gallop on real gaits. They pick up speed from a standstill, ease off to swing round sharp turns and brake to a stop, and their legs always move at the speed they actually cover the ground, so the paws never slide.
 - A Watchtower guards the village by itself, day and night: it needs no villager. When a jaguar or alligator comes within range, arrows fly from whichever window faces it on a real arc, leading a moving target. Most arrows fly true: a wounded beast flees, and a few hits kill it. Misses stick quivering in the ground. The tower's card shows the arrows loosed and the predators brought down.
 - The predators never die out: a new jaguar swims over from beyond the edge of the map to take a dead one's den, and a new alligator turns up in the swamps a few minutes later. Tuning lives in `DEFENCE` in `config.ts`.
 
