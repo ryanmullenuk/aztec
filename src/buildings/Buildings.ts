@@ -323,6 +323,7 @@ export class BuildingSystem {
       for (let z = cz; z < cz + d; z++) for (let x = cx; x < cx + w; x++) {
         if (!this.world.inBounds(x, z)) return { ok: false, reason: 'Out of bounds' };
         const i = this.world.idx(x, z);
+        if (this.world.blockFixed[i]) return { ok: false, reason: 'A natural landmark occupies this ground' };
         if (this.world.occ[i]) return { ok: false, reason: 'Something is already built here' };
         if (this.world.layer[i] < 1 || !Number.isNaN(this.world.riverY[i])) return { ok: false, reason: 'Needs dry land' };
       }

@@ -1,3 +1,4 @@
+import { Volcano, VOLCANO_COST, VOLCANO_HAPPINESS } from './entities/Volcano';
 import { Explore } from './render/Explore';
 import * as THREE from 'three';
 import type { Where } from './ui/where';
@@ -160,6 +161,7 @@ export class Game {
   boats: Boats;
   marine: Marine;
   powers: Powers;
+  volcano!: Volcano;
   rng: RNG;
   settings: Settings;
 
@@ -336,6 +338,14 @@ export class Game {
     this.connectSystems();
 
     if (save) this.loadFrom(save);
+    this.volcano = new Volcano(this.world, save?.volcano);
+    this.scene.add(this.volcano.group);
+    this.sculptor.protectedAt = (x, z) => this.volcano.group.visible &&
+      Math.hypot(x - this.volcano.x, z - this.volcano.z) < 9;
+    if (this.volcano.group.visible) {
+      const [cx, cz] = this.world.cellOf(this.volcano.x, this.volcano.z);
+      this.veg.clearArea(cx - 8, cz - 8, 17, 17);
+    }
 
     this.brush = new THREE.Mesh(
       new THREE.RingGeometry(0.92, 1.0, 48).rotateX(-Math.PI / 2),
@@ -363,6 +373,7 @@ export class Game {
     });
 
     this.ui = new UI(this);
+    this.volcano.notify = message => this.ui.toast(message, 'warn', () => ({ x: this.volcano.x, z: this.volcano.z }));
     // A new game (or a save from before anyone landed) starts with the arrival canoe.
     if (this.colony.list.length === 0) this.beginSettlement();
     else if (!this.buildings.hasCampfire) this.awaitingFire = true;
@@ -582,7 +593,17 @@ export class Game {
     this.powerHandler = (tool, p) => {
       if (tool === 'bless') this.powers.bless(p.x, p.z);
       else if (tool === 'rain') this.powers.summonRain();
-      else if (tool === 'calm') this.powers.calm();
+      else if (tool === 'calm') {
+        const v = this.volcano;
+        if (v?.group.visible && v.state.active &&
+          (Math.hypot(p.x - v.x, p.z - v.z) < 15 || this.powers.state !== 'storm')) {
+          if (v.state.calm(cost => this.eco.spend({ wood: 0, stone: 0, belief: cost }))) {
+            for (const isl of this.colony.list) isl.happy = Math.min(1, isl.happy + VOLCANO_HAPPINESS);
+            this.ui.toast('The volcano is calmed. Your islanders feel safer and happier.');
+            this.saveHandler?.();
+          } else this.ui.toast(`You need ${VOLCANO_COST} Belief to calm the volcano.`, 'warn');
+        } else this.powers.calm();
+      }
     };
     this.interactHandler = () => this.audio.unlock();
     this.onSettingsChanged = (s) => {
@@ -864,7 +885,7 @@ export class Game {
       harvest: 'Tap or drag over trees, rocks and fruit to mark them · tap a pig, goat, chicken or tapir to hunt it',
       bless: 'Tap near your farms to bless their crops',
       rain: 'Tap anywhere to summon rain',
-      calm: 'Tap anywhere to calm a storm',
+      calm: 'Tap the active volcano or a storm to calm it · 50 Belief',
       path: `Hold and drag to lay a <b>stone path</b> · ${PATHS.stonePerCell} stone per cell · Esc to finish`,
       dirtpath: 'Hold and drag to tread a <b>dirt path</b> · free · Esc to finish',
       unpath: 'Hold and drag over a path or bridge to <b>remove</b> it · Esc to finish',
@@ -1680,6 +1701,7 @@ export class Game {
     // What the camera sees this frame: off-screen entities skip posing and drawing.
     View.update(this.rig.camera);
     this.breeze.update(realDt, this.rig.target, this.rig.viewRadius);
+    this.volcano.update(dt);
     const t = this.time.elapsed;
     // With the day/night cycle off, the light stays at warm mid-afternoon (the clock still runs for the islanders).
     this.lighting.update(this.settings.dayNight ? this.time.t : RENDER.fixedTimeOfDay, this.rig.target, this.rig.viewRadius);

@@ -1,3 +1,4 @@
+import type { VolcanoSave } from '../entities/Volcano';
 import { BuildingKey, GOOD_KEYS, GoodKey, ResourceKey, SAVE } from '../config';
 import type { Game } from '../Game';
 import type { Islander, Role } from '../entities/Islander';
@@ -16,6 +17,7 @@ export interface SaveData {
   milestones: string[];
   stats: { sculpted: number; marked: number; boats: number };
   weather: { state: string };
+  volcano?: VolcanoSave;
   world: { layer: string; sandy: string; forest: string; rocky: string; wear: string; path?: string; bridge?: string; canal?: string };
   plants: string;
   /** Terrain layout version: 1 = the grown islets are part of the stored terrain. */
@@ -112,6 +114,7 @@ export function serialize(g: Game): SaveData {
     milestones: [...g.milestones],
     stats: { ...g.stats },
     weather: { state: g.powers?.state ?? 'clear' },
+    volcano: g.volcano?.save(),
     world: { layer: toB64(layerU), sandy: q8(w.sandy), forest: q8(w.forest), rocky: q8(w.rocky), wear: q8(w.wear), path: toB64(w.path), bridge: toB64(w.bridge), canal: toB64(w.canal) },
     plants: toB64(plants),
     layout: 1,

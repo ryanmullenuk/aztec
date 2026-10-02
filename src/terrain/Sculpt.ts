@@ -18,6 +18,7 @@ export class Sculptor {
   private dirty: [number, number, number, number] | null = null;
   private flushTimer = 0;
   active = false;
+  protectedAt: (x: number, z: number) => boolean = () => false;
   /** Total layer steps sculpted (for the tutorial and stats). */
   total = 0;
   /** Set when the stroke ran out of Belief. */
@@ -48,7 +49,7 @@ export class Sculptor {
         const d = Math.hypot(w.centerX(nx) - x, w.centerZ(nz) - z);
         if (d > r) continue;
         const i = w.idx(nx, nz);
-        if (this.touched.has(i)) continue;
+        if (this.touched.has(i) || this.protectedAt(w.centerX(nx), w.centerZ(nz))) continue;
         if (w.occ[i] !== 0 || !Number.isNaN(w.riverY[i])) continue;
         const L = w.layer[i];
         let nl = L;
