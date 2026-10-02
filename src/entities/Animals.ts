@@ -318,6 +318,9 @@ function ik2(tz: number, ty: number, l1: number, l2: number, bend: number): void
  * (wander, feed, rest, follow the group, alert → avoid → flee from islanders) with per-species
  * habitats and tuning. Animals only become food through explicit capture orders.
  */
+/** Most chickens that can be brought to the island after it was made (by voyages). */
+export const ANIMALS_EXTRA_CHICKENS = 40;
+
 export class Animals {
   readonly group = new THREE.Group();
   list: Animal[] = [];
@@ -360,19 +363,21 @@ export class Animals {
       this.group.add(mesh);
     };
     const cap = 40;
-    add('chicken_hen', models.chickenBody('hen'), cap);
-    add('chicken_speckled', models.chickenBody('speckled'), cap);
-    add('chicken_rooster', models.chickenBody('rooster'), cap);
-    add('head_hen', models.chickenHead(false), cap);
-    add('head_rooster', models.chickenHead(true), cap);
+    // Room for chickens brought home by voyages too.
+    const hens = cap + ANIMALS_EXTRA_CHICKENS;
+    add('chicken_hen', models.chickenBody('hen'), hens);
+    add('chicken_speckled', models.chickenBody('speckled'), hens);
+    add('chicken_rooster', models.chickenBody('rooster'), hens);
+    add('head_hen', models.chickenHead(false), hens);
+    add('head_rooster', models.chickenHead(true), hens);
     // Jointed wings (arm, forearm, hand; right then left), tinted with the coat colour.
-    wingParts(CHICKEN_WING, 2).forEach((g, k) => add(`wing_chicken${k}`, g, cap));
-    add('neck_chicken', models.chickenNeck(), cap);
+    wingParts(CHICKEN_WING, 2).forEach((g, k) => add(`wing_chicken${k}`, g, hens));
+    add('neck_chicken', models.chickenNeck(), hens);
     // Three-piece legs: feathered drumstick, scaly shank, toes.
     const [cu, cl, cf] = models.chickenLegParts();
-    add('legU_chicken', cu, cap * 2);
-    add('legL_chicken', cl, cap * 2);
-    add('foot_chicken', cf, cap * 2);
+    add('legU_chicken', cu, hens * 2);
+    add('legL_chicken', cl, hens * 2);
+    add('foot_chicken', cf, hens * 2);
     // Quadrupeds: front / rear body halves (split at the spine joint) and three-segment legs.
     const halves = (key: string, h: [THREE.BufferGeometry, THREE.BufferGeometry], n: number) => {
       add(`${key}_F`, h[0], n);
@@ -519,6 +524,29 @@ export class Animals {
       chasedBy: null, heldBy: null, heldMode: null, tick: this.rng.next() * 0.3, tempo: this.rng.range(0.8, 1.25),
       anim: { frame: -10, px: x, pz: z, v: 0, move: 0, run: 0, slope: 0, graze: 0, alert: 0, hy: 0, hr: 0, side: 0, vF: 0, vR: 0, kF: `${sp}_${v.body}_F`, kR: `${sp}_${v.body}_R`, nx: x, ny: 0, nz: z },
     };
+  }
+
+  /** Chickens added after the island was made (brought home by voyages), after the generated animals. */
+  private extra = 0;
+  private baseCount = -1;
+
+  /**
+   * A chicken brought ashore at (x, z): it joins a flock there (true), unless there's no room for
+   * more chickens on the island.
+   */
+  addChicken(x: number, z: number): boolean {
+    if (this.baseCount < 0) this.baseCount = this.list.length;
+    if (this.extra >= ANIMALS_EXTRA_CHICKENS) return false;
+    let gi = this.groups.findIndex((g) => g.sp === 'chicken' && Math.hypot(g.homeX - x, g.homeZ - z) < 4);
+    if (gi < 0) {
+      this.groups.push({ sp: 'chicken', x, z, homeX: x, homeZ: z, r: 4 });
+      gi = this.groups.length - 1;
+    }
+    const a = this.makeAnimal('chicken', x, z, gi);
+    a.timer = this.rng.range(0.2, 1.5);
+    this.list.push(a);
+    this.extra++;
+    return true;
   }
 
   // ---------------- Pens & capture API ----------------
@@ -1470,6 +1498,9 @@ export class Animals {
   }
 
   restore(data: number[][], idMap: Map<number, number>): void {
+    if (this.baseCount < 0) this.baseCount = this.list.length;
+    // Chickens brought home by voyages, saved after the island's own animals.
+    for (let i = this.list.length; i < data.length; i++) this.addChicken(data[i][1], data[i][2]);
     data.forEach((d, i) => {
       const a = this.list[i];
       if (!a) return;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BOATS, JETTY } from '../config';
+import { BOATS, JETTY, PEARLS } from '../config';
 import { Building, BuildingSystem } from '../buildings/Buildings';
 import { Colony } from '../ai/Colony';
 import { Economy } from '../economy/Economy';
@@ -387,6 +387,8 @@ export class Boats {
   private heap = new Heap();
   /** Other boats on the water (trade boats, visitors) for keeping clear. */
   readonly fleets: (() => Iterable<Hull>)[] = [];
+  /** A pearl came in with a fishing catch. */
+  onPearl: ((fisher: Islander | null, x: number, z: number) => void) | null = null;
   /** Number of boats ever launched (milestone). */
   launched = 0;
   onLaunch: () => void = () => {};
@@ -1034,6 +1036,8 @@ export class Boats {
           const crew = b.crew;
           b.crew = null;
           if (crew) this.colony.disembark(crew, b.catch, j.door.x, j.door.z);
+          // Now and then an oyster in the catch holds a pearl.
+          if (b.catch > 0 && Math.random() < PEARLS.fishChance) this.onPearl?.(crew, j.door.x, j.door.z);
           b.catch = 0;
           b.path = null;
         }
