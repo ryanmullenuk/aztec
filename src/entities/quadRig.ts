@@ -98,13 +98,13 @@ export interface QuadDims {
  * waist, sloping croup; shoulder blades; four-segment legs with a toe joint.
  */
 export const DOG_DIMS: QuadDims = {
-  spineY: 0.2, hipY: 0.165, frontK: 1.115, hindK: 1.14, x: 0.034, zF: 0.121, zR: -0.112, footF: -0.2, footH: -0.05,
-  neck: [0, 0.028, 0.128], neckLen: 0.05, neckPitch: -0.95, neckLen2: 0.046, neckPitch2: 0.5, jaw: [-0.005, 0.028],
-  tail: [0, 0.03, -0.163], tailLen: [0.036, 0.034, 0.032, 0.03, 0.028],
+  spineY: 0.218, hipY: 0.18, frontK: 1.115, hindK: 1.14, x: 0.034, zF: 0.097, zR: -0.09, footF: -0.17, footH: -0.06,
+  neck: [0, 0.033, 0.103], neckLen: 0.04, neckPitch: -1.12, neckLen2: 0.036, neckPitch2: 0.52, jaw: [0.0035, 0.03],
+  tail: [0, 0.032, -0.132], tailLen: [0.036, 0.034, 0.032, 0.03, 0.028],
   segF: [0.436, 0.5, 0.18], segH: [0.455, 0.485, 0.29], toeF: 0.13, toeH: 0.12, padH: 0.009,
   r: 0.017, stride: 0.24, gallopK: 2.6, trotK: 0.52, trotV: [0.55, 0.8], gallopV: [1.6, 2.1],
   crouchDrop: 0.3, lieY: 0.5, pawF: -0.25, pawH: -0.08, clear: 0.22,
-  spineJ: [0.035, -0.07], scap: [0.024, 0.05, 0.085, 0.075, -0.5, 0.14], turnR: 0.12, slowStride: 0.6, flexK: 0.42, swayK: 0.05,
+  spineJ: [0.028, -0.056], scap: [0.024, 0.05, 0.068, 0.075, -0.5, 0.14], turnR: 0.12, slowStride: 0.6, flexK: 0.42, swayK: 0.05,
 };
 
 export const JAG_DIMS: QuadDims = {
@@ -323,7 +323,7 @@ function sampleSec(tab: Sec[], z: number): Sec {
  * One piece of a lofted body: its own span [z0, z1] plus overlaps ov0 / ov1 reaching into its
  * neighbours, shrunk a touch so they stay hidden at rest and fill the joint as it bends.
  */
-function bodyPiece(tab: Sec[], z0: number, z1: number, ov0: number, ov1: number, radial: number, step: number, ex: number, seed: number, endCap = 0.014): THREE.BufferGeometry {
+function bodyPiece(tab: Sec[], z0: number, z1: number, ov0: number, ov1: number, radial: number, step: number, ex: number, seed: number, endCap = 0.014, jit = 0.03): THREE.BufferGeometry {
   const secs: Sec[] = [];
   const a = z0 - ov0, b = z1 + ov1;
   const n = Math.max(2, Math.ceil((b - a) / step));
@@ -341,7 +341,7 @@ function bodyPiece(tab: Sec[], z0: number, z1: number, ov0: number, ov1: number,
   }
   const f = secs[0], l = secs[secs.length - 1];
   const cap = (s: Sec, ov: number) => (ov > 0 ? 0.75 * Math.min(s.w, s.u, s.d) : endCap);
-  return loft(secs, radial, cap(f, ov0), cap(l, ov1), ex, 0.03, seed);
+  return loft(secs, radial, cap(f, ov0), cap(l, ov1), ex, jit, seed);
 }
 
 /** Retag faces (coat, mat 2) as markings (mat 1) where fn(centroid, normal) holds. Non-indexed geometry. */
@@ -360,30 +360,31 @@ function markFaces(g: THREE.BufferGeometry, fn: (x: number, y: number, z: number
 
 /** Coat shading: a darker saddle on upward faces above `y0`, and per-facet grain. */
 const saddle = (y0: number, amt: number) => (_x: number, y: number, _z: number, _nx: number, ny: number, _nz: number, m: number, i: number) =>
-  (m > 1.5 ? 1 - amt * Math.min(1, Math.max(0, (ny - 0.35) * 2.5)) * Math.min(1, Math.max(0, (y - y0) * 60)) : 1) * grain(i, 0.045);
+  (m > 1.5 ? 1 - amt * Math.min(1, Math.max(0, (ny - 0.35) * 2.5)) * Math.min(1, Math.max(0, (y - y0) * 60)) : 1) * grain(i, 0.025);
 
 // ---------------- Dog geometry ----------------
 
 /**
  * Body profile in body space (y from the spine height): rounded rump and haunch, a tucked waist,
- * the deep ribcage and brisket, the point of the chest.
+ * the deep ribcage and brisket, the point of the chest. About as long as the dog is tall at the
+ * withers, like a lean village (pariah) dog.
  */
 const DOG_BODY: Sec[] = [
-  sec(-0.18, 0.002, 0.026, 0.028, 0.034),
-  sec(-0.167, 0.004, 0.036, 0.037, 0.044),
-  sec(-0.15, 0.006, 0.043, 0.045, 0.05),
-  sec(-0.125, 0.009, 0.047, 0.05, 0.05),
-  sec(-0.1, 0.011, 0.046, 0.051, 0.049),
-  sec(-0.075, 0.012, 0.042, 0.049, 0.045),
-  sec(-0.05, 0.01, 0.041, 0.048, 0.046),
-  sec(-0.02, 0.004, 0.045, 0.052, 0.055),
-  sec(0.01, -0.002, 0.049, 0.058, 0.066),
-  sec(0.04, -0.006, 0.052, 0.064, 0.077),
-  sec(0.07, -0.008, 0.052, 0.068, 0.082),
-  sec(0.1, -0.006, 0.05, 0.066, 0.08),
-  sec(0.128, -0.002, 0.045, 0.058, 0.068),
-  sec(0.152, 0.0, 0.037, 0.046, 0.054),
-  sec(0.17, -0.003, 0.025, 0.031, 0.036),
+  sec(-0.144, 0.002, 0.0229, 0.028, 0.034),
+  sec(-0.1336, 0.004, 0.0317, 0.037, 0.044),
+  sec(-0.12, 0.006, 0.0378, 0.045, 0.05),
+  sec(-0.1, 0.009, 0.0414, 0.05, 0.05),
+  sec(-0.08, 0.011, 0.0405, 0.051, 0.049),
+  sec(-0.06, 0.012, 0.037, 0.049, 0.045),
+  sec(-0.04, 0.01, 0.0361, 0.048, 0.046),
+  sec(-0.016, 0.004, 0.0396, 0.052, 0.055),
+  sec(0.008, -0.002, 0.0431, 0.058, 0.066),
+  sec(0.032, -0.006, 0.0458, 0.064, 0.077),
+  sec(0.056, -0.008, 0.0458, 0.068, 0.082),
+  sec(0.08, -0.006, 0.044, 0.066, 0.08),
+  sec(0.1024, -0.002, 0.0396, 0.058, 0.068),
+  sec(0.1216, 0.0, 0.0326, 0.046, 0.054),
+  sec(0.136, -0.003, 0.022, 0.031, 0.036),
 ];
 
 /**
@@ -394,18 +395,18 @@ export function dogBodyParts(): { chest: THREE.BufferGeometry; loin: THREE.Buffe
   const [jc, jp] = DOG_DIMS.spineJ!;
   const piece = (z0: number, z1: number, ov0: number, ov1: number, seed: number, extra?: (b: GeoBuilder) => void) => {
     const b = new GeoBuilder();
-    b.add(bodyPiece(DOG_BODY, z0, z1, ov0, ov1, 12, 0.016, 2.25, seed), COAT);
+    b.add(bodyPiece(DOG_BODY, z0, z1, ov0, ov1, 12, 0.016, 2.25, seed, 0.014, 0.015), COAT);
     extra?.(b);
     const g = facet(b.build());
-    markFaces(g, (_x, y, z, _nx, ny, nz) => ny < -0.7 && z > -0.13 && z < 0.16 || (z > 0.09 && y < 0.012 && (nz > 0.3 || ny < -0.35)));
+    markFaces(g, (_x, y, z, _nx, ny, nz) => ny < -0.7 && z > -0.104 && z < 0.128 || (z > 0.072 && y < 0.012 && (nz > 0.3 || ny < -0.35)));
     paintFaces(g, saddle(0.03, 0.17));
     return g;
   };
-  const chest = piece(jc, 0.17, 0.03, 0, 11).translate(0, 0, -jc);
-  const loin = piece(jp, jc, 0.026, 0.026, 12);
-  const pelvis = piece(-0.18, jp, 0, 0.03, 13, (b) => {
+  const chest = piece(jc, 0.136, 0.026, 0, 11).translate(0, 0, -jc);
+  const loin = piece(jp, jc, 0.022, 0.022, 12);
+  const pelvis = piece(-0.144, jp, 0, 0.026, 13, (b) => {
     // Points of the hip either side of the croup.
-    for (const x of [-1, 1]) b.add(P.sphere(0.009, 1), COAT, M.t(x * 0.025, 0.045, -0.09, 0, 0, 0, 1, 0.75, 1.4));
+    for (const x of [-1, 1]) b.add(P.sphere(0.009, 1), COAT, M.t(x * 0.025, 0.045, -0.072, 0, 0, 0, 1, 0.75, 1.4));
   }).translate(0, 0, -jp);
   return { chest, loin, pelvis };
 }
@@ -417,8 +418,8 @@ export function dogNeckParts(): [THREE.BufferGeometry, THREE.BufferGeometry] {
     markFaces(f, (_x, _y, _z, _nx, ny) => ny < -0.35);
     return paintFaces(f, saddle(0.008, 0.14));
   };
-  const n1 = loft([sec(0, -0.002, 0.037, 0.037, 0.043), sec(0.02, -0.001, 0.034, 0.034, 0.04), sec(0.04, 0, 0.031, 0.031, 0.035), sec(0.05, 0, 0.03, 0.03, 0.033), sec(0.064, 0, 0.027, 0.027, 0.03)], 10, 0.022, 0.014, 2, 0.04, 21);
-  const n2 = loft([sec(-0.014, 0, 0.028, 0.028, 0.031), sec(0, 0, 0.03, 0.03, 0.033), sec(0.022, 0, 0.029, 0.029, 0.031), sec(0.04, 0.001, 0.027, 0.027, 0.029), sec(0.056, 0.002, 0.023, 0.023, 0.024)], 10, 0.012, 0.012, 2, 0.04, 22);
+  const n1 = loft([sec(0, -0.002, 0.037, 0.037, 0.043), sec(0.016, -0.001, 0.035, 0.035, 0.041), sec(0.032, 0, 0.032, 0.032, 0.036), sec(0.04, 0, 0.031, 0.031, 0.034), sec(0.052, 0, 0.028, 0.028, 0.031)], 10, 0.022, 0.014, 2, 0.02, 21);
+  const n2 = loft([sec(-0.012, 0, 0.029, 0.029, 0.032), sec(0, 0, 0.03, 0.03, 0.033), sec(0.018, 0, 0.029, 0.029, 0.031), sec(0.032, 0.001, 0.027, 0.027, 0.029), sec(0.045, 0.002, 0.023, 0.023, 0.024)], 10, 0.012, 0.012, 2, 0.02, 22);
   return [fin(n1), fin(n2)];
 }
 
@@ -433,25 +434,25 @@ export function dogHead(): THREE.BufferGeometry {
     sec(0.054, 0.027, 0.031, 0.025, 0.033),
     sec(0.066, 0.022, 0.026, 0.019, 0.031),
     sec(0.08, 0.02, 0.022, 0.017, 0.027),
-    sec(0.095, 0.019, 0.0195, 0.016, 0.023),
-    sec(0.108, 0.018, 0.017, 0.015, 0.019),
-    sec(0.116, 0.018, 0.0145, 0.013, 0.015),
+    sec(0.095, 0.019, 0.0195, 0.016, 0.0255),
+    sec(0.106, 0.018, 0.0172, 0.015, 0.0235),
+    sec(0.115, 0.018, 0.0148, 0.013, 0.019),
   ], 12, 0.014, 0.006, 2.1, 0.035, 31);
   b.add(skull, COAT);
   for (const x of [-1, 1]) {
     // Flews: the loose upper lips hanging either side of the muzzle.
-    b.add(P.sphere(0.012, 1), COAT, M.t(x * 0.015, -0.001, 0.082, 0, x * 0.12, 0, 0.62, 0.85, 1.8));
+    b.add(P.sphere(0.011, 1), COAT, M.t(x * 0.0138, 0.0025, 0.085, 0, x * 0.1, 0, 0.5, 0.62, 1.75));
     // Eyes with a glint; tan brow spots (markings) above.
-    b.add(P.sphere(0.0082, 1), C(0x140e0a), M.t(x * 0.0205, 0.042, 0.052));
-    b.add(P.sphere(0.0022, 0), C(0xffffff), M.t(x * 0.0225, 0.045, 0.059));
-    b.add(P.sphere(0.006, 0), MARK, M.t(x * 0.0165, 0.054, 0.049, 0, 0, 0, 1.2, 0.8, 1));
+    b.add(P.sphere(0.0074, 1), C(0x140e0a), M.t(x * 0.0205, 0.042, 0.052, 0, 0, 0, 1, 0.9, 1));
+    b.add(P.sphere(0.002, 0), C(0xffffff), M.t(x * 0.0225, 0.0445, 0.0585));
+    b.add(P.sphere(0.0045, 0), MARK, M.t(x * 0.015, 0.053, 0.05, 0, 0, 0, 1.3, 0.55, 0.9));
     // Upper canines, seen when the mouth opens.
-    b.add(P.cone(0.0022, 0.007, 4), C(0xf2eadc), M.t(x * 0.0105, -0.007, 0.1, Math.PI, 0, 0));
+    b.add(P.cone(0.0022, 0.007, 4), C(0xf2eadc), M.t(x * 0.0105, -0.0012, 0.094, Math.PI, 0, 0));
   }
   // Nose leather and nostrils.
-  b.add(P.sphere(0.0115, 1), C(0x1a1412), M.t(0, 0.028, 0.117, -0.25, 0, 0, 1.25, 0.9, 0.85));
+  b.add(P.sphere(0.0098, 1), C(0x1a1412), M.t(0, 0.027, 0.1165, -0.25, 0, 0, 1.15, 0.85, 0.8));
   // Dark mouth roof, hidden by the jaw until it opens.
-  b.add(P.box(0.024, 0.003, 0.066), C(0x3a1a1a), M.t(0, -0.005, 0.072));
+  b.add(P.box(0.02, 0.003, 0.054), C(0x3a1a1a), M.t(0, 0.003, 0.066));
   const g = facet(b.build());
   // Pale muzzle, cheeks and chin (markings): the lower half of the face forward of the eyes.
   markFaces(g, (_x, y, z, _nx, ny) => z > 0.058 && y < 0.018 && ny < 0.55);
@@ -461,10 +462,10 @@ export function dogHead(): THREE.BufferGeometry {
 /** Lower jaw (pivot at the hinge): pale chin, dark mouth floor with the tongue, lower canines. */
 export function dogJaw(): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  b.add(loft([sec(0, -0.006, 0.019, 0.006, 0.013), sec(0.028, -0.007, 0.017, 0.005, 0.012), sec(0.052, -0.006, 0.0145, 0.005, 0.0105), sec(0.074, -0.004, 0.011, 0.004, 0.008)], 8, 0.01, 0.006, 2, 0.03, 41), MARK);
-  b.add(P.box(0.02, 0.003, 0.066), C(0x4a2020), M.t(0, -0.0005, 0.04));
-  b.add(P.box(0.016, 0.004, 0.05), C(0xd86a78), M.t(0, 0.0012, 0.04));
-  for (const x of [-1, 1]) b.add(P.cone(0.0019, 0.006, 4), C(0xf2eadc), M.t(x * 0.009, 0.002, 0.07));
+  b.add(loft([sec(0, -0.004, 0.016, 0.004, 0.0085), sec(0.024, -0.0045, 0.0138, 0.0038, 0.0078), sec(0.044, -0.0042, 0.0115, 0.0036, 0.0065), sec(0.06, -0.0035, 0.0088, 0.0032, 0.005)], 8, 0.008, 0.004, 2, 0.02, 41), MARK);
+  b.add(P.box(0.018, 0.003, 0.054), C(0x4a2020), M.t(0, -0.0012, 0.033));
+  b.add(P.box(0.014, 0.004, 0.042), C(0xd86a78), M.t(0, 0.0004, 0.033));
+  for (const x of [-1, 1]) b.add(P.cone(0.0019, 0.006, 4), C(0xf2eadc), M.t(x * 0.008, 0.001, 0.056));
   return facet(b.build());
 }
 
@@ -513,7 +514,7 @@ export function dogTail(): THREE.BufferGeometry[] {
     const g = facet(b.build());
     const last = i === L.length - 1;
     markFaces(g, (_x, _y, z, _nx, ny) => ny < -0.55 || (last && z < -len * 0.55));
-    return paintFaces(g, (_x, _y, _z, _nx, ny, _nz, m2, k) => (m2 > 1.5 && ny > 0.5 ? 0.88 : 1) * grain(k, 0.05));
+    return paintFaces(g, (_x, _y, _z, _nx, ny, _nz, m2, k) => (m2 > 1.5 && ny > 0.5 ? 0.9 : 1) * grain(k, 0.03));
   });
 }
 
@@ -541,7 +542,7 @@ function dogPaw(len: number, padH: number, k: number, pad: number): GeoBuilder {
  */
 export function dogLegParts(pad: number): THREE.BufferGeometry[] {
   const q = DOG_DIMS, L = q.hipY;
-  const fin = (b: GeoBuilder) => paintFaces(facet(b.build()), (_x, _y, _z, _nx, _ny, _nz, _m, i) => grain(i, 0.05));
+  const fin = (b: GeoBuilder) => paintFaces(facet(b.build()), (_x, _y, _z, _nx, _ny, _nz, _m, i) => grain(i, 0.03));
   const lF = q.segF.map((f) => f * L), lH = q.segH.map((f) => f * L);
   const out: THREE.BufferGeometry[] = [];
   // Shoulder blade: a flat blade lying against the chest wall.
@@ -1196,7 +1197,7 @@ export function drawQuad(out: QuadMeshes, keys: QuadKeys, q: QuadDims, p: QuadPo
     const t = p.tongue || 0;
     if (keys.tongue && t > 0.02) {
       const tb = dyn && dyn.ready ? dyn.tng : 0;
-      _L.multiplyMatrices(_J, compose(_T, 0, 0.0015, 0.024 + 0.02 * t, 0.15 + 0.4 * t + tb, 0, 0, 1, 1, 0.45 + 0.75 * t));
+      _L.multiplyMatrices(_J, compose(_T, 0, 0.0015, 0.022 + 0.012 * t, 0.12 + 0.28 * t + tb, 0, 0, 1, 1, 0.42 + 0.42 * t));
       out.put(keys.tongue, _O.multiplyMatrices(_W, _L), col, mark);
     }
   }

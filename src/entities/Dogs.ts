@@ -445,20 +445,39 @@ export class Dogs {
     }
   }
 
+  /**
+   * Move toward (tx, tz) wanting speed `want`, the way a dog really does: picking up speed from
+   * its current pace rather than leaping to it, easing off to swing round a sharp turn (instead
+   * of sliding sideways), and braking as it comes up to where it's going (`brake`). True on
+   * arrival.
+   */
+  private go(d: Dog, tx: number, tz: number, want: number, dt: number, swim = false, arrive = 0.08, brake = true): boolean {
+    const dist = Math.hypot(tx - d.x, tz - d.z);
+    let off = Math.atan2(tx - d.x, tz - d.z) - d.heading;
+    while (off > Math.PI) off -= Math.PI * 2;
+    while (off < -Math.PI) off += Math.PI * 2;
+    let v = want * (0.35 + 0.65 * Math.max(0, Math.cos(off)));
+    if (brake) v = Math.min(v, Math.sqrt(2 * DOG_DECEL * Math.max(0, dist - arrive)) + 0.15);
+    const now = d.speed;
+    v = v > now ? Math.min(v, now + DOG_ACCEL * dt) : Math.max(v, now - DOG_DECEL * dt);
+    return steer(this.world, d, tx, tz, Math.max(0.06, v), dt, swim, arrive);
+  }
+
   /** Walk home along the route if there is one, else straight; true on arrival (near enough). */
   private walkHome(d: Dog, speed: number, dt: number): boolean {
     if (d.route && d.routeIdx < d.route.length) {
       const wp = d.route[d.routeIdx];
-      if (steer(this.world, d, wp.x, wp.z, speed, dt, false, 0.35)) d.routeIdx++;
+      if (this.go(d, wp.x, wp.z, speed, dt, false, 0.35, d.routeIdx < d.route.length - 1 ? false : true)) d.routeIdx++;
       return false;
     }
     // The door is right against the building: close is close enough.
-    return steer(this.world, d, d.tx, d.tz, speed, dt, !d.route, 0.4) || Math.hypot(d.tx - d.x, d.tz - d.z) < 0.9;
+    return this.go(d, d.tx, d.tz, speed, dt, !d.route, 0.4) || Math.hypot(d.tx - d.x, d.tz - d.z) < 0.9;
   }
 
   private think(d: Dog, dt: number, night: boolean): void {
     const h = this.hooks!;
     const w = this.world;
+    const x0 = d.x, z0 = d.z;
     d.phase += dt;
     d.bark = Math.max(0, d.bark - dt);
     d.barkCool = Math.max(0, d.barkCool - dt);
@@ -569,7 +588,7 @@ export class Dogs {
           d.tz = hm.z;
           break;
         }
-        steer(w, d, tx, tz, run, dt, false, 0.2);
+        this.go(d, tx, tz, run, dt, false, 0.2);
         speed = Math.hypot(tx - d.x, tz - d.z) > 0.25 ? run : 0;
         if (speed === 0) turnTo(d, Math.atan2(j.x - d.x, j.z - d.z), dt, 8);
         if (dj < 4) this.barkNow(d);
@@ -603,7 +622,10 @@ export class Dogs {
       default:
         speed = this.everyday(d, dt, night, walk, run);
     }
-    d.speed += (speed - d.speed) * Math.min(1, dt * 6);
+    // The legs follow how fast the dog really covers the ground (so the paws stay planted).
+    const moved = Math.hypot(d.x - x0, d.z - z0) / dt;
+    const ground = moved > 6 ? 0 : moved;
+    d.speed += (ground - d.speed) * Math.min(1, dt * (speed === 0 ? 14 : 10));
     const sitT = d.state === 'sit' || (d.state === 'social' && d.timer < 2.5 && d.speed < 0.1) || (d.state === 'follow' && d.speed < 0.05) ? 1 : 0;
     const lieT = d.state === 'lie' || d.state === 'sleep' ? 1 : 0;
     const crouchT = d.state === 'alert' ? 0.35 : d.state === 'chase' && d.speed < 0.3 ? 0.45 : 0;
@@ -636,14 +658,14 @@ export class Dogs {
     d.timer -= dt;
     switch (d.state) {
       case 'walk':
-        if (steer(w, d, d.tx, d.tz, walk, dt, false, 0.3) || d.timer <= 0) this.choose(d, night);
+        if (this.go(d, d.tx, d.tz, walk, dt, false, 0.3) || d.timer <= 0) this.choose(d, night);
         else return walk;
         return 0;
       case 'zoom': {
         // Tearing around in loops, as dogs (especially puppies) do.
         const a = d.phase * 2.1 + d.id;
         const tx = d.tx + Math.cos(a) * 2.2, tz = d.tz + Math.sin(a * 1.3) * 1.8;
-        steer(w, d, tx, tz, run * 0.85, dt, false, 0.2);
+        this.go(d, tx, tz, run * 0.85, dt, false, 0.2);
         if (d.timer <= 0) this.choose(d, night);
         return run * 0.85;
       }
@@ -657,7 +679,7 @@ export class Dogs {
         if (dd > 1.6) {
           const back = v.heading + Math.PI + (d.id % 2 ? 0.5 : -0.5);
           const fast = dd > 5;
-          steer(w, d, v.x + Math.sin(back) * 0.9, v.z + Math.cos(back) * 0.9, fast ? run * 0.7 : walk * 1.25, dt, false, 0.3);
+          this.go(d, v.x + Math.sin(back) * 0.9, v.z + Math.cos(back) * 0.9, fast ? run * 0.7 : walk * 1.25, dt, false, 0.3);
           return fast ? run * 0.7 : walk * 1.25;
         }
         turnTo(d, Math.atan2(v.x - d.x, v.z - d.z), dt, 3);
@@ -666,7 +688,7 @@ export class Dogs {
       case 'sniff': {
         const dd = Math.hypot(d.sniffX - d.x, d.sniffZ - d.z);
         if (dd > 1.1 && d.timer > 0) {
-          steer(w, d, d.sniffX, d.sniffZ, walk, dt, false, 1.0);
+          this.go(d, d.sniffX, d.sniffZ, walk, dt, false, 1.0);
           return walk;
         }
         turnTo(d, Math.atan2(d.sniffX - d.x, d.sniffZ - d.z), dt, 4);
@@ -681,7 +703,7 @@ export class Dogs {
         }
         const dd = Math.hypot(o.x - d.x, o.z - d.z);
         if (dd > 0.55) {
-          steer(w, d, o.x, o.z, walk * 1.3, dt, false, 0.5);
+          this.go(d, o.x, o.z, walk * 1.3, dt, false, 0.5);
           return walk * 1.3;
         }
         turnTo(d, Math.atan2(o.x - d.x, o.z - d.z) + Math.sin(d.phase * 3) * 0.6, dt, 5);
@@ -1152,6 +1174,9 @@ export class Dogs {
 
 /** Marking colours for tricolour dogs by coat: white on tan, cream on browns, tan points on black. */
 const DOG_MARKS = [new THREE.Color(0xf2eadc), new THREE.Color(0xeee0c4), new THREE.Color(0xc0864c), new THREE.Color(0xb87a44), new THREE.Color(0xf2eadc)];
+/** How hard a dog speeds up and slows down (world units / s²). */
+const DOG_ACCEL = 4.5;
+const DOG_DECEL = 5.5;
 /** Seconds between idle fidget choices, and how fast panting fades after a run. */
 const DOG_IDLE_WINDOW = 5;
 const DOG_PANT_DECAY = 0.06;
