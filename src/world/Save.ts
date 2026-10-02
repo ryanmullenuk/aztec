@@ -1,4 +1,4 @@
-import { BuildingKey, ResourceKey, SAVE } from '../config';
+import { BuildingKey, GOOD_KEYS, GoodKey, ResourceKey, SAVE } from '../config';
 import type { Game } from '../Game';
 import type { Islander, Role } from '../entities/Islander';
 import { PlantState } from '../vegetation/Vegetation';
@@ -32,6 +32,10 @@ export interface SaveData {
   name?: string;
   /** Land animals: [alive, x, z, pen building id, respawn]. */
   animals?: number[][];
+  /** Pearls, herbs and spices. */
+  goods?: Partial<Record<GoodKey, number>>;
+  /** The voyage ship: its dock, state, hold, haul, crew away at sea and news. */
+  voyage?: Record<string, unknown> | null;
   /** Trees the player planted, in order: [kind, variant, x, z, rotation, scale] flattened (hundredths). */
   trees?: number[];
   /** The player's garden plants: [variant, x, z, rotation, scale] flattened (hundredths). */
@@ -128,6 +132,8 @@ export function serialize(g: Game): SaveData {
     dogsFounded: g.dogs?.founded ?? false,
     garden: g.garden?.serialize() ?? [],
     trees: g.veg.serializePlanted(),
+    goods: { ...g.eco.goods },
+    voyage: g.voyage?.serialize() ?? null,
     name: g.islandName,
   };
 }
@@ -220,6 +226,8 @@ export function applyRest(g: Game, d: SaveData): void {
   if (g.wildlife) d.schools.forEach((s, i) => g.wildlife!.schools[i] && (g.wildlife!.schools[i].stock = s));
   if (g.powers && d.weather.state === 'storm') g.powers.startStorm();
   g.garden?.restore(d.garden ?? []);
+  for (const k of GOOD_KEYS) g.eco.goods[k] = Math.max(0, Number(d.goods?.[k]) || 0);
+  g.voyage?.restore(d.voyage as Record<string, unknown> | null | undefined, idMap);
 }
 
 /** Set when the game failed to start: a half-loaded island must never overwrite the real save. */
