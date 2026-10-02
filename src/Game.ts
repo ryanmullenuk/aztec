@@ -759,6 +759,12 @@ export class Game {
   applySettings(): void {
     const s = this.settings;
     if (this.preset !== s.preset) this.setPreset(s.preset);
+    const ultra = this.preset === 'ultra';
+    this.veg.ultra = ultra;
+    this.tufts.setUltra(ultra);
+    this.terrain.uniforms.uUltra.value = Number(ultra);
+    this.water.shared.uUltra.value = Number(ultra);
+    this.lighting.ultra = ultra;
     const was = this.applied;
     if (was.shadows !== s.shadows) {
       this.renderer.shadowMap.enabled = s.shadows;
@@ -1631,12 +1637,12 @@ export class Game {
   /** Step the preset down (high → medium → low) after a few seconds of low frame rate. */
   private autoQuality(): void {
     if (!this.settings.autoQuality || document.hidden || this.qualityChecks++ < 4) return;
-    const target = this.preset === 'high' ? 45 : 28;
+    const target = this.preset === 'ultra' ? 50 : this.preset === 'high' ? 45 : 28;
     this.slowSeconds = this.fps.value < target ? this.slowSeconds + 1 : 0;
     if (this.slowSeconds >= 4 && this.preset !== 'low') {
       this.slowSeconds = 0;
       this.qualityChecks = 0;
-      this.settings.preset = this.preset === 'high' ? 'medium' : 'low';
+      this.settings.preset = this.preset === 'ultra' ? 'high' : this.preset === 'high' ? 'medium' : 'low';
       this.applySettings();
       this.ui.toast(`Graphics set to ${this.settings.preset} for a smoother frame rate (change it in Settings).`);
     }

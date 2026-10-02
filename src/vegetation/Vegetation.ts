@@ -117,6 +117,7 @@ export class Vegetation {
   private contact!: THREE.InstancedMesh;
   private contactDirty = false;
   private density: number;
+  ultra = false;
 
   /** Plants from the seed (and islets); any after these were planted by the player, in order. */
   private baseCount = 0;
@@ -440,7 +441,7 @@ export class Vegetation {
       if (!def.mid) continue;
       const tall = /^(palm|broadleaf|banana|apple1)/.test(def.key);
       const mat = tall ? (def.double ? treeMaterialDouble() : treeMaterial()) : def.double ? stylisedMaterialDouble() : stylisedMaterial();
-      const mesh = new THREE.InstancedMesh(def.hi, mat, VEG.fineCap);
+      const mesh = new THREE.InstancedMesh(def.hi, mat, VEG.fineCap * 3);
       mesh.castShadow = def.shadow;
       mesh.receiveShadow = true;
       mesh.count = 0;
@@ -806,7 +807,7 @@ export class Vegetation {
     const next = new Set<number>();
     for (const [key, list] of per) {
       list.sort((a, b) => a.d - b.d);
-      const ids = list.slice(0, VEG.fineCap).map((e) => e.id);
+      const ids = list.slice(0, VEG.fineCap * (this.ultra ? 3 : 1)).map((e) => e.id);
       ids.forEach((id) => next.add(id));
       this.fine.get(key)!.ids = ids;
     }
@@ -1072,7 +1073,7 @@ export class Vegetation {
         cm.mesh.visible = cm.def.cull === 0 || d < lodDist * cm.def.cull;
         if (cm.def.shadow) cm.mesh.castShadow = d < lodDist * 1.4;
       }
-      this.pickNear(camPos, lodDist * VEG.fineDetail);
+      this.pickNear(camPos, lodDist * VEG.fineDetail * (this.ultra ? 1.35 : 1));
     }
 
     for (const [k, cm] of this.chunks) {

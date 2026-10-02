@@ -484,7 +484,7 @@ export class UI {
       </div>
       <label class="row">Graphics
         <select data-k="preset">
-          <option value="high">High</option><option value="medium">Medium</option><option value="low">Low (phones)</option>
+          <option value="ultra">Ultra (desktop)</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low (phones)</option>
         </select>
       </label>
       <label class="row">Shadows <input type="checkbox" data-k="shadows"></label>

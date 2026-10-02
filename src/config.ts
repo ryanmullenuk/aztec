@@ -4,7 +4,7 @@
  * (1x speed = real seconds) unless noted.
  */
 
-export type PresetName = 'high' | 'medium' | 'low';
+export type PresetName = 'ultra' | 'high' | 'medium' | 'low';
 
 export const WORLD = {
   /** Grid cells along each side of the square map. */
@@ -80,6 +80,7 @@ export const RENDER = {
   fogNear: 140,
   fogFar: 700,
   presets: {
+    ultra: { pixelRatio: 2, shadowSize: 4096, ssao: true, dofSamples: 48, smaa: true, bloom: true, vegDensity: 1.0, lodDist: 120, terrainSubdiv: 3 },
     high: { pixelRatio: 1.75, shadowSize: 2048, ssao: true, dofSamples: 36, smaa: true, bloom: true, vegDensity: 1.0, lodDist: 80, terrainSubdiv: 3 },
     medium: { pixelRatio: 1.35, shadowSize: 2048, ssao: false, dofSamples: 24, smaa: false, bloom: true, vegDensity: 0.8, lodDist: 62, terrainSubdiv: 2 },
     low: { pixelRatio: 1, shadowSize: 1024, ssao: false, dofSamples: 12, smaa: false, bloom: false, vegDensity: 0.55, lodDist: 48, terrainSubdiv: 2 },

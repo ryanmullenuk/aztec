@@ -47,6 +47,7 @@ export class Terrain {
   private noise: Simplex2;
   private wearData: Uint8Array;
   readonly uniforms = {
+    uUltra: { value: 0 },
     uTime: { value: 0 },
     uWear: { value: null as THREE.Texture | null },
     uWorld: { value: WORLD.size },
@@ -346,6 +347,7 @@ export class Terrain {
         uniform vec3 uPathCol2;
         uniform vec3 uSoilCol;
         uniform float uCaustic;
+        uniform float uUltra;
         varying vec3 vWPos;
         varying vec4 vMask;
         varying float vForest;
@@ -427,6 +429,14 @@ export class Terrain {
             float dry = vMask.z * smoothstep(0.08, 0.3, vWPos.y);
             float rip = sin(dot(xz, vec2(0.8, 0.6)) * 8.5 + vn2(xz * 0.7) * 7.0) * 0.5 + 0.5;
             diffuseColor.rgb *= 1.0 - dry * (rip * 0.07) * nearK;
+            if (uUltra > 0.5) {
+              float footprint = length(fwidth(xz));
+              float detailFade = 1.0 - smoothstep(0.02, 0.12, footprint);
+              float grains = vn2(xz * 38.0);
+              float fineRidges = sin(dot(xz, vec2(0.8, 0.6)) * 22.0 + vn2(xz * 1.2) * 4.0);
+              diffuseColor.rgb *= 1.0 + dry * nearK * detailFade
+                * ((grains - 0.5) * 0.15 + fineRidges * 0.035);
+            }
             vec2 pc = floor(xz * 5.0);
             float ph = th21(pc + 31.0);
             if (ph > 0.9 && vMask.z > 0.4) {

@@ -6,7 +6,7 @@ import { RNG } from '../world/rng';
 import { World } from '../world/World';
 
 /** A clump of 5 thin blades, pivoting at the ground and swaying at the tips. */
-function tuftGeometry(): THREE.BufferGeometry {
+function tuftGeometry(n = 6): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const blade = new THREE.BufferGeometry();
   blade.setAttribute('position', new THREE.Float32BufferAttribute([-0.03, 0, 0, 0.03, 0, 0, 0, 1, 0], 3));
@@ -15,7 +15,6 @@ function tuftGeometry(): THREE.BufferGeometry {
   // Both windings share the upward normals, so either side lights the same (no back-face flip).
   blade.setIndex([0, 1, 2, 2, 1, 0]);
   const base = new THREE.Color(COLORS.grassOlive), tip = new THREE.Color(COLORS.grassBright);
-  const n = 6;
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + k * 0.7;
     const h = 0.16 + ((k * 37) % 7) * 0.014;
@@ -44,6 +43,7 @@ export class GrassTufts {
   private tufts: Tuft[] = [];
   private meshes: THREE.InstancedMesh[] = [];
   private timer = 0;
+  private ultra = false;
   private C = VEG.chunks;
 
   constructor(private world: World, density: number) {
@@ -91,6 +91,16 @@ export class GrassTufts {
       this.group.add(m);
     }
     this.refresh();
+  }
+
+  /** Change visual blade density without moving clumps or affecting simulation. */
+  setUltra(enabled: boolean): void {
+    if (enabled === this.ultra) return;
+    this.ultra = enabled;
+    const old = this.meshes[0]?.geometry;
+    const geometry = tuftGeometry(enabled ? 12 : 6);
+    for (const mesh of this.meshes) mesh.geometry = geometry;
+    old?.dispose();
   }
 
   /** Re-pack visible clumps (hides those under buildings, farms and worn paths; follows sculpting). */

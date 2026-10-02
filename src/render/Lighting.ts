@@ -56,6 +56,7 @@ export class Lighting {
   overcast = 0;
   /** Lightning flash on the scene (0..~1.4), set each frame by the weather. */
   flash = 0;
+  ultra = false;
 
   constructor(scene: THREE.Scene, shadowSize: number) {
     this.sun = new THREE.DirectionalLight(COLORS.sunWarm, 3.2);
@@ -142,6 +143,14 @@ export class Lighting {
     cB.setHex(b.fog);
     s.fog.copy(cA).lerp(cB, f).lerp(cC.copy(STORM_FOG_DAY).lerp(STORM_FOG_NIGHT, night), oc * 0.6);
     s.exposure = L(a.exposure, b.exposure) * (1 - oc * (0.12 + 0.08 * night));
+
+    if (this.ultra) {
+      // Deeper blue-black sky, retaining moonlight and emissive lamps for navigation.
+      s.fog.multiplyScalar(1 - night * 0.6);
+      this.hemi.color.multiplyScalar(1 - night * 0.25);
+      this.hemi.intensity *= 1 - night * 0.15;
+      this.ambient.intensity *= 1 - night * 0.2;
+    }
 
     // Lightning: everything lights up cold and blue-white for an instant (most of all in the dark).
     const fl = this.flash * (0.55 + 0.45 * night);

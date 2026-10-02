@@ -50,6 +50,7 @@ const waterFrag = /* glsl */ `
   #include <fog_pars_fragment>
   uniform float uTime;
   uniform float uWorld;
+  uniform float uUltra;
   uniform float uFlow;
   /** Extra depth for narrow canals, too fine for the seabed texture to resolve. */
   uniform float uDeepen;
@@ -207,7 +208,8 @@ const waterFrag = /* glsl */ `
     vec2 warp = vec2(vnoise(p * 0.045 + vec2(t * 0.012, 0.0)), vnoise(p * 0.045 + vec2(5.2, -t * 0.01))) * 6.0;
     float ra = 0.32 * amp * mix(0.35, 1.7, gWind);
     float freq = 0.42;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
+      if (i >= 4 && uUltra < 0.5) break;
       float fi = float(i);
       // Each octave turned by an irrational angle and stretched along its crests (wind ripples are
       // longer than they are wide), drifting its own way.
@@ -714,6 +716,7 @@ export class Water {
   private plungeAt = new THREE.Vector3();
   private sprayAcc = 0;
   readonly shared = {
+    uUltra: { value: 0 },
     uTime: { value: 0 },
     uWorld: { value: WORLD.size },
     uSunDir: { value: new THREE.Vector3(0.5, 0.5, 0.5).normalize() },
