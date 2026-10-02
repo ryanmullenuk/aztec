@@ -1828,6 +1828,12 @@ export class Colony {
   cure(isl: Islander): boolean {
     if (!this.canCure(isl)) return false;
     this.takeFood(this.cureCost(isl));
+    this.heal(isl);
+    return true;
+  }
+
+  /** Back on their feet: well again, and back to work. */
+  private heal(isl: Islander): void {
     isl.condition = 'well';
     isl.conditionT = 0;
     isl.injured = 0;
@@ -1837,6 +1843,18 @@ export class Colony {
     if (t && b && t.stage === 3) this.leaveCare(isl, t, b);
     else if (t?.kind === 'heal' && t.stage !== 2 && t.stage !== 4) this.releaseTask(isl);
     isl.think = 0;
+  }
+
+  /** Can herbs or spices brought home by a voyage cure them (one bundle or pouch)? */
+  canCureWith(isl: Islander, good: 'herbs' | 'spices'): boolean {
+    return isl.condition !== 'well' && this.eco.goods[good] >= 1;
+  }
+
+  /** Cure an islander with herbs or spices instead of food. */
+  cureWith(isl: Islander, good: 'herbs' | 'spices'): boolean {
+    if (!this.canCureWith(isl, good)) return false;
+    this.eco.goods[good] -= 1;
+    this.heal(isl);
     return true;
   }
 
