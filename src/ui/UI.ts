@@ -1,6 +1,6 @@
 import { serialize } from '../world/Save';
 import { islandFile, parseIslandFile, downloadIsland, MAX_ISLAND_FILE_BYTES } from '../world/IslandFile';
-import { DEFENCE, DOGS, FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
+import { DEFENCE, DOGS, GOODS, GOOD_KEYS, GoodKey, VOYAGE, FAUNA, PATHS, BUILDINGS, BuildingKey, CAMERA, JETTY, MILESTONES, PresetName, SAVE, SPECIES, WARRIOR, FARM_TYPES, SMOKE, TRADE, TradeOffer, ResourceKey } from '../config';
 import { MONKEY_BASE } from '../entities/Monkeys';
 import { DOG_BASE } from '../entities/Dogs';
 import { JAG_BASE } from '../entities/Jaguars';
@@ -12,6 +12,7 @@ import { randomIslandName } from '../world/names';
 import { Ground } from '../world/World';
 import { ICONS, icon } from './icons';
 import type { Where } from './where';
+import { CARGO_KEYS, CargoKey, haulText, holdValue } from '../entities/Voyage';
 import { BUILD_MENU, GARDEN_TOOLS, PAINT_TOOLS, TERRAIN_TOOLS, TOOLBAR, TOOLS, ToolId } from './tools';
 import { GARDEN } from '../vegetation/Garden';
 
@@ -128,9 +129,9 @@ export class UI {
     clock.append(this.sunIcon, tx);
     this.tl.appendChild(clock);
     const grid = el('div', 'resgrid');
-    for (const k of ['people', 'wood', 'stone', 'grain', 'fruit', 'meat', 'fish']) {
+    for (const k of ['people', 'wood', 'stone', 'grain', 'fruit', 'meat', 'fish', 'pearls', 'herbs', 'spices']) {
       const r = el('div', 'res', icon(k));
-      r.title = k === 'people' ? 'Islanders (housed / total)' : k[0].toUpperCase() + k.slice(1);
+      r.title = k === 'people' ? 'Islanders (housed / total)' : k === 'pearls' ? 'Pearls: found on beaches and in fishing catches; worth a lot on a voyage' : k === 'herbs' || k === 'spices' ? `${k[0].toUpperCase() + k.slice(1)}: brought home by voyages; cure the sick and injured at a Healing Centre` : k[0].toUpperCase() + k.slice(1);
       const v = el('span', 'v');
       r.appendChild(v);
       this.resEls[k] = v;
@@ -631,6 +632,8 @@ export class UI {
         <li>A <b>Watchtower</b> near the jungle or the swamps guards the village by itself, day and night, with no villager needed (a torch burns on its roof after dark). Arrows fly from its windows at jaguars and alligators that come in range: wounded ones flee, and a few hits kill one. The island is never emptied of them, though: new jaguars swim over from beyond the map, and new alligators turn up in the swamps.</li>
         <li>Plant a garden: open <b>Flora</b> (4), pick <b>Flowers</b>, <b>Bushes</b> or <b>Shrubs &amp; ferns</b> and hold and drag over open ground, like laying a path. Plants pop up as you go, each stroke in its own colours. <b>Dig up plants</b> clears them again. It's free, and just for looks. (No need to harvest: your islanders fell, mine and pick by themselves.)</li>
         <li><b>Trees</b> (in Flora) plants real trees by dragging, for a little Belief each: they burst up out of the ground, grow wood for your woodcutters (and regrow from the stump), and fruit trees feed your gatherers.</li>
+        <li><b>Pearls</b> wash up on the beaches in open oysters (tap one, or a villager walking by picks it up), and fishers sometimes find one in their catch.</li>
+        <li>A finished <b>Trade Dock</b> can build the great <b>voyage ship</b>. Tap the ship, load goods with − and + (pearls fetch the most), and set sail with two villagers. Out past the horizon it may meet storms (calm them with Belief from the dock's card in time!), raiders, good markets or a green island. It comes home with chickens, <b>herbs</b> and <b>spices</b> (which cure the sick and injured at a Healing Centre) and goods, and waits under a green orb for you to unload. Some voyages never come back. A green orb over a visiting trader's boat means bargains are on offer.</li>
         <li>At night in first-person view, look up: the stars and the Milky Way are out on a clear night.</li>
         <li>Birds and fish scatter from your cursor.</li>
         <li>Humpback whales cruise the deep water and come up for air now and then, with a tall blow. Tap one to bring it up.</li>
@@ -875,6 +878,7 @@ export class UI {
     this.resEls.wood.textContent = `${fmt(e.res.wood)}`;
     this.resEls.stone.textContent = `${fmt(e.res.stone)}`;
     for (const k of ['grain', 'fruit', 'meat', 'fish'] as const) this.resEls[k].textContent = fmt(e.res[k]);
+    for (const k of GOOD_KEYS) this.resEls[k].textContent = fmt(e.goods[k]);
     this.resEls.wood.parentElement!.title = `Wood ${Math.floor(e.res.wood)} / ${e.woodCap}`;
     this.resEls.stone.parentElement!.title = `Stone ${Math.floor(e.res.stone)} / ${e.woodCap}`;
     this.resEls.grain.parentElement!.title = `Food ${Math.floor(e.food)} / ${e.foodCap}`;
@@ -1017,7 +1021,7 @@ export class UI {
         <div class="actions"><button class="btn small" data-a="capture" ${free && (!d.needsPen || hasPen) ? '' : 'disabled'}>${ICONS.harvest} ${label}</button></div>
         <p class="muted small">Tip: select an islander first, then tap an animal to send them after it.</p>`;
     } else if (b) {
-      key = `b${b.id}|${b.key === 'tradedock' ? g.trade.visitKey(b) : ''}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'healer' ? g.colony.patients(b).map((p) => `${p.id}:${p.condition}:${Math.ceil(p.conditionT / 60)}:${p.task?.slot}:${g.colony.canCure(p)}`).join(',') : ''}|${b.key === 'watchtower' ? `${g.defence.stats(b).shots}|${g.defence.stats(b).kills}|` : ''}${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
+      key = `b${b.id}|${b.key === 'tradedock' ? g.trade.visitKey(b) + '|' + g.voyage.key() + '|' + JSON.stringify(g.eco.goods) : ''}|${b.key === 'greathall' ? JSON.stringify(g.colony.hallCount(b)) : ''}|${b.key === 'healer' ? g.colony.patients(b).map((p) => `${p.id}:${p.condition}:${Math.ceil(p.conditionT / 60)}:${p.task?.slot}:${g.colony.canCure(p)}`).join(',') + JSON.stringify(g.eco.goods) : ''}|${b.key === 'watchtower' ? `${g.defence.stats(b).shots}|${g.defence.stats(b).kills}|` : ''}${b.key === 'kennel' ? `${g.dogs.alive.length}|${g.dogs.alive.filter((d) => d.puppy).length}|${Math.ceil(b.breedT)}|${Math.ceil(b.breedCool / 5)}|${b.dogRole}|${Math.floor(g.eco.food / 4)}|` : ''}${b.complete}|${Math.round(b.progress * 50)}|${b.tier}|${b.residents.length}|${b.upgrading}|${Math.round(b.growth * 20)}|${b.boats.length}|${b.boatBuild > 0}|${b.training.length}|${Math.floor(g.eco.res.wood / 5)}|${Math.floor(g.eco.res.stone / 5)}|${Math.floor(g.eco.res.belief / 5)}`;
       html = this.buildingHtml(b);
     }
     if (!force && key === this.infoKey) return;
@@ -1047,6 +1051,7 @@ export class UI {
     if (b.key === 'woodstore' || b.key === 'campfire') body += `<div class="kv"><span>Wood / Stone</span><b>${Math.floor(g.eco.res.wood)} · ${Math.floor(g.eco.res.stone)} of ${g.eco.woodCap}</b></div>`;
     if (b.key === 'grainstore' || b.key === 'campfire') body += `<div class="kv"><span>Food</span><b>${Math.floor(g.eco.food)} of ${g.eco.foodCap}</b></div>`;
     if (b.key === 'jetty' && b.complete) body += `<div class="kv"><span>Boats</span><b>${b.boats.length} / ${JETTY.maxBoats}${b.boatBuild > 0 ? ` (building ${Math.round((b.boatBuild / JETTY.boatBuildSeconds) * 100)}%)` : ''}</b></div>`;
+    if (b.key === 'tradedock' && b.complete) body += this.voyageSection(b);
     if (b.key === 'tradedock' && b.complete) {
       const ships = g.trade.of(b);
       const docked = ships.filter((s) => s.state === 'docked').length;
@@ -1088,7 +1093,7 @@ export class UI {
       for (const p of pts) {
         const cost = g.colony.cureCost(p);
         body += `<div class="kv"><span><button class="btn small ghost" data-a="patient:${p.id}" title="Select ${p.name}">${p.name}</button></span><b>${this.healthText(p)}</b></div>
-          <div class="actions" style="margin-top:2px"><button class="btn small" data-a="cure:${p.id}" ${g.colony.canCure(p) ? '' : 'disabled'}>Cure <span class="c">${cost ? `${cost} food` : 'free'}</span></button></div>`;
+          <div class="actions" style="margin-top:2px"><button class="btn small" data-a="cure:${p.id}" ${g.colony.canCure(p) ? '' : 'disabled'}>Cure <span class="c">${cost ? `${cost} food` : 'free'}</span></button>${(['herbs', 'spices'] as const).filter((k) => g.eco.goods[k] >= 1).map((k) => `<button class="btn small" data-a="cure${k}:${p.id}" title="Cure with ${GOODS[k].one} brought home by a voyage">${icon(k)} Cure <span class="c">1 ${k === 'herbs' ? 'herbs' : 'spice'}</span></button>`).join('')}</div>`;
       }
     }
     if (b.key === 'warroom' && b.complete) body += `<div class="kv"><span>Warriors</span><b>${g.colony.list.filter((i) => i.warrior).length}${b.training.length ? ` (+${b.training.length} training)` : ''}</b></div>`;
@@ -1156,6 +1161,21 @@ export class UI {
     }
     if (b) {
       if (a.startsWith('patient:')) g.select({ islander: Number(a.slice(8)) });
+      if (a.startsWith('cureherbs:') || a.startsWith('curespices:')) {
+        const good = a.startsWith('cureherbs:') ? 'herbs' : 'spices';
+        const p = g.colony.byId(Number(a.slice(a.indexOf(':') + 1)));
+        if (p && g.colony.cureWith(p, good)) this.toast(`${p.name} is cured with ${GOODS[good].one} and will go back to work.`);
+        else this.toast(`No ${good} left.`, 'warn');
+      }
+      if (a === 'vbuild') this.toast(g.voyage.buildAt(b));
+      if (a === 'vsail') this.toast(g.voyage.sail());
+      if (a === 'vunload') this.toast(g.voyage.unload());
+      if (a === 'vcalm') this.toast(g.voyage.calm(), g.voyage.calmed ? 'info' : 'warn');
+      if (a.startsWith('vl+:') || a.startsWith('vl-:')) {
+        const msg = g.voyage.load(a.slice(4) as CargoKey, a[2] === '+' ? 1 : -1);
+        if (msg) this.toast(msg, 'warn');
+        g.audio?.sfx('click');
+      }
       if (a.startsWith('cure:')) {
         const p = g.colony.byId(Number(a.slice(5)));
         const cost = p ? g.colony.cureCost(p) : 0;
@@ -1205,6 +1225,50 @@ export class UI {
     }
     this.infoKey = '';
     this.refresh(true);
+  }
+
+  /** The Trade Dock card's voyage ship section: build it, load it, send it, calm a storm, unload. */
+  private voyageSection(b: Building): string {
+    const g = this.game, V = g.voyage;
+    const name = (k: CargoKey) => (k in GOODS ? GOODS[k as GoodKey].name : k[0].toUpperCase() + k.slice(1));
+    let h = `<div class="sec-h">${icon('voyage')} Voyage ship</div>`;
+    if (V.state === 'none') {
+      const why = V.whyNotBuild(b), c = VOYAGE.shipCost;
+      h += `<p class="muted small">A great ship to load with goods and send off beyond the horizon with ${VOYAGE.crew} villagers. Out there it may meet storms and raiders, or good markets; it comes home with chickens, herbs and spices for healing, and goods. Some voyages never return.</p>
+        <div class="actions"><button class="btn small" data-a="vbuild" ${why ? 'disabled' : ''} title="${why ?? ''}">${icon('voyage')} Build voyage ship <span class="c">${icon('wood')}${c.wood} ${icon('stone')}${c.stone}</span></button></div>`;
+      return h;
+    }
+    if (V.dock !== b.id) return h + '<p class="muted small">The island\'s voyage ship belongs to another Trade Dock.</p>';
+    if (V.state === 'building') return h + this.bar(`Shipwrights at work ${Math.round((V.build / VOYAGE.buildSeconds) * 100)}%`, V.build / VOYAGE.buildSeconds, 'good');
+    const news = V.log.length ? `<div class="vnews">${V.log.slice(-4).map((l) => `<div class="muted small">· ${l}</div>`).join('')}</div>` : '';
+    if (V.state === 'docked' && V.haul) {
+      return h + `<div class="kv"><span>Home from ${V.place}</span><b class="good">Goods waiting aboard</b></div>${news}
+        <div class="kv"><span>Aboard</span><b>${haulText(V.haul)}</b></div>
+        <div class="actions"><button class="btn small" data-a="vunload">${icon('voyage')} Unload the goods</button></div>`;
+    }
+    if (V.state === 'docked') {
+      const rows = CARGO_KEYS.map((k) => {
+        const have = k in GOODS ? g.eco.goods[k as GoodKey] : g.eco.res[k as ResourceKey];
+        const n = V.hold[k] ?? 0;
+        if (!n && have < 1) return '';
+        return `<div class="vrow"><span class="vname">${icon(k)} ${name(k)}</span><span class="muted small">${Math.floor(have)} in store</span><span class="vctl"><button class="btn small ghost" data-a="vl-:${k}" ${n ? '' : 'disabled'}>−</button><b class="vn">${n}</b><button class="btn small ghost" data-a="vl+:${k}" ${have >= 1 ? '' : 'disabled'}>+</button></span></div>`;
+      }).join('');
+      const why = V.whyNotSail();
+      const worth = Math.round(holdValue(V.hold));
+      return h + `<p class="muted small">Load goods from your stores (pearls are worth the most abroad), then set sail. ${VOYAGE.crew} villagers go as crew.</p>
+        <div class="vrows">${rows || '<p class="muted small">The stores are empty.</p>'}</div>
+        <div class="kv"><span>Cargo worth</span><b>${worth}</b></div>${V.voyages ? news : ''}
+        <div class="actions"><button class="btn small" data-a="vsail" ${why ? 'disabled' : ''} title="${why ?? ''}">${icon('voyage')} Set sail</button>${why ? ` <span class="muted small">${why}</span>` : ''}</div>`;
+    }
+    const where = V.state === 'out' ? 'Sailing out to sea' : V.state === 'back' ? 'Sailing home: coming in to the dock' : `Away at ${V.place} (expected back in about ${Math.max(1, Math.ceil((V.timer + 20) / 60))} min)`;
+    h += `<div class="kv"><span>Status</span><b>${where}</b></div>`;
+    if (V.crew.length) h += `<div class="kv"><span>Crew</span><b>${V.crew.map((c) => c.name).join(', ')}</b></div>`;
+    if (V.storm > 0) {
+      const ok = g.eco.res.belief >= VOYAGE.calmCost || g.eco.godMode;
+      h += `<p class="warn small">A storm is raging around the ship! ${Math.ceil(V.storm)} seconds to calm it before it does its worst.</p>
+        <div class="actions"><button class="btn small" data-a="vcalm" ${ok ? '' : 'disabled'}>${icon('calm')} Calm the far seas <span class="c">${icon('belief')}${VOYAGE.calmCost}</span></button></div>`;
+    }
+    return h + news;
   }
 
   // ---------------- Minimap ----------------

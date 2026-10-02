@@ -549,3 +549,14 @@ body.exploring #hud * { pointer-events: none !important; }
 .explore-look { right: calc(20px + env(safe-area-inset-right, 0px)); }
 .explore-thumb { position: absolute; width: 40%; height: 40%; top: 30%; left: 30%; border-radius: 50%; border: 2px solid #ffe08a; background: #a57b32; box-shadow: 0 3px 6px #0008; transform: translate(var(--stick-x, 0px), var(--stick-y, 0px)); pointer-events: none; }
 .explore-label { position: absolute; top: calc(100% + 6px); width: 100%; text-align: center; color: #ffe08a; font-size: 12px; font-weight: bold; letter-spacing: 2px; text-shadow: 0 2px 3px #000; pointer-events: none; }
+
+/* Voyage ship: cargo rows with − / + loaders, news from the sea. */
+.vrows { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 6px; }
+.vrow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
+.vrow .vname { display: flex; align-items: center; gap: 5px; text-transform: capitalize; }
+.vctl { display: flex; align-items: center; gap: 4px; }
+.vctl .btn.small { min-width: 26px; padding: 2px 6px; }
+.vn { min-width: 2.2em; text-align: center; }
+.vnews { margin: 2px 0 4px; }
+b.good { color: #7ee08a; }
+p.warn { color: #ffb08a; }
