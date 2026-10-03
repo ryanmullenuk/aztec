@@ -47,7 +47,8 @@ export class VolcanoCycle {
 export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
   const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
   const radius = 2.85 + 5.1 * Math.pow(f, 1.55);
-  const r = radius + ridge * Math.sin(Math.PI * f);
+  const shoulder = 1 + f * (0.10 * Math.sin(angle * 3 + 0.6) + 0.06 * Math.cos(angle * 5));
+  const r = radius * shoulder + ridge * Math.sin(Math.PI * f);
   // Steep fluted walls open onto a broad, asymmetric apron.
   const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
   const lip = Math.sin(angle * 7) * 0.32 + Math.sin(angle * 13) * 0.21 - notch;
@@ -59,7 +60,7 @@ export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
 export function volcanoRockGeometry(): THREE.BufferGeometry {
   const positions: number[] = [], colours: number[] = [], indices: number[] = [];
   const sides = 64, rings = 20;
-  const dark = new THREE.Color(0x38332f), ash = new THREE.Color(0x766b5b);
+  const dark = new THREE.Color(0x303740), ash = new THREE.Color(0x879098);
   // Lower flank -> lip -> deep inner crater -> closed rocky floor.
   for (let j = 0; j <= rings + 5; j++) for (let i = 0; i <= sides; i++) {
     const angle = i / sides * Math.PI * 2;
@@ -101,7 +102,7 @@ export class Volcano {
   readonly state: VolcanoCycle;
   readonly x: number;
   readonly z: number;
-  readonly radius = 8;
+  readonly radius = 13;
   private age = 0;
   private lava: THREE.Group;
   private pool: THREE.Mesh;
@@ -118,10 +119,10 @@ export class Volcano {
     // Prefer the broad inland crown of island two, clear of existing buildings and landmarks.
     let best = -Infinity, site = -1;
     for (let i = 0; i < w.layer.length; i++) {
-      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 9) continue;
+      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 13) continue;
       const cx = i % w.N, cz = Math.floor(i / w.N);
       let clear = true;
-      for (let dz = -9; dz <= 9 && clear; dz++) for (let dx = -9; dx <= 9; dx++) {
+      for (let dz = -13; dz <= 13 && clear; dz++) for (let dx = -13; dx <= 13; dx++) {
         if (!w.inBounds(cx + dx, cz + dz)) { clear = false; break; }
         const j = w.idx(cx + dx, cz + dz);
         if (w.occ[j] || w.blockFixed[j] || w.layer[j] < 1) { clear = false; break; }
@@ -141,6 +142,7 @@ export class Volcano {
       y = Math.min(y, w.heightAt(this.x + Math.cos(a) * 8, this.z + Math.sin(a) * 8));
     }
     this.group.position.set(this.x, y, this.z);
+    this.group.scale.set(1.35, 1.8, 1.25);
     if (site >= 0) w.blockCircle(this.x, this.z, this.radius + 0.8);
     const stone = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true });
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
@@ -150,24 +152,63 @@ export class Volcano {
     const rng = new RNG(w.seed + 9817), dummy = new THREE.Object3D();
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
     const outcrops = new THREE.InstancedMesh(rockGeo,
-      new THREE.MeshStandardMaterial({ color: 0x696354, roughness: 1, flatShading: true }), 46);
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), 78);
     const shrubs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
-      new THREE.MeshStandardMaterial({ color: 0x56742d, roughness: 1, flatShading: true }), 110);
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), 240);
     for (const [mesh, vegetation] of [[outcrops, false], [shrubs, true]] as const) {
       for (let i = 0; i < mesh.count; i++) {
-        const f = rng.range(vegetation ? 0.52 : 0.25, 0.98);
+        const f = rng.range(vegetation ? 0.40 : 0.25, 0.98);
         // Leave the lava apron bare while the opposite flanks retain vegetation.
         const angle = rng.range(1.2, Math.PI * 2 - 0.5);
         const point = volcanoSurface(f, angle);
-        const size = rng.range(vegetation ? 0.18 : 0.25, vegetation ? 0.45 : 0.65);
-        dummy.position.copy(point); dummy.position.y += vegetation ? 0.12 : size * 0.35;
+        const size = rng.range(vegetation ? 0.18 : 0.25, vegetation ? 0.72 : 0.95);
+        dummy.position.copy(point);
+        const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+        dummy.position.y = Math.max(point.y, ground) + (vegetation ? 0.12 : size * 0.35);
         dummy.rotation.set(rng.range(-0.15, 0.15), angle, rng.range(-0.2, 0.2));
         dummy.scale.set(size, size * (vegetation ? 0.65 : rng.range(1.8, 3.6)), size);
         dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
-        mesh.setColorAt(i, new THREE.Color(vegetation ? 0x668538 : 0x827765).multiplyScalar(rng.range(0.65, 1.15)));
+        mesh.setColorAt(i, new THREE.Color(vegetation ? 0x628c32 : 0x737d87).multiplyScalar(rng.range(0.65, 1.15)));
       }
       mesh.castShadow = true; mesh.receiveShadow = true; this.group.add(mesh);
     }
+    // Irregular clusters at ground level soften the boundary into the forest.
+    const rubble = new THREE.InstancedMesh(rockGeo,
+      new THREE.MeshStandardMaterial({ color: 0x68727c, roughness: 1, flatShading: true }), 92);
+    for (let i = 0; i < rubble.count; i++) {
+      const angle = rng.range(0, Math.PI * 2);
+      const point = volcanoSurface(1, angle).multiplyScalar(rng.range(0.84, 1.07));
+      const size = rng.range(0.18, 0.8);
+      const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      dummy.position.set(point.x, ground + size * 0.28, point.z);
+      dummy.rotation.set(rng.range(-0.4, 0.4), angle, rng.range(-0.3, 0.3));
+      dummy.scale.set(size * rng.range(0.8, 1.5), size * rng.range(0.6, 1.8), size);
+      dummy.updateMatrix(); rubble.setMatrixAt(i, dummy.matrix);
+    }
+    rubble.castShadow = true; rubble.receiveShadow = true; this.group.add(rubble);
+    // Broad pointed leaves form recognisable tropical plants among the rock ledges.
+    const leafGeometry = new THREE.BufferGeometry();
+    leafGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0, -0.22, 0.28, 0.46, 0, 0.42, 1.05,
+      0, 0, 0, 0, 0.42, 1.05, 0.22, 0.28, 0.46,
+    ], 3));
+    leafGeometry.computeVertexNormals();
+    const leaves = new THREE.InstancedMesh(leafGeometry,
+      new THREE.MeshStandardMaterial({ color: 0x6d9637, roughness: 1, side: THREE.DoubleSide }), 420);
+    for (let plant = 0; plant < 60; plant++) {
+      const f = rng.range(0.48, 0.99), angle = rng.range(1.15, 5.8);
+      const point = volcanoSurface(f, angle);
+      const terrain = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      point.y = Math.max(point.y, terrain) + 0.08;
+      const size = rng.range(0.55, 1.05);
+      for (let leaf = 0; leaf < 7; leaf++) {
+        dummy.position.copy(point);
+        dummy.rotation.set(rng.range(-0.25, 0.35), leaf * Math.PI * 2 / 7 + angle, 0);
+        dummy.scale.setScalar(size); dummy.updateMatrix();
+        leaves.setMatrixAt(plant * 7 + leaf, dummy.matrix);
+      }
+    }
+    leaves.castShadow = true; leaves.receiveShadow = true; this.group.add(leaves);
     // Dark cooling crust breaks the molten surface into moving orange fissures.
     this.glow.onBeforeCompile = shader => {
       shader.uniforms.uLavaTime = this.lavaTime;

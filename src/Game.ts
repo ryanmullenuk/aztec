@@ -341,10 +341,13 @@ export class Game {
     this.volcano = new Volcano(this.world, save?.volcano);
     this.scene.add(this.volcano.group);
     this.sculptor.protectedAt = (x, z) => this.volcano.group.visible &&
-      Math.hypot(x - this.volcano.x, z - this.volcano.z) < 9;
+      Math.hypot(x - this.volcano.x, z - this.volcano.z) < this.volcano.radius + 0.8;
     if (this.volcano.group.visible) {
       const [cx, cz] = this.world.cellOf(this.volcano.x, this.volcano.z);
-      this.veg.clearArea(cx - 8, cz - 8, 17, 17);
+      // Clear only the steep core; preserve the forest against the planted foothills.
+      for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
+        if (dx * dx + dz * dz < 26) this.veg.clearArea(cx + dx, cz + dz, 1, 1);
+      }
     }
 
     this.brush = new THREE.Mesh(
