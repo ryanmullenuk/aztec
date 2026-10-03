@@ -43,35 +43,12 @@ function torchPole(b: GeoBuilder, x: number, z: number, h = 0.75, y0 = 0): THREE
   return new THREE.Vector3(x, y0 + h + 0.12, z);
 }
 
-/** The starting tribal fire: stone ring, crossed logs, seating and a painted totem. */
+/** The founding fire uses the village hearth at a scale that fits its original footprint. */
 export function campfireModel(): BuildingModel {
-  const b = new GeoBuilder();
-  const rng = new RNG(5);
-  for (let k = 0; k < 9; k++) {
-    const a = (k / 9) * Math.PI * 2;
-    b.add(lumpy(P.sphere(0.11, 1), 0.2, 50 + k, 0.7), { color: K.stoneDark }, M.t(Math.cos(a) * 0.38, 0.05, Math.sin(a) * 0.38));
-  }
-  for (let k = 0; k < 3; k++) {
-    b.add(P.cyl(0.04, 0.05, 0.55, 6), { color: K.timberDark }, M.t(0, 0.08, 0, Math.PI / 2, (k / 3) * Math.PI, 0.25));
-  }
-  // Seating logs.
-  for (let k = 0; k < 3; k++) {
-    const a = (k / 3) * Math.PI * 2 + 0.5;
-    b.add(P.cyl(0.09, 0.09, 0.7, 7), { color: K.timber }, M.t(Math.cos(a) * 0.95, 0.09, Math.sin(a) * 0.95, Math.PI / 2, 0, a));
-  }
-  // Totem pole.
-  const tx = -0.7, tz = -0.7;
-  const bands = [K.terracotta, K.jade, K.gold, K.timber, K.terracotta];
-  for (let k = 0; k < 5; k++) {
-    b.add(P.cyl(0.12, 0.13, 0.28, 8), { color: bands[k] }, M.t(tx, 0.14 + k * 0.28, tz));
-  }
-  b.add(P.box(0.6, 0.08, 0.12), { color: K.jade }, M.t(tx, 1.2, tz));
-  b.add(P.cone(0.14, 0.2, 8), { color: K.gold }, M.t(tx, 1.52, tz));
-  // Pots.
-  for (let k = 0; k < 2; k++) {
-    b.add(P.uvSphere(0.1, 8, 6), { color: K.terracotta }, M.t(0.7 + k * 0.2, 0.1, -0.5 + rng.next() * 0.1, 0, 0, 0, 1, 0.9, 1));
-  }
-  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.2, 0)], height: 1.6 };
+  const model = bonfireModel();
+  model.finished.scale(0.72, 0.85, 0.72);
+  model.height *= 0.85;
+  return model;
 }
 
 // ---------------- Village comforts ----------------
@@ -87,28 +64,47 @@ export function torchModel(): BuildingModel {
   return { finished: b.build(), torches: [new THREE.Vector3(0, 1.42, 0)], height: 1.5 };
 }
 
-/** Bonfire: a big stone-ringed fire of stacked logs with log benches all round. */
+/** Communal hearth: irregular stones, leaning split logs, benches and painted posts. */
 export function bonfireModel(): BuildingModel {
-  const b = new GeoBuilder();
-  // Beaten earth circle.
-  b.add(P.cyl(1.35, 1.4, 0.03, 18), { color: c(0x9a7a52) }, M.t(0, 0.015, 0));
-  for (let k = 0; k < 12; k++) {
-    const a = (k / 12) * Math.PI * 2;
-    b.add(lumpy(P.sphere(0.14, 1), 0.22, 90 + k, 0.7), { color: K.stoneDark }, M.t(Math.cos(a) * 0.55, 0.06, Math.sin(a) * 0.55));
+  const b = new GeoBuilder(), rng = new RNG(905);
+  b.add(lumpy(P.cyl(1.42, 1.46, 0.035, 22), 0.025, 74, 0.5), { color: c(0xa17b4e) }, M.t(0, 0.018, 0));
+  b.add(P.cyl(0.66, 0.7, 0.035, 16), { color: c(0x34261e) }, M.t(0, 0.04, 0));
+  for (let k = 0; k < 14; k++) {
+    const a = k / 14 * Math.PI * 2, r = rng.range(0.66, 0.73);
+    b.add(lumpy(P.sphere(rng.range(0.17, 0.22), 1), 0.22, 90 + k, 0.75),
+      { color: c(k % 3 ? 0x827b70 : 0xa39883) }, M.t(Math.cos(a) * r, 0.15, Math.sin(a) * r, 0, a, 0, 1.05, rng.range(0.8, 1.2), 0.85));
   }
-  // A teepee of logs.
-  for (let k = 0; k < 7; k++) {
-    const a = (k / 7) * Math.PI * 2;
-    b.add(P.cyl(0.045, 0.06, 0.95, 6), { color: k % 2 ? K.timberDark : c(0x3a2820) }, M.t(Math.cos(a) * 0.18, 0.36, Math.sin(a) * 0.18, Math.sin(a) * 0.45, 0, -Math.cos(a) * 0.45));
+  for (let k = 0; k < 9; k++) {
+    const a = k / 9 * Math.PI * 2, h = rng.range(0.85, 1.25);
+    // Tops lean inward, with uneven lengths and split angular faces.
+    b.add(P.cyl(0.055, 0.085, h, 5), { color: c(k % 3 ? 0x64391e : 0x39281d) },
+      M.t(Math.cos(a) * 0.23, h * 0.46 + 0.05, Math.sin(a) * 0.23, -Math.sin(a) * 0.4, 0, Math.cos(a) * 0.4));
   }
-  b.add(P.sphere(0.2, 0), { color: c(0xe8702a) }, M.t(0, 0.1, 0, 0, 0, 0, 1.4, 0.45, 1.4));
-  // Log benches.
-  for (let k = 0; k < 5; k++) {
-    const a = (k / 5) * Math.PI * 2 + 0.3;
-    b.add(P.cyl(0.11, 0.11, 0.95, 7), { color: K.timber }, M.t(Math.cos(a) * 1.15, 0.11, Math.sin(a) * 1.15, 0, Math.PI / 2 - a, Math.PI / 2));
+  for (let k = 0; k < 36; k++) {
+    const a = rng.range(0, Math.PI * 2), r = Math.sqrt(rng.next()) * 0.52;
+    b.add(P.sphere(rng.range(0.025, 0.06), 0), { color: c(k % 3 ? 0x502619 : 0xf99026) }, M.t(Math.cos(a) * r, 0.075, Math.sin(a) * r, 0, a, 0, 1, 0.5, 1));
   }
-  const fire = [new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(0.12, 0.2, 0.08), new THREE.Vector3(-0.1, 0.2, -0.06)];
-  return { finished: b.build(), torches: fire, height: 1.2 };
+  for (let k = 0; k < 6; k++) {
+    const a = k / 6 * Math.PI * 2, x = Math.cos(a) * 1.17, z = Math.sin(a) * 1.17;
+    b.add(P.cyl(0.115, 0.14, 0.92, 6), { color: K.timber }, M.t(x, 0.24, z, 0, Math.PI / 2 - a, Math.PI / 2));
+    for (const side of [-1, 1]) {
+      b.add(P.box(0.13, 0.2, 0.24), { color: K.timberDark }, M.t(x - Math.sin(a) * side * 0.31, 0.1, z + Math.cos(a) * side * 0.31, 0, -a, 0));
+    }
+  }
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2, x = Math.cos(a) * 1.24, z = Math.sin(a) * 1.24;
+    b.add(P.cyl(0.115, 0.14, 0.64, 7), { color: K.timberDark }, M.t(x, 0.32, z));
+    b.add(P.cyl(0.128, 0.132, 0.17, 7), { color: K.red }, M.t(x, 0.43, z));
+    for (let j = 0; j < 7; j++) {
+      const t = j / 7 * Math.PI * 2;
+      b.add(P.cone(0.035, 0.09, 3), { color: K.gold }, M.t(x + Math.cos(t) * 0.127, 0.43, z + Math.sin(t) * 0.127, 0, -t, 0));
+    }
+  }
+  for (let k = 0; k < 18; k++) {
+    const a = rng.range(0, Math.PI * 2), r = rng.range(0.86, 1.4);
+    b.add(P.sphere(rng.range(0.02, 0.055), 0), { color: K.stoneDark }, M.t(Math.cos(a) * r, 0.045, Math.sin(a) * r));
+  }
+  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.12, 0)], height: 1.8 };
 }
 
 /** Firepit: a stone-lined pit with a whole pig roasting on a spit between forked posts. */

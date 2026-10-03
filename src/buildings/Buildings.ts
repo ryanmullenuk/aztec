@@ -1,3 +1,4 @@
+import { villageFire } from './VillageFire';
 import * as THREE from 'three';
 import { BUILDINGS, BuildingDef, BuildingKey, ECONOMY, FARM, HOMES, JETTY, TEMPLE, FARM_TYPES, isFarm } from '../config';
 import { Economy, Cost } from '../economy/Economy';
@@ -9,7 +10,7 @@ import { RNG } from '../world/rng';
 import * as models from './models';
 
 /** Flame size per building, and the fires that burn day and night. */
-const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.8, bonfire: 3.2, firepit: 3.0, torch: 1.25, greathall: 1.45, watchtower: 1.1 };
+const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 0.85, bonfire: 1, firepit: 3.0, torch: 1.25, greathall: 1.45, watchtower: 1.1 };
 const ALWAYS_LIT = new Set<BuildingKey>(['campfire', 'bonfire', 'firepit', 'greathall']);
 import { Particles } from '../render/Particles';
 
@@ -661,10 +662,14 @@ export class BuildingSystem {
   }
 
   private setTorches(b: Building, points: THREE.Vector3[]): void {
-    for (const t of b.torches) b.group.remove(t.flame);
+    for (const t of b.torches) {
+      b.group.remove(t.flame);
+      if (t.flame.geometry !== this.flameGeo) t.flame.geometry.dispose();
+    }
     b.torches = [];
     for (const p of points) {
-      const flame = new THREE.Mesh(this.flameGeo, flameMaterial());
+      const flame = b.key === 'campfire' || b.key === 'bonfire'
+        ? villageFire() : new THREE.Mesh(this.flameGeo, flameMaterial());
       flame.position.copy(p);
       flame.scale.setScalar(FLAME_SCALE[b.key] ?? 1);
       b.group.add(flame);
