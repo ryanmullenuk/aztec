@@ -45,20 +45,20 @@ export class VolcanoCycle {
 
 /** Uneven slopes and a broken crater lip shared by the rock and lava geometry. */
 export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
-  const ridge = Math.sin(angle * 5 + 0.7) * 0.42 + Math.sin(angle * 9 - 0.8) * 0.2;
-  const radius = 2.25 + 5.7 * Math.pow(f, 1.28);
-  const rough = (Math.sin(angle * 13 + f * 8) + Math.cos(angle * 7 - f * 14)) * 0.11;
-  const r = radius + ridge * Math.sin(Math.PI * f) + rough * Math.sin(Math.PI * f);
-  // A breached lip provides a natural outlet for the primary lava channel.
-  const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 28) * 0.7;
-  const height = 9.6 * (1 - f) + (Math.sin(angle * 3) * 0.35 + Math.sin(angle * 7) * 0.18 - notch) * (1 - f)
-    + ridge * Math.sin(Math.PI * f) * 0.48;
+  const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
+  const radius = 2.85 + 5.1 * Math.pow(f, 1.55);
+  const r = radius + ridge * Math.sin(Math.PI * f);
+  // Steep fluted walls open onto a broad, asymmetric apron.
+  const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
+  const lip = Math.sin(angle * 7) * 0.32 + Math.sin(angle * 13) * 0.21 - notch;
+  const height = 10.2 * Math.pow(1 - f, 1.35) + lip * (1 - f)
+    + ridge * Math.sin(Math.PI * f) * 0.8;
   return new THREE.Vector3(Math.cos(angle) * r + 0.38 * (1 - f), height, Math.sin(angle) * r);
 }
 
 export function volcanoRockGeometry(): THREE.BufferGeometry {
   const positions: number[] = [], colours: number[] = [], indices: number[] = [];
-  const sides = 48, rings = 20;
+  const sides = 64, rings = 20;
   const dark = new THREE.Color(0x38332f), ash = new THREE.Color(0x766b5b);
   // Lower flank -> lip -> deep inner crater -> closed rocky floor.
   for (let j = 0; j <= rings + 5; j++) for (let i = 0; i <= sides; i++) {
@@ -68,9 +68,10 @@ export function volcanoRockGeometry(): THREE.BufferGeometry {
     else {
       const t = (j - rings) / 5;
       point = volcanoSurface(0, angle);
-      point.x = 0.38 + (point.x - 0.38) * (1 - t);
-      point.z *= 1 - t;
-      point.y = point.y * (1 - t) + 7.0 * t;
+      const innerRadius = t < 1 ? 1 - t * 0.48 : 0;
+      point.x = 0.38 + (point.x - 0.38) * innerRadius;
+      point.z *= innerRadius;
+      point.y = point.y * (1 - t) + 7.2 * t;
     }
     positions.push(point.x, point.y, point.z);
     const strata = 0.36 + Math.sin(point.y * 3.5 + Math.sin(angle * 6) * 0.8) * 0.09;
@@ -87,6 +88,12 @@ export function volcanoRockGeometry(): THREE.BufferGeometry {
   g.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
   g.setIndex(indices); g.computeVertexNormals();
   return g;
+}
+
+/** One breached outlet splits into three channels across the lower apron. */
+export function volcanoChannel(f: number, branch: number): number {
+  const fork = Math.max(0, (f - 0.35) / 0.65);
+  return 0.35 + (branch - 1) * 0.52 * fork * fork + Math.sin(f * 10) * 0.045 * f;
 }
 
 export class Volcano {
@@ -139,6 +146,28 @@ export class Volcano {
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
     mountain.castShadow = true; mountain.receiveShadow = true;
     this.group.add(mountain);
+    // Batched angular outcrops and scrub nest the mountain into its jungle island.
+    const rng = new RNG(w.seed + 9817), dummy = new THREE.Object3D();
+    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+    const outcrops = new THREE.InstancedMesh(rockGeo,
+      new THREE.MeshStandardMaterial({ color: 0x696354, roughness: 1, flatShading: true }), 46);
+    const shrubs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+      new THREE.MeshStandardMaterial({ color: 0x56742d, roughness: 1, flatShading: true }), 110);
+    for (const [mesh, vegetation] of [[outcrops, false], [shrubs, true]] as const) {
+      for (let i = 0; i < mesh.count; i++) {
+        const f = rng.range(vegetation ? 0.52 : 0.25, 0.98);
+        // Leave the lava apron bare while the opposite flanks retain vegetation.
+        const angle = rng.range(1.2, Math.PI * 2 - 0.5);
+        const point = volcanoSurface(f, angle);
+        const size = rng.range(vegetation ? 0.18 : 0.25, vegetation ? 0.45 : 0.65);
+        dummy.position.copy(point); dummy.position.y += vegetation ? 0.12 : size * 0.35;
+        dummy.rotation.set(rng.range(-0.15, 0.15), angle, rng.range(-0.2, 0.2));
+        dummy.scale.set(size, size * (vegetation ? 0.65 : rng.range(1.8, 3.6)), size);
+        dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
+        mesh.setColorAt(i, new THREE.Color(vegetation ? 0x668538 : 0x827765).multiplyScalar(rng.range(0.65, 1.15)));
+      }
+      mesh.castShadow = true; mesh.receiveShadow = true; this.group.add(mesh);
+    }
     // Dark cooling crust breaks the molten surface into moving orange fissures.
     this.glow.onBeforeCompile = shader => {
       shader.uniforms.uLavaTime = this.lavaTime;
@@ -157,10 +186,10 @@ export class Volcano {
         totalEmissiveRadiance *= molten;
       `);
     };
-    this.lava = new THREE.Group(); this.group.add(this.lava);
-    this.pool = new THREE.Mesh(new THREE.CircleGeometry(1.35, 36).rotateX(-Math.PI / 2), this.glow);
+    this.lava = new THREE.Group(); this.lava.name = 'Active lava'; this.group.add(this.lava);
+    this.pool = new THREE.Mesh(new THREE.CircleGeometry(2.15, 48).rotateX(-Math.PI / 2), this.glow);
     // Lake sits well below the broken rim.
-    this.pool.position.set(0.38, 7.9, 0); this.lava.add(this.pool);
+    this.pool.position.set(0.38, 8.8, 0); this.lava.add(this.pool);
     const bubbleGeo = new THREE.IcosahedronGeometry(0.22, 1);
     for (let i = 0; i < 9; i++) {
       const b = new THREE.Mesh(bubbleGeo, this.glow); this.bubbles.push(b); this.lava.add(b);
@@ -169,8 +198,8 @@ export class Volcano {
       const positions: number[] = [], indices: number[] = [];
       for (let n = 0; n <= 64; n++) {
         const f = n / 64;
-        const angle = 0.35 + k * 2.25 + Math.sin(f * 9 + k) * 0.055 * f;
-        const width = (0.11 + 0.12 * Math.sin(f * 7 + k) ** 2) / (2.25 + f * 5.7);
+        const angle = volcanoChannel(f, k);
+        const width = (0.24 + 0.10 * Math.sin(f * 7) ** 2) / (2.85 + 5.1 * f ** 1.55);
         for (const side of [-1, 1]) {
           const point = volcanoSurface(f, angle + width * side);
           point.y += 0.11;
@@ -181,6 +210,20 @@ export class Volcano {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geometry.setIndex(indices); geometry.computeVertexNormals();
+      // Cooled basalt beds remain visible throughout dormancy.
+      const bedGeometry = geometry.clone();
+      const bedPositions = bedGeometry.getAttribute('position');
+      for (let n = 0; n <= 64; n++) {
+        const f = n / 64, angle = volcanoChannel(f, k);
+        const width = 0.5 / (2.85 + 5.1 * f ** 1.55);
+        for (let side = 0; side < 2; side++) {
+          const p = volcanoSurface(f, angle + (side * 2 - 1) * width);
+          bedPositions.setXYZ(n * 2 + side, p.x, p.y + 0.055, p.z);
+        }
+      }
+      bedGeometry.computeVertexNormals();
+      const bed = new THREE.Mesh(bedGeometry, new THREE.MeshStandardMaterial({ color: 0x282824, roughness: 1 }));
+      bed.name = 'Cooled lava channel'; bed.receiveShadow = true; this.group.add(bed);
       const stream = new THREE.Mesh(geometry, this.glow);
       this.streams.push(stream); this.lava.add(stream);
     }
@@ -200,6 +243,7 @@ export class Volcano {
       const m = new THREE.Sprite(new THREE.SpriteMaterial({
         map: smokeMap, color: 0x777675, transparent: true, opacity: 0, depthWrite: false, fog: true,
       }));
+      m.name = 'Volcanic smoke';
       this.smoke.push(m); this.group.add(m);
     }
     this.animate(0);
@@ -225,10 +269,10 @@ export class Volcano {
     this.lavaTime.value = t; this.lavaHeat.value = strength;
     this.glow.emissiveIntensity = strength * (2.4 + Math.sin(t * 4) * 0.3);
     this.glow.color.setRGB(0.12 + strength * 0.88, 0.035 + strength * 0.3, 0.015);
-    this.pool.position.y = 7.9 + Math.sin(t * 1.7) * 0.07 * strength;
+    this.pool.position.y = 8.8 + Math.sin(t * 1.7) * 0.07 * strength;
     this.bubbles.forEach((b, i) => {
-      const a = i * 2.4, r = 0.3 + (i % 3) * 0.3;
-      b.position.set(0.38 + Math.cos(a) * r, 7.86 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.35 * strength, Math.sin(a) * r);
+      const a = i * 2.4, r = 0.5 + (i % 3) * 0.5;
+      b.position.set(0.38 + Math.cos(a) * r, 8.76 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.35 * strength, Math.sin(a) * r);
       b.scale.setScalar(0.6 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.65);
     });
     this.streams.forEach((m, i) => {

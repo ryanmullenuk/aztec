@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Volcano, VolcanoCycle } from '../src/entities/Volcano';
+import { Volcano, VolcanoCycle, volcanoRockGeometry } from '../src/entities/Volcano';
 import { World } from '../src/world/World';
 import { generateIsland } from '../src/world/generator';
 import { growIslets } from '../src/world/islets';
@@ -38,4 +38,29 @@ test('volcano is placed on the second island and reserves its footprint', () => 
   const saved = v.save()!;
   const again = new Volcano(w, saved);
   assert.equal(again.x, v.x); assert.equal(again.z, v.z);
+});
+
+test('crater geometry has finite positions and normals', () => {
+  const geometry = volcanoRockGeometry();
+  for (const name of ['position', 'normal']) {
+    assert.ok(Array.from(geometry.getAttribute(name).array).every(Number.isFinite));
+  }
+  geometry.dispose();
+});
+test('cooling retains the mountain and basalt channels but removes lava and smoke', () => {
+  const w = new World(); generateIsland(w, WORLD.islandSeed); growIslets(w);
+  const v = new Volcano(w);
+  const staticCount = v.group.children.length;
+  v.update(190);
+  assert.equal(v.state.phase, 'erupting');
+  assert.equal(v.group.getObjectByName('Active lava')!.visible, true);
+  assert.equal(v.state.calm(() => true), true);
+  v.update(25);
+  assert.equal(v.state.phase, 'dormant');
+  assert.equal(v.group.children.length, staticCount);
+  assert.equal(v.group.getObjectByName('Active lava')!.visible, false);
+  const beds = v.group.children.filter(o => o.name === 'Cooled lava channel');
+  assert.equal(beds.length, 3);
+  assert.ok(beds.every(o => o.visible));
+  assert.ok(v.group.children.filter(o => o.name === 'Volcanic smoke').every(o => !o.visible));
 });
