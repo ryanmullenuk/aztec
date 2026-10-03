@@ -54,6 +54,7 @@ interface Pose {
   shrugL: number;
   shrugR: number;
   lying: boolean;
+  flatBed: boolean;
 }
 
 const tri = (s: number) => (s < 0.7 ? s / 0.7 : 1 - (s - 0.7) / 0.3);
@@ -64,7 +65,7 @@ function blankPose(): Pose {
   return {
     drop: 0, bob: 0, lean: 0, twist: 0, headX: 0, headY: 0, headZ: 0, thL: 0, thR: 0, shL: 0.05, shR: 0.05,
     uaLx: 0, uaLz: 0.16, uaRx: 0, uaRz: 0.16, faL: -0.14, faR: -0.14, hipYaw: 0, roll: 0, hipPitch: 0, spineX: 0, chestX: 0,
-    wrLx: 0.08, wrLz: 0, wrRx: 0.08, wrRz: 0, ftL: 0, ftR: 0, spread: 0, shrugL: 0, shrugR: 0, lying: false,
+    wrLx: 0.08, wrLz: 0, wrRx: 0.08, wrRz: 0, ftL: 0, ftR: 0, spread: 0, shrugL: 0, shrugR: 0, lying: false, flatBed: false,
   };
 }
 
@@ -96,10 +97,18 @@ function stride(p: Pose, ph: number, amp: number, knee: number, stance: number, 
 }
 
 /** Procedural animation for every islander activity. */
-function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
+export function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
   const t = isl.animT;
   const p = blankPose();
   const sk = skel ?? SKELETON[female ? 'f' : 'm'];
+  // Bed care is authoritative even if a previous walking animation is still set.
+  if (isl.task?.kind === 'heal' && isl.task.phase === 1 && isl.task.stage === 3 && (isl.task.slot ?? -1) >= 0 && isl.condition !== 'well') {
+    p.lying = true; p.flatBed = true;
+    p.thL = p.thR = p.shL = p.shR = 0;
+    p.uaLz = p.uaRz = 0.06; p.faL = p.faR = -0.08;
+    p.bob = Math.sin(t * 1.2) * 0.002;
+    return p;
+  }
   switch (isl.anim) {
     case 'idle': {
       // Breathing, a slow weight shift onto one hip, relaxed arms, looking around.
@@ -365,6 +374,22 @@ function poseFor(isl: Islander, female: boolean, skel?: Skeleton): Pose {
       p.shL = 0.15;
       break;
     }
+    case 'dance': {
+      const beat = t * 4.4 + isl.id * 0.8;
+      p.bob = Math.abs(Math.sin(beat)) * 0.045;
+      p.hipYaw = Math.sin(beat * 0.5) * 0.20;
+      p.roll = Math.sin(beat) * 0.06;
+      p.thL = Math.max(0, Math.sin(beat)) * -0.22;
+      p.thR = Math.max(0, -Math.sin(beat)) * -0.22;
+      p.shL = Math.max(0, Math.sin(beat)) * 0.30;
+      p.shR = Math.max(0, -Math.sin(beat)) * 0.30;
+      p.uaLx = -0.6 + Math.sin(beat * 0.5) * 0.25;
+      p.uaRx = -0.6 - Math.sin(beat * 0.5) * 0.25;
+      p.uaLz = p.uaRz = 0.45;
+      p.faL = p.faR = -0.9;
+      p.headY = Math.sin(beat * 0.5) * 0.12;
+      break;
+    }
     case 'sleep':
       // Curled on the side a little, knees drawn up, breathing slowly.
       p.lying = true;
@@ -547,7 +572,7 @@ export class IslanderRig {
     const J = model.joint, L = model.len, W = this.W;
     const hips = J.hips;
     if (p.lying) {
-      this.rot(W[BI.hips], 0, 0.16 + p.bob, 0.35, -Math.PI / 2, 0, 0.3);
+      this.rot(W[BI.hips], 0, 0.16 + p.bob, 0.35, -Math.PI / 2, 0, p.flatBed ? 0 : 0.3);
     } else {
       const hipDY = J.thighL.y - hips.y;
       // The hips sit where no leg dips below the ground: the leg reaching lowest touches it.

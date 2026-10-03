@@ -114,13 +114,22 @@ export function bonfireModel(): BuildingModel {
 /** Firepit: a stone-lined pit with a whole pig roasting on a spit between forked posts. */
 export function firepitModel(): BuildingModel {
   const b = new GeoBuilder();
-  for (let k = 0; k < 10; k++) {
-    const a = (k / 10) * Math.PI * 2;
-    b.add(lumpy(P.sphere(0.12, 1), 0.2, 120 + k, 0.65), { color: K.stoneDark }, M.t(Math.cos(a) * 0.5, 0.05, Math.sin(a) * 0.36));
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * Math.PI * 2;
+    b.add(lumpy(P.sphere(0.15, 1), 0.2, 120 + k, 0.65), { color: K.stoneDark }, M.t(Math.cos(a) * 0.68, 0.09, Math.sin(a) * 0.52));
   }
-  b.add(P.cyl(0.45, 0.48, 0.03, 12), { color: c(0x3a2a22) }, M.t(0, 0.015, 0, 0, 0, 0, 1, 1, 0.72));
+  b.add(P.cyl(0.64, 0.68, 0.05, 16), { color: c(0x3a2a22) }, M.t(0, 0.015, 0, 0, 0, 0, 1, 1, 0.72));
   for (let k = 0; k < 4; k++) b.add(P.cyl(0.035, 0.035, 0.5, 5), { color: c(0x2e2018) }, M.t(0, 0.06, 0, Math.PI / 2, (k / 4) * Math.PI, 0));
   b.add(P.sphere(0.14, 0), { color: c(0xe8702a) }, M.t(0, 0.08, 0, 0, 0, 0, 1.6, 0.4, 1.1));
+  // Small glowing coals and charred split logs give the enlarged hearth depth.
+  const coals = new RNG(772);
+  for (let k = 0; k < 36; k++) {
+    const a = coals.range(0, Math.PI * 2), r = Math.sqrt(coals.next()) * 0.48;
+    b.add(P.sphere(coals.range(0.025, 0.055), 0), { color: c(k % 3 ? 0x72351c : 0xfda13b) }, M.t(Math.cos(a) * r, 0.07, Math.sin(a) * r * 0.72, 0, a, 0, 1, 0.55, 1));
+  }
+  for (let k = 0; k < 5; k++) {
+    b.add(P.cyl(0.055, 0.07, 0.78, 6), { color: K.timberDark }, M.t(0, 0.11 + k * 0.018, 0, Math.PI / 2, k * 1.7, 0.1));
+  }
   // Forked posts and the spit (low, so the pig hangs just above the embers).
   const spitY = 0.42;
   for (const x of [-0.66, 0.66]) {
@@ -144,7 +153,7 @@ export function firepitModel(): BuildingModel {
   // A basket and a pot beside it.
   b.add(P.cyl(0.14, 0.11, 0.14, 8), { color: K.rope }, M.t(-0.75, 0.07, 0.6));
   b.add(P.uvSphere(0.11, 8, 6), { color: K.terracotta }, M.t(0.8, 0.1, 0.6, 0, 0, 0, 1, 0.9, 1));
-  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.18, 0)], height: 0.8 };
+  return { finished: b.build(), torches: [new THREE.Vector3(0, 0.20, 0), new THREE.Vector3(-0.22, 0.16, 0.04), new THREE.Vector3(0.20, 0.15, -0.08)], height: 1.3 };
 }
 
 /** Well: a round stone well with a timber frame, rope and bucket under a little tiled roof. */

@@ -11,6 +11,7 @@ import { World } from '../world/World';
 import { escortSurfaceY } from '../entities/livestockTravel';
 import { SpatialHash } from '../world/SpatialHash';
 import { Pathfinder, PathOptions } from './Pathfinder';
+import { avoidCrowd } from './CrowdAvoidance';
 
 /** Hooks into systems built later (wildlife, boats, audio) so the colony can use them if present. */
 export interface ColonyHooks {
@@ -59,6 +60,7 @@ export class Colony {
   private houseTimer = 0;
   private wearTimer = 0;
   private healthTimer = 0;
+  private avoidanceGrid = new SpatialHash<Islander>(2);
   wearDirty = false;
   private blacklist = new Map<number, number>();
   private usedNames = new Set<string>();
@@ -159,18 +161,22 @@ export class Colony {
       const pv = this.world.path[cell];
       if (pv) speed *= pv === 1 ? ISLANDER.pathSpeed : 1 + (ISLANDER.pathSpeed - 1) * PATHS.dirtSpeedShare;
     }
-    const step = speed * dt;
-    if (d <= step || d < 0.05) {
-      isl.x = wp.x;
-      isl.z = wp.z;
-      isl.pathIdx++;
-    } else {
-      isl.x += (dx / d) * step;
-      isl.z += (dz / d) * step;
-      this.faceTo(isl, dx, dz, dt);
+    const velocity = avoidCrowd(isl, dx, dz, speed, this.avoidanceGrid, (nx, nz) => {
+      const next = this.world.cellIndexAt(nx, nz);
+      return next >= 0 && this.pf.walkable(next, opts.allowBuilding, opts.allowWater)
+        && Math.abs((opts.allowWater ? escortSurfaceY(this.world, nx, nz, 0.48) : this.world.groundY(nx, nz)) - isl.y) < 0.65;
+    });
+    const actualSpeed = Math.hypot(velocity.x, velocity.z);
+    const aligned = actualSpeed > 0 && (velocity.x * dx + velocity.z * dz) / (actualSpeed * (d || 1)) > 0.99;
+    if (d < 0.05 || (aligned && d <= actualSpeed * dt)) {
+      isl.x = wp.x; isl.z = wp.z; isl.pathIdx++;
+    } else if (actualSpeed > 0) {
+      const moveDt = Math.min(dt, d / actualSpeed);
+      isl.x += velocity.x * moveDt; isl.z += velocity.z * moveDt;
+      this.faceTo(isl, velocity.x, velocity.z, dt);
     }
-    isl.anim = isl.carry ? 'carry' : run ? 'run' : 'walk';
-    isl.speed = speed;
+    isl.anim = actualSpeed < 0.01 ? 'idle' : isl.carry ? 'carry' : run ? 'run' : 'walk';
+    isl.speed = actualSpeed;
     // Wear paths into the grass.
     if (cell >= 0 && cell !== isl.lastCell) {
       isl.lastCell = cell;
@@ -566,10 +572,11 @@ export class Colony {
     }
     // Evenings: gather round a bonfire to sing and tell stories before bed.
     const hr = this.time.hour;
-    if (!god && isl.role !== 'warrior' && isl.lastBonfire !== this.time.day && hr >= COMFORTS.bonfireHours[0] && hr < COMFORTS.bonfireHours[1] && isl.rest > 0.15) {
+    if (isl.role !== 'warrior' && isl.lastBonfire !== this.time.day && hr >= COMFORTS.bonfireHours[0] && hr < COMFORTS.bonfireHours[1] && isl.rest > 0.15) {
       let fire: Building | null = null, fd = Infinity;
       for (const b of this.bld.list) {
-        if (b.key !== 'bonfire' || !b.complete) continue;
+        if (!['bonfire', 'firepit', 'campfire'].includes(b.key) || !b.complete) continue;
+        if (this.list.filter(o => o.task?.kind === 'bonfire' && o.task.target === b.id).length >= 12) continue;
         const d = (b.x - isl.x) ** 2 + (b.z - isl.z) ** 2;
         if (d < fd) {
           fd = d;
@@ -577,9 +584,18 @@ export class Colony {
         }
       }
       if (fire && fd < 70 * 70) {
-        isl.lastBonfire = this.time.day;
-        const a = this.rnd() * Math.PI * 2;
-        return this.setTask(isl, 'bonfire', fire.id, fire.x + Math.cos(a) * 1.25, fire.z + Math.sin(a) * 1.25);
+        const taken = new Set(this.list.filter(o => o.task?.kind === 'bonfire' && o.task.target === fire!.id).map(o => o.task!.slot));
+        for (let k = 0; k < 12; k++) {
+          const slot = (isl.id + k) % 12, a = slot / 12 * Math.PI * 2;
+          if (taken.has(slot)) continue;
+          const x = fire.x + Math.cos(a) * 1.75, z = fire.z + Math.sin(a) * 1.75;
+          const cell = this.world.cellIndexAt(x, z);
+          if (cell < 0 || !this.pf.walkable(cell)) continue;
+          isl.lastBonfire = this.time.day;
+          this.setTask(isl, 'bonfire', fire.id, x, z);
+          isl.task!.slot = slot;
+          return;
+        }
       }
     }
     // Warriors keep watch through the night, until they tire.
@@ -1331,15 +1347,16 @@ export class Colony {
         if (!b || !b.complete) return this.releaseTask(isl);
         isl.tool = 'none';
         if (t.stage < 2) {
-          const r = this.travel(isl, dt, t.x, t.z, { goalRadius: 0.6 });
+          const r = this.travel(isl, dt, t.x, t.z, { goalRadius: 0.10 });
           if (r === 'failed') return this.fail(isl);
           if (r !== 'arrived') return;
           t.stage = 2;
           t.timer = COMFORTS.bonfireSeconds[0] + this.rnd() * (COMFORTS.bonfireSeconds[1] - COMFORTS.bonfireSeconds[0]);
         }
-        // Sit facing the fire; now and then someone stands to dance or pray.
+        // Dance and rest in individual places around the village fire.
         this.faceTo(isl, b.x - isl.x, b.z - isl.z, dt);
-        isl.anim = Math.sin(t.timer * 0.7 + isl.id) > 0.85 ? 'pray' : 'eat';
+        isl.anim = Math.sin(t.timer * 0.18 + isl.id * 1.7) > -0.4 ? 'dance' : 'sit';
+        isl.speed = 0;
         isl.happy = Math.min(1, isl.happy + COMFORTS.bonfireHappy * dt);
         this.eco.add('belief', COMFORTS.bonfireBelief * dt);
         t.timer -= dt;
@@ -2001,6 +2018,9 @@ export class Colony {
     isl.sleeping = true;
     isl.safe = true;
     isl.anim = 'sleep';
+    isl.speed = 0;
+    isl.path = null;
+    isl.pathPending = false;
     const k = t.slot ?? -1;
     if (k >= 0) {
       const bed = HEAL.beds[k];
@@ -2150,6 +2170,9 @@ export class Colony {
     }
 
     let happy = 0;
+    // Seed all neighbours before anyone moves, including those later in the update order.
+    this.avoidanceGrid.clear();
+    for (const person of this.list) if (!person.hidden) this.avoidanceGrid.insert(person);
     this.grid.clear();
     for (const isl of this.list) {
       isl.animT += dt;
@@ -2232,7 +2255,7 @@ export class Colony {
       if (px === 0 && pz === 0) continue;
       const nx = a.x + px * k, nz = a.z + pz * k;
       const from = W.cellIndexAt(a.x, a.z), to = W.cellIndexAt(nx, nz);
-      if (to < 0 || !W.isLandCell(to)) continue;
+      if (to < 0 || (!W.isLandCell(to) && !W.bridge[to]) || W.blocked(to)) continue;
       if (to !== from && W.occ[to] && W.occ[to] !== (from >= 0 ? W.occ[from] : 0) && !W.passable(W.occ[to] - 1)) continue;
       a.x = nx;
       a.z = nz;
@@ -2280,7 +2303,7 @@ export class Colony {
       case 'smoke': return 'Smoking fish and meat';
       case 'pray': return 'Praying at the temple';
       case 'eat': return 'Eating';
-      case 'bonfire': return 'Singing and telling stories at the bonfire';
+      case 'bonfire': return 'Gathering and dancing around the village fire';
       case 'flee': return isl.hidden ? 'Sheltering indoors' : 'Running for shelter';
       case 'hall':
         if (isl.task!.phase === 1) return isl.task!.stage === 3 ? 'Sheltering in the Great Hall' : 'Running to the Great Hall for shelter';

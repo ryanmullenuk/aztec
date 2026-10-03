@@ -33,7 +33,8 @@ export type Anim =
   | 'sleep'
   | 'eat'
   | 'wave'
-  | 'sit';
+  | 'sit'
+  | 'dance';
 
 export type Tool = 'none' | 'axe' | 'pick' | 'hoe' | 'spear' | 'hammer';
 

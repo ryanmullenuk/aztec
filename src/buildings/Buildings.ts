@@ -9,7 +9,7 @@ import { RNG } from '../world/rng';
 import * as models from './models';
 
 /** Flame size per building, and the fires that burn day and night. */
-const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.4, bonfire: 3.2, firepit: 1.7, torch: 1.25, greathall: 1.45, watchtower: 1.1 };
+const FLAME_SCALE: Partial<Record<BuildingKey, number>> = { campfire: 2.8, bonfire: 3.2, firepit: 3.0, torch: 1.25, greathall: 1.45, watchtower: 1.1 };
 const ALWAYS_LIT = new Set<BuildingKey>(['campfire', 'bonfire', 'firepit', 'greathall']);
 import { Particles } from '../render/Particles';
 
