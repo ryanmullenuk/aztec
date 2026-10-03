@@ -105,21 +105,39 @@ export function volcanoChannel(f: number, branch: number): number {
   return 0.35 + (branch - 1) * 0.52 * fork * fork + Math.sin(f * 10) * 0.045 * f;
 }
 
+// Smooth seeded value noise avoids repeating stripes in dirt and molten surfaces.
+const SURFACE_NOISE = `
+float surfaceHash(vec3 p) {
+  p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+float surfaceNoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(surfaceHash(i), surfaceHash(i+vec3(1,0,0)), f.x),
+    mix(surfaceHash(i+vec3(0,1,0)), surfaceHash(i+vec3(1,1,0)), f.x), f.y),
+    mix(mix(surfaceHash(i+vec3(0,0,1)), surfaceHash(i+vec3(1,0,1)), f.x),
+    mix(surfaceHash(i+vec3(0,1,1)), surfaceHash(i+vec3(1,1,1)), f.x), f.y), f.z);
+}
+`;
+
 /** Fine stone grain fades with pixel footprint so distant cliffs do not sparkle. */
 function texturedRock(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
   material.onBeforeCompile = shader => {
     shader.vertexShader = 'varying vec3 vRockPoint;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
       '#include <begin_vertex>\nvRockPoint = position;');
-    shader.fragmentShader = 'varying vec3 vRockPoint;\n' + shader.fragmentShader;
+    shader.fragmentShader = 'varying vec3 vRockPoint;\n' + SURFACE_NOISE + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
       #include <color_fragment>
-      vec3 cell = floor(vRockPoint * 65.0);
-      float grit = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-      float fade = 1.0 - smoothstep(0.012, 0.065, length(fwidth(vRockPoint)));
-      float mottling = sin(vRockPoint.x * 7.0 + sin(vRockPoint.z * 5.0))
-        * sin(vRockPoint.y * 9.0 + vRockPoint.z * 3.0);
-      diffuseColor.rgb *= 0.94 + mottling * 0.10 + (grit - 0.5) * 0.35 * fade;
+      float footprint = length(fwidth(vRockPoint));
+      float fineFade = 1.0 - smoothstep(0.008, 0.04, footprint);
+      float coarseFade = 1.0 - smoothstep(0.04, 0.18, footprint);
+      float soil = surfaceNoise(vRockPoint * 3.8);
+      float aggregate = surfaceNoise(vRockPoint * 17.0);
+      float grit = surfaceNoise(vRockPoint * 85.0);
+      vec3 dirtTint = mix(vec3(0.69, 0.66, 0.60), vec3(1.13, 1.10, 1.03), soil);
+      diffuseColor.rgb *= dirtTint * (0.86 + aggregate * 0.28
+        + (aggregate - 0.5) * 0.42 * coarseFade + (grit - 0.5) * 0.72 * fineFade);
     `);
   };
   return material;
@@ -139,6 +157,9 @@ export class Volcano {
   private lavaHeat = { value: 0 };
   private streams: THREE.Mesh[] = [];
   private bubbles: THREE.Mesh[] = [];
+  private flowBlobs!: THREE.InstancedMesh;
+  private blobTransform = new THREE.Object3D();
+  private blobUp = new THREE.Vector3(0, 1, 0);
   private readonly glow = new THREE.MeshStandardMaterial({ color: 0xff6b13, emissive: 0xff3800, emissiveIntensity: 2.7, roughness: 0.7 });
   notify: (message: string) => void = () => {};
 
@@ -259,15 +280,18 @@ export class Volcano {
       shader.vertexShader = 'varying vec3 vLavaPosition;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
         '#include <begin_vertex>\nvLavaPosition = position;');
-      shader.fragmentShader = 'varying vec3 vLavaPosition; uniform float uLavaTime; uniform float uLavaHeat;\n' + shader.fragmentShader;
+      shader.fragmentShader = 'varying vec3 vLavaPosition; uniform float uLavaTime; uniform float uLavaHeat;\n' + SURFACE_NOISE + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
         #include <emissivemap_fragment>
-        vec2 lp = vLavaPosition.xz * 2.8 + vec2(uLavaTime * 0.035, -uLavaTime * 0.06);
-        float fracture = abs(sin(lp.x * 3.0 + sin(lp.y * 2.5)) * sin(lp.y * 3.2 + cos(lp.x)));
-        float crack = 1.0 - smoothstep(0.04, 0.24, fracture);
-        float molten = (0.16 + 0.84 * crack) * uLavaHeat;
-        diffuseColor.rgb = mix(vec3(0.075, 0.023, 0.009), diffuseColor.rgb, molten);
-        totalEmissiveRadiance *= molten;
+        // Radial advection travels from the crater towards the foot of each slope.
+        float radius = length(vLavaPosition.xz - vec2(0.38, 0.0));
+        vec3 flow = vec3(radius * 1.8 - uLavaTime * 0.30,
+          atan(vLavaPosition.z, vLavaPosition.x - 0.38) * 3.0, vLavaPosition.y * 0.14);
+        vec3 warp = vec3(surfaceNoise(flow * 0.7), surfaceNoise(flow * 0.6 + 17.2), 0.0);
+        float blobs = surfaceNoise(flow + warp * 1.8);
+        float molten = smoothstep(0.24, 0.69, blobs) * uLavaHeat;
+        diffuseColor.rgb = mix(vec3(0.07, 0.022, 0.008), vec3(1.0, 0.27, 0.025), molten);
+        totalEmissiveRadiance *= (0.20 + 0.80 * molten) * uLavaHeat;
       `);
     };
     this.lava = new THREE.Group(); this.lava.name = 'Active lava'; this.group.add(this.lava);
@@ -311,6 +335,10 @@ export class Volcano {
       const stream = new THREE.Mesh(geometry, this.glow);
       this.streams.push(stream); this.lava.add(stream);
     }
+    this.flowBlobs = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 6), this.glow, 24);
+    this.flowBlobs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.flowBlobs.frustumCulled = false;
+    this.flowBlobs.name = 'Downhill molten lobes'; this.lava.add(this.flowBlobs);
     // Soft particles overlap into a billowing plume, fading before they respawn.
     const pixels = new Uint8Array(64 * 64 * 4);
     for (let py = 0; py < 64; py++) for (let px = 0; px < 64; px++) {
@@ -365,6 +393,22 @@ export class Volcano {
       m.geometry.setDrawRange(0, Math.floor(progress * 64) * 6);
       m.visible = progress > 0 && (i === 0 || strength > 0.3);
     });
+    if (strength > 0) for (let i = 0; i < 24; i++) {
+      const branch = i % 3;
+      const f = (t * (0.021 + (i % 5) * 0.0017) + i * 0.381966) % 1;
+      const angle = volcanoChannel(f, branch);
+      const point = volcanoSurface(f, angle);
+      const tangent = volcanoSurface(f, angle + 0.001).sub(point);
+      const downhill = volcanoSurface(Math.min(1, f + 0.001), angle).sub(point);
+      const normal = tangent.cross(downhill).normalize();
+      this.blobTransform.position.copy(point).addScaledVector(normal, 0.11);
+      this.blobTransform.quaternion.setFromUnitVectors(this.blobUp, normal);
+      const front = phase === 'erupting' ? Math.max(0, Math.min(1, (65 - this.state.remaining - branch * 5) / 22)) : 1;
+      const size = f < front ? Math.sin(Math.PI * f) * (0.22 + (i % 4) * 0.04) * strength : 0;
+      this.blobTransform.scale.set(size, size * 0.48, size * 1.5);
+      this.blobTransform.updateMatrix(); this.flowBlobs.setMatrixAt(i, this.blobTransform.matrix);
+    }
+    this.flowBlobs.instanceMatrix.needsUpdate = strength > 0;
     this.smoke.forEach((m, i) => {
       const f = ((t * 0.045 + i / 28) % 1);
       m.position.set(0.38 + f * f * 6 + Math.sin(i * 2.4 + t * 0.2) * f * 0.9, 9.1 + f * 15, Math.cos(i * 3 + t * 0.14) * f * 1.7);
