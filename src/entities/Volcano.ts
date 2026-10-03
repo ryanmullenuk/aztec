@@ -50,14 +50,14 @@ export class VolcanoCycle {
 /** Uneven slopes and a broken crater lip shared by the rock and lava geometry. */
 export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
   const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
-  const radius = 2.85 + 5.1 * Math.pow(f, 1.12);
+  const radius = 3.3 + 6.0 * Math.pow(f, 1.48);
   const shoulder = 1 + f * (0.10 * Math.sin(angle * 3 + 0.6) + 0.06 * Math.cos(angle * 5));
   // A long rocky spur makes space for a joined secondary peak on one side.
   const spur = Math.pow(Math.max(0, Math.cos(angle - 2.3)), 10);
   const r = radius * shoulder + ridge * Math.sin(Math.PI * f) + spur * 1.8 * f * f;
   // Steep fluted walls open onto a broad, asymmetric apron.
   const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
-  const lip = Math.sin(angle * 7) * 0.32 + Math.sin(angle * 13) * 0.21 - notch;
+  const lip = Math.sin(angle * 7) * 0.45 + Math.sin(angle * 13) * 0.30 - notch;
   const ridgeLobes = Math.pow(Math.max(0, Math.cos(angle - 4.35)), 10) * 2.5
     + Math.pow(Math.max(0, Math.cos(angle - 5.4)), 8) * 1.6;
   const foothills = ridgeLobes * Math.exp(-(((f - 0.62) / 0.26) ** 2)) * Math.sin(Math.PI * f);
@@ -71,7 +71,7 @@ export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
 
 export function volcanoRockGeometry(): THREE.BufferGeometry {
   const positions: number[] = [], colours: number[] = [], indices: number[] = [];
-  const sides = 80, rings = 32;
+  const sides = 64, rings = 24;
   const dark = new THREE.Color(0x303740), ash = new THREE.Color(0x879098);
   // Lower flank -> lip -> deep inner crater -> closed rocky floor.
   for (let j = 0; j <= rings + 5; j++) for (let i = 0; i <= sides; i++) {
@@ -87,7 +87,7 @@ export function volcanoRockGeometry(): THREE.BufferGeometry {
       point.y = point.y * (1 - t) + 7.2 * t;
     }
     positions.push(point.x, point.y, point.z);
-    const strata = 0.36 + Math.sin(point.y * 3.5 + Math.sin(angle * 6) * 0.8) * 0.09;
+    const strata = 0.52 + Math.sin(point.y * 3.5 + Math.sin(angle * 6) * 0.8) * 0.09;
     const c = dark.clone().lerp(ash, Math.max(0, strata + Math.sin(angle * 17 + j * 8) * 0.12));
     if (j > rings) c.multiplyScalar(0.65);
     colours.push(c.r, c.g, c.b);
@@ -105,8 +105,8 @@ export function volcanoRockGeometry(): THREE.BufferGeometry {
 
 /** One breached outlet splits into three channels across the lower apron. */
 export function volcanoChannel(f: number, branch: number): number {
-  const fork = Math.max(0, (f - 0.35) / 0.65);
-  return 0.35 + (branch - 1) * 0.52 * fork * fork + Math.sin(f * 10) * 0.045 * f;
+  const fork = Math.max(0, (f - 0.30) / 0.70);
+  return 0.35 + (branch - 1) * 0.68 * fork * fork + Math.sin(f * 10) * 0.045 * f;
 }
 
 // Smooth seeded value noise avoids repeating stripes in dirt and molten surfaces.
@@ -152,7 +152,7 @@ export class Volcano {
   readonly state: VolcanoCycle;
   readonly x: number;
   readonly z: number;
-  readonly radius = 16;
+  readonly radius = 18;
   private age = 0;
   private lava: THREE.Group;
   private pool: THREE.Mesh;
@@ -161,6 +161,7 @@ export class Volcano {
   private lavaHeat = { value: 0 };
   private streams: THREE.Mesh[] = [];
   private bubbles: THREE.Mesh[] = [];
+  private craterLight = new THREE.PointLight(0xff6a12, 0, 16, 2);
   private flowBlobs!: THREE.InstancedMesh;
   private blobTransform = new THREE.Object3D();
   private blobUp = new THREE.Vector3(0, 1, 0);
@@ -172,10 +173,10 @@ export class Volcano {
     // Prefer the broad inland crown of island two, clear of existing buildings and landmarks.
     let best = -Infinity, site = -1;
     for (let i = 0; i < w.layer.length; i++) {
-      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 16) continue;
+      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 18) continue;
       const cx = i % w.N, cz = Math.floor(i / w.N);
       let clear = true;
-      for (let dz = -16; dz <= 16 && clear; dz++) for (let dx = -16; dx <= 16; dx++) {
+      for (let dz = -18; dz <= 18 && clear; dz++) for (let dx = -18; dx <= 18; dx++) {
         if (!w.inBounds(cx + dx, cz + dz)) { clear = false; break; }
         const j = w.idx(cx + dx, cz + dz);
         if (w.occ[j] || w.blockFixed[j] || w.layer[j] < 1) { clear = false; break; }
@@ -201,6 +202,7 @@ export class Volcano {
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
     mountain.castShadow = true; mountain.receiveShadow = true;
     this.group.add(mountain);
+    this.craterLight.position.set(0.38, 9.7, 0); this.group.add(this.craterLight);
     // Batched angular outcrops and scrub nest the mountain into its jungle island.
     const rng = new RNG(w.seed + 9817), dummy = new THREE.Object3D();
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -225,6 +227,40 @@ export class Volcano {
       }
       mesh.castShadow = true; mesh.receiveShadow = true; this.group.add(mesh);
     }
+    // Large fractured cliff slabs form the silhouette; small stones only dress their feet.
+    const slabGeometry = new THREE.CylinderGeometry(0.58, 1.0, 1, 5, 1);
+    const slabs = new THREE.InstancedMesh(slabGeometry,
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true })), 34);
+    slabs.name = 'Fractured volcanic cliffs';
+    for (let i = 0; i < slabs.count; i++) {
+      const angle = 1.05 + (i % 17) / 16 * 4.7 + rng.range(-0.09, 0.09);
+      const f = i < 17 ? rng.range(0.18, 0.34) : rng.range(0.52, 0.74);
+      const point = volcanoSurface(f, angle);
+      const h = i < 17 ? rng.range(3.2, 5.0) : rng.range(2.3, 4.5);
+      const width = rng.range(0.48, 0.9);
+      dummy.position.copy(point); dummy.position.y -= h * 0.30;
+      dummy.rotation.set(rng.range(-0.12, 0.12), angle + rng.range(-0.3, 0.3), rng.range(-0.15, 0.15));
+      dummy.scale.set(width, h, width * rng.range(0.7, 1.25));
+      dummy.updateMatrix(); slabs.setMatrixAt(i, dummy.matrix);
+      slabs.setColorAt(i, new THREE.Color(0x858982).multiplyScalar(rng.range(0.68, 1.08)));
+    }
+    slabs.castShadow = true; slabs.receiveShadow = true; this.group.add(slabs);
+    // A lower planted crag divides the two main lava arms, like the reference.
+    const crag = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 1.2, 2.8, 6),
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0x727b77, roughness: 1, flatShading: true })));
+    const cragPoint = volcanoSurface(0.79, 0.35);
+    crag.position.copy(cragPoint); crag.position.y += 0.7;
+    crag.rotation.y = 0.65; crag.scale.set(0.70, 1, 0.60);
+    crag.castShadow = true; crag.receiveShadow = true; this.group.add(crag);
+    const cragShrubs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+      new THREE.MeshStandardMaterial({ color: 0x729339, roughness: 1, flatShading: true }), 12);
+    for (let i = 0; i < 12; i++) {
+      const a = i * 2.4, r = rng.range(0, 0.30);
+      dummy.position.set(cragPoint.x + Math.cos(a) * r, cragPoint.y + 2.07, cragPoint.z + Math.sin(a) * r);
+      dummy.rotation.set(0, a, 0); dummy.scale.set(0.22, 0.15, 0.22); dummy.updateMatrix();
+      cragShrubs.setMatrixAt(i, dummy.matrix);
+    }
+    cragShrubs.castShadow = true; this.group.add(cragShrubs);
     // Irregular clusters at ground level soften the boundary into the forest.
     const rubble = new THREE.InstancedMesh(rockGeo,
       texturedRock(new THREE.MeshStandardMaterial({ color: 0x68727c, roughness: 1, flatShading: true })), 92);
@@ -299,7 +335,7 @@ export class Volcano {
       `);
     };
     this.lava = new THREE.Group(); this.lava.name = 'Active lava'; this.group.add(this.lava);
-    this.pool = new THREE.Mesh(new THREE.CircleGeometry(2.15, 48).rotateX(-Math.PI / 2), this.glow);
+    this.pool = new THREE.Mesh(new THREE.CircleGeometry(2.5, 48).rotateX(-Math.PI / 2), this.glow);
     // Lake sits well below the broken rim.
     this.pool.position.set(0.38, 8.8, 0); this.lava.add(this.pool);
     const bubbleGeo = new THREE.IcosahedronGeometry(0.22, 1);
@@ -309,9 +345,9 @@ export class Volcano {
     for (let k = 0; k < 3; k++) {
       const positions: number[] = [], indices: number[] = [];
       for (let n = 0; n <= 64; n++) {
-        const f = n / 64;
+        const f = n / 64 * (k === 1 ? 0.60 : 1);
         const angle = volcanoChannel(f, k);
-        const width = (0.24 + 0.10 * Math.sin(f * 7) ** 2) / (2.85 + 5.1 * f ** 1.12);
+        const width = (0.24 + 0.10 * Math.sin(f * 7) ** 2) / (3.3 + 6.0 * f ** 1.48);
         for (const side of [-1, 1]) {
           const point = volcanoSurface(f, angle + width * side);
           point.y += 0.11;
@@ -326,8 +362,8 @@ export class Volcano {
       const bedGeometry = geometry.clone();
       const bedPositions = bedGeometry.getAttribute('position');
       for (let n = 0; n <= 64; n++) {
-        const f = n / 64, angle = volcanoChannel(f, k);
-        const width = 0.5 / (2.85 + 5.1 * f ** 1.12);
+        const f = n / 64 * (k === 1 ? 0.60 : 1), angle = volcanoChannel(f, k);
+        const width = 0.5 / (3.3 + 6.0 * f ** 1.48);
         for (let side = 0; side < 2; side++) {
           const p = volcanoSurface(f, angle + (side * 2 - 1) * width);
           bedPositions.setXYZ(n * 2 + side, p.x, p.y + 0.055, p.z);
@@ -382,6 +418,7 @@ export class Volcano {
     const cooling = phase === 'cooling' ? Math.min(1, this.state.remaining / 25) : 0;
     const strength = phase === 'erupting' ? 1 : this.state.coolingHot ? cooling : 0;
     this.lava.visible = strength > 0;
+    this.craterLight.intensity = strength * (32 + Math.sin(t * 2.7) * 4);
     this.lavaTime.value = t; this.lavaHeat.value = strength;
     this.glow.emissiveIntensity = strength * (2.4 + Math.sin(t * 4) * 0.3);
     this.glow.color.setRGB(0.12 + strength * 0.88, 0.035 + strength * 0.3, 0.015);
@@ -399,7 +436,7 @@ export class Volcano {
     });
     if (strength > 0) for (let i = 0; i < 24; i++) {
       const branch = i % 3;
-      const f = (t * (0.021 + (i % 5) * 0.0017) + i * 0.381966) % 1;
+      const f = ((t * (0.021 + (i % 5) * 0.0017) + i * 0.381966) % 1) * (branch === 1 ? 0.60 : 1);
       const angle = volcanoChannel(f, branch);
       const point = volcanoSurface(f, angle);
       const tangent = volcanoSurface(f, angle + 0.001).sub(point);
@@ -419,6 +456,7 @@ export class Volcano {
       m.scale.set(1.3 + f * 6, 1.5 + f * 5, 1);
       const material = m.material as THREE.SpriteMaterial;
       material.opacity = (this.state.active ? (phase === 'erupting' ? 0.8 : 0.5) : cooling * 0.4) * Math.sin(Math.PI * f);
+      material.color.setRGB(0.47 + strength * (1 - f) * 0.24, 0.46 + strength * (1 - f) * 0.07, 0.45);
       material.rotation = Math.sin(t * 0.1 + i) * 0.5;
       m.visible = material.opacity > 0.01;
     });
