@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Volcano, VolcanoCycle, volcanoRockGeometry } from '../src/entities/Volcano';
+import { Volcano, VolcanoCycle, volcanoRockGeometry, volcanoSurface } from '../src/entities/Volcano';
 import { World } from '../src/world/World';
 import { generateIsland } from '../src/world/generator';
 import { growIslets } from '../src/world/islets';
@@ -73,4 +73,13 @@ test('smoke countdown persists and old saves receive the longer warning', () => 
   current.update(0); assert.equal(current.remaining, 120);
   current.update(119); assert.equal(current.phase, 'smoking');
   current.update(1); assert.equal(current.phase, 'erupting');
+});
+
+test('joined side peak rises above its saddle and breaks radial symmetry', () => {
+  const peak = volcanoSurface(0.73, 2.3);
+  const saddle = volcanoSurface(0.46, 2.3);
+  const opposite = volcanoSurface(0.73, 2.3 + Math.PI);
+  assert.ok(peak.y > saddle.y + 1);
+  assert.ok(peak.y > opposite.y + 4);
+  assert.ok(volcanoSurface(0, 2.3).y > peak.y);
 });

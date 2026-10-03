@@ -52,22 +52,26 @@ export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
   const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
   const radius = 2.85 + 5.1 * Math.pow(f, 1.12);
   const shoulder = 1 + f * (0.10 * Math.sin(angle * 3 + 0.6) + 0.06 * Math.cos(angle * 5));
-  const r = radius * shoulder + ridge * Math.sin(Math.PI * f);
+  // A long rocky spur makes space for a joined secondary peak on one side.
+  const spur = Math.pow(Math.max(0, Math.cos(angle - 2.3)), 10);
+  const r = radius * shoulder + ridge * Math.sin(Math.PI * f) + spur * 1.8 * f * f;
   // Steep fluted walls open onto a broad, asymmetric apron.
   const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
   const lip = Math.sin(angle * 7) * 0.32 + Math.sin(angle * 13) * 0.21 - notch;
-  const ridgeLobes = Math.pow(Math.max(0, Math.cos(angle - 2.3)), 6) * 4.4
-    + Math.pow(Math.max(0, Math.cos(angle - 4.35)), 10) * 3.3
-    + Math.pow(Math.max(0, Math.cos(angle - 5.4)), 8) * 2.0;
+  const ridgeLobes = Math.pow(Math.max(0, Math.cos(angle - 4.35)), 10) * 2.5
+    + Math.pow(Math.max(0, Math.cos(angle - 5.4)), 8) * 1.6;
   const foothills = ridgeLobes * Math.exp(-(((f - 0.62) / 0.26) ** 2)) * Math.sin(Math.PI * f);
-  const height = foothills + 10.2 * Math.pow(1 - f, 1.10) + lip * (1 - f)
+  // One continuous surface: summit, low connecting saddle, then a craggy side peak.
+  const secondaryPeak = spur * 8.4 * Math.exp(-(((f - 0.73) / 0.16) ** 2)) * Math.sin(Math.PI * f);
+  const saddle = spur * 1.1 * Math.sin(Math.PI * f);
+  const height = foothills + secondaryPeak + saddle + 10.2 * Math.pow(1 - f, 1.25) + lip * (1 - f)
     + ridge * Math.sin(Math.PI * f) * 0.8;
   return new THREE.Vector3(Math.cos(angle) * r + 0.38 * (1 - f), height, Math.sin(angle) * r);
 }
 
 export function volcanoRockGeometry(): THREE.BufferGeometry {
   const positions: number[] = [], colours: number[] = [], indices: number[] = [];
-  const sides = 64, rings = 20;
+  const sides = 80, rings = 32;
   const dark = new THREE.Color(0x303740), ash = new THREE.Color(0x879098);
   // Lower flank -> lip -> deep inner crater -> closed rocky floor.
   for (let j = 0; j <= rings + 5; j++) for (let i = 0; i <= sides; i++) {
@@ -148,7 +152,7 @@ export class Volcano {
   readonly state: VolcanoCycle;
   readonly x: number;
   readonly z: number;
-  readonly radius = 13;
+  readonly radius = 16;
   private age = 0;
   private lava: THREE.Group;
   private pool: THREE.Mesh;
@@ -168,10 +172,10 @@ export class Volcano {
     // Prefer the broad inland crown of island two, clear of existing buildings and landmarks.
     let best = -Infinity, site = -1;
     for (let i = 0; i < w.layer.length; i++) {
-      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 13) continue;
+      if (w.isle[i] !== 2 || w.layer[i] < 2 || w.distWater[i] < 16) continue;
       const cx = i % w.N, cz = Math.floor(i / w.N);
       let clear = true;
-      for (let dz = -13; dz <= 13 && clear; dz++) for (let dx = -13; dx <= 13; dx++) {
+      for (let dz = -16; dz <= 16 && clear; dz++) for (let dx = -16; dx <= 16; dx++) {
         if (!w.inBounds(cx + dx, cz + dz)) { clear = false; break; }
         const j = w.idx(cx + dx, cz + dz);
         if (w.occ[j] || w.blockFixed[j] || w.layer[j] < 1) { clear = false; break; }
@@ -191,7 +195,7 @@ export class Volcano {
       y = Math.min(y, w.heightAt(this.x + Math.cos(a) * 8, this.z + Math.sin(a) * 8));
     }
     this.group.position.set(this.x, y, this.z);
-    this.group.scale.set(1.35, 1.8, 1.25);
+    this.group.scale.set(1.5, 2.15, 1.4);
     if (site >= 0) w.blockCircle(this.x, this.z, this.radius + 0.8);
     const stone = texturedRock(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
@@ -212,7 +216,7 @@ export class Volcano {
         const point = volcanoSurface(f, angle);
         const size = rng.range(vegetation ? 0.18 : 0.25, vegetation ? 0.72 : 0.95);
         dummy.position.copy(point);
-        const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+        const ground = (w.heightAt(this.x + point.x * 1.5, this.z + point.z * 1.4) - y) / 2.15;
         dummy.position.y = Math.max(point.y, ground) + (vegetation ? 0.12 : size * 0.35);
         dummy.rotation.set(rng.range(-0.15, 0.15), angle, rng.range(-0.2, 0.2));
         dummy.scale.set(size, size * (vegetation ? 0.65 : rng.range(1.8, 3.6)), size);
@@ -228,7 +232,7 @@ export class Volcano {
       const angle = rng.range(0, Math.PI * 2);
       const point = volcanoSurface(1, angle).multiplyScalar(rng.range(0.84, 1.07));
       const size = rng.range(0.18, 0.8);
-      const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      const ground = (w.heightAt(this.x + point.x * 1.5, this.z + point.z * 1.4) - y) / 2.15;
       dummy.position.set(point.x, ground + size * 0.28, point.z);
       dummy.rotation.set(rng.range(-0.4, 0.4), angle, rng.range(-0.3, 0.3));
       dummy.scale.set(size * rng.range(0.8, 1.5), size * rng.range(0.6, 1.8), size);
@@ -241,7 +245,7 @@ export class Volcano {
     for (let i = 0; i < pebbles.count; i++) {
       const f = rng.range(0.50, 0.995), angle = rng.range(0, Math.PI * 2);
       const point = volcanoSurface(f, angle);
-      const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      const ground = (w.heightAt(this.x + point.x * 1.5, this.z + point.z * 1.4) - y) / 2.15;
       const size = rng.range(0.035, 0.16);
       dummy.position.set(point.x, Math.max(point.y, ground) + size * 0.3, point.z);
       dummy.rotation.set(rng.next(), angle, rng.next());
@@ -262,7 +266,7 @@ export class Volcano {
     for (let plant = 0; plant < 60; plant++) {
       const f = rng.range(0.48, 0.99), angle = rng.range(1.15, 5.8);
       const point = volcanoSurface(f, angle);
-      const terrain = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      const terrain = (w.heightAt(this.x + point.x * 1.5, this.z + point.z * 1.4) - y) / 2.15;
       point.y = Math.max(point.y, terrain) + 0.08;
       const size = rng.range(0.55, 1.05);
       for (let leaf = 0; leaf < 7; leaf++) {
