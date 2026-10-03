@@ -58,6 +58,8 @@ export interface PathOptions {
   /** Accept any cell within this many cells of the goal. */
   goalRadius?: number;
   maxIterations?: number;
+  /** Captured livestock escorts may swim; bridges and dry land remain preferred. */
+  allowWater?: boolean;
 }
 
 const DIRS = [
@@ -85,9 +87,9 @@ export class Pathfinder {
     this.closed = new Uint32Array(n);
   }
 
-  walkable(i: number, allowBuilding = -1): boolean {
+  walkable(i: number, allowBuilding = -1, allowWater = false): boolean {
     const w = this.world;
-    if (w.layer[i] < 1 && !w.bridge[i]) return false;
+    if (w.layer[i] < 1 && !w.bridge[i] && !allowWater) return false;
     if (w.blocked(i)) return false;
     const occ = w.occ[i];
     if (occ !== 0 && occ - 1 !== allowBuilding && !w.passable(occ - 1)) return false;
@@ -95,19 +97,20 @@ export class Pathfinder {
   }
 
   /** Layer for walking purposes (bridge decks count as shore level). */
-  private walkLayer(i: number): number {
+  private walkLayer(i: number, allowWater = false): number {
     const w = this.world;
-    return w.bridge[i] ? Math.max(1, w.layer[i]) : w.layer[i];
+    return w.bridge[i] || allowWater ? Math.max(1, w.layer[i]) : w.layer[i];
   }
 
-  private stepCost(from: number, to: number, base: number): number {
+  private stepCost(from: number, to: number, base: number, allowWater = false): number {
     const w = this.world;
-    const dl = Math.abs(this.walkLayer(to) - this.walkLayer(from));
+    const dl = Math.abs(this.walkLayer(to, allowWater) - this.walkLayer(from, allowWater));
     if (dl > 1) return -1;
     let c = base;
     if (dl === 1) c += 0.9;
     c *= 1 + w.forest[to] * 0.9;
-    if (!Number.isNaN(w.riverY[to])) c *= 4;
+    if (!w.bridge[to] && w.layer[to] < 1) c *= 8;
+    else if (!w.bridge[to] && !Number.isNaN(w.riverY[to])) c *= 4;
     // Worn paths are preferred.
     c *= 1 - w.wear[to] * 0.45;
     // Stone paths are strongly preferred.
@@ -157,12 +160,12 @@ export class Pathfinder {
         if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
         const ni = nz * N + nx;
         if (this.closed[ni] === gen) continue;
-        if (!this.walkable(ni, allow)) continue;
+        if (!this.walkable(ni, allow, opts.allowWater)) continue;
         // No corner cutting past unwalkable cells.
         if (dx !== 0 && dz !== 0) {
-          if (!this.walkable(cz * N + nx, allow) || !this.walkable(nz * N + cx, allow)) continue;
+          if (!this.walkable(cz * N + nx, allow, opts.allowWater) || !this.walkable(nz * N + cx, allow, opts.allowWater)) continue;
         }
-        const sc = this.stepCost(cur, ni, base);
+        const sc = this.stepCost(cur, ni, base, opts.allowWater);
         if (sc < 0) continue;
         const ng = this.g[cur] + sc;
         if (this.stamp[ni] !== gen || ng < this.g[ni]) {
@@ -181,7 +184,8 @@ export class Pathfinder {
     const cells: number[] = [];
     for (let c = found; c !== -1; c = this.from[c]) cells.push(c);
     cells.reverse();
-    const pts = this.smooth(cells, allow);
+    // Keep crossing waypoints: smoothing must not cut off a preferred bridge through water.
+    const pts = opts.allowWater ? cells.map(i => ({ x: w.centerX(i % N), z: w.centerZ((i / N) | 0) })) : this.smooth(cells, allow);
     // Replace the final waypoint with the exact goal when it lies inside the goal cell.
     if (found === tcz * N + tcx) pts[pts.length - 1] = { x: tx, z: tz };
     return pts;

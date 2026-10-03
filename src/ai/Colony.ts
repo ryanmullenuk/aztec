@@ -8,6 +8,7 @@ import { Condition, Islander, Role, Task, makeIslander } from '../entities/Islan
 import { Plant, PlantState, Vegetation } from '../vegetation/Vegetation';
 import { GameTime } from '../world/Time';
 import { World } from '../world/World';
+import { escortSurfaceY } from '../entities/livestockTravel';
 import { SpatialHash } from '../world/SpatialHash';
 import { Pathfinder, PathOptions } from './Pathfinder';
 
@@ -154,7 +155,7 @@ export class Colony {
     const cell = this.world.cellIndexAt(isl.x, isl.z);
     if (cell >= 0) {
       speed *= 1 - this.world.forest[cell] * 0.35;
-      if (!Number.isNaN(this.world.riverY[cell])) speed *= 0.5;
+      if (!this.world.bridge[cell] && (this.world.layer[cell] < 1 || !Number.isNaN(this.world.riverY[cell]))) speed *= 0.5;
       const pv = this.world.path[cell];
       if (pv) speed *= pv === 1 ? ISLANDER.pathSpeed : 1 + (ISLANDER.pathSpeed - 1) * PATHS.dirtSpeedShare;
     }
@@ -1263,7 +1264,7 @@ export class Colony {
         const b = this.bld.byId(t.building ?? -1);
         if (!b || !b.complete) return this.releaseTask(isl);
         isl.tool = 'none';
-        const r = this.travel(isl, dt, t.x, t.z, { allowBuilding: b.id, goalRadius: 1 });
+        const r = this.travel(isl, dt, t.x, t.z, { allowBuilding: b.id, goalRadius: 1, allowWater: isl.carry?.kind !== 'chicken' });
         if (r === 'failed') return this.fail(isl);
         if (r !== 'arrived') return;
         this.hooks.putInPen?.(t.target, b);
@@ -2184,7 +2185,8 @@ export class Colony {
         } else this.runTask(isl, dt);
       }
       if (!isl.hidden) {
-        isl.y = isl.floorY ?? this.world.groundY(isl.x, isl.z);
+        isl.y = isl.floorY ?? (isl.task?.kind === 'capture' && isl.task.phase === 1 && isl.carry?.kind !== 'chicken'
+          ? escortSurfaceY(this.world, isl.x, isl.z, 0.48) : this.world.groundY(isl.x, isl.z));
         this.grid.insert(isl);
       }
     }

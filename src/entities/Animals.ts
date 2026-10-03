@@ -7,6 +7,7 @@ import { RNG } from '../world/rng';
 import { SpatialHash } from '../world/SpatialHash';
 import { World } from '../world/World';
 import { Islander } from './Islander';
+import { escortSurfaceY, leashedWalkable } from './livestockTravel';
 import * as models from './animalModels';
 import { CHICKEN_WING, FOLDED, flapPose, mixPose, pose, wingMatrices, wingParts } from './birdWings';
 
@@ -743,7 +744,7 @@ export class Animals {
         // Distance-based simulation rate: far animals think less often.
         const far = Math.hypot(a.x - camTarget.x, a.z - camTarget.z) > FAUNA.lodDistance;
         a.tick += dt;
-        const step = far ? 0.3 : 0;
+        const step = far && !a.heldBy ? 0.3 : 0;
         if (a.tick < step) continue;
         const d = a.tick;
         a.tick = 0;
@@ -755,6 +756,8 @@ export class Animals {
 
   private walkable(a: Animal, x: number, z: number): boolean {
     const w = this.world;
+    if (a.heldMode === 'lead' && a.heldBy && (a.sp === 'pig' || a.sp === 'goat'))
+      return leashedWalkable(w, x, z, a.x, a.z, SPECIES[a.sp].maxSlope, a.heldBy.task?.building);
     const i = w.cellIndexAt(x, z);
     if (i < 0 || w.layer[i] < 1 || !Number.isNaN(w.riverY[i]) || w.blocked(i)) return false;
     // Wild animals keep out of building footprints (the fire, huts, fields); penned ones stay in their pen.
@@ -773,7 +776,8 @@ export class Animals {
     // Accelerate smoothly; slow when turning hard.
     const target = speed * (1 - Math.min(0.7, Math.abs(dh) * 0.4));
     a.speed += (target - a.speed) * Math.min(1, dt * 4);
-    const nx = a.x + Math.sin(a.heading) * a.speed * dt, nz = a.z + Math.cos(a.heading) * a.speed * dt;
+    const travel = a.heldMode === 'lead' ? Math.min(d, a.speed * dt, 0.22) : a.speed * dt;
+    const nx = a.x + Math.sin(a.heading) * travel, nz = a.z + Math.cos(a.heading) * travel;
     // Standing somewhere it shouldn't be (e.g. a building went up around it): always let it walk out.
     if (this.walkable(a, nx, nz) || !this.walkable(a, a.x, a.z)) {
       a.x = nx;
@@ -825,7 +829,7 @@ export class Animals {
         a.tz = l.z - Math.cos(l.heading) * 0.55;
         this.moveToward(a, Math.max(1.4, Math.hypot(a.tx - a.x, a.tz - a.z) * 3), dt, 6);
       }
-      a.y = this.world.groundY(a.x, a.z);
+      a.y = escortSurfaceY(this.world, a.x, a.z, 0.18 * a.scale);
       return;
     }
     if (a.pen >= 0) {
