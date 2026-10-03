@@ -3,7 +3,8 @@ import { World } from '../world/World';
 import { RNG } from '../world/rng';
 
 export type VolcanoPhase = 'dormant' | 'smoking' | 'erupting' | 'cooling';
-export interface VolcanoSave { x: number; z: number; phase: VolcanoPhase; remaining: number; cycle: number; coolingHot?: boolean }
+export interface VolcanoSave { x: number; z: number; phase: VolcanoPhase; remaining: number; cycle: number; coolingHot?: boolean; warningVersion?: number }
+export const VOLCANO_SMOKE_SECONDS = 300;
 export const VOLCANO_COST = 50;
 export const VOLCANO_HAPPINESS = 0.15;
 
@@ -17,6 +18,9 @@ export class VolcanoCycle {
     if (saved && ['dormant', 'smoking', 'erupting', 'cooling'].includes(saved.phase)
       && Number.isFinite(saved.remaining) && saved.remaining >= 0 && saved.remaining <= 900) {
       this.phase = saved.phase; this.remaining = saved.remaining;
+      // Preserve time already spent smoking when loading the old 35-second warning.
+      if (saved.phase === 'smoking' && saved.warningVersion !== 2)
+        this.remaining = Math.max(0, VOLCANO_SMOKE_SECONDS - (35 - Math.min(35, saved.remaining)));
       this.coolingHot = saved.coolingHot === true;
       this.cycle = Number.isSafeInteger(saved.cycle) && saved.cycle >= 0 ? saved.cycle : 0;
     }
@@ -26,7 +30,7 @@ export class VolcanoCycle {
     if (!Number.isFinite(dt) || dt <= 0) return;
     this.remaining -= dt;
     while (this.remaining <= 0) {
-      if (this.phase === 'dormant') { this.phase = 'smoking'; this.remaining += 35; }
+      if (this.phase === 'dormant') { this.phase = 'smoking'; this.remaining += VOLCANO_SMOKE_SECONDS; }
       else if (this.phase === 'smoking') { this.phase = 'erupting'; this.remaining += 65; }
       else if (this.phase === 'erupting') { this.coolingHot = true; this.phase = 'cooling'; this.remaining += 25; }
       else {
@@ -46,13 +50,17 @@ export class VolcanoCycle {
 /** Uneven slopes and a broken crater lip shared by the rock and lava geometry. */
 export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
   const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
-  const radius = 2.85 + 5.1 * Math.pow(f, 1.55);
+  const radius = 2.85 + 5.1 * Math.pow(f, 1.12);
   const shoulder = 1 + f * (0.10 * Math.sin(angle * 3 + 0.6) + 0.06 * Math.cos(angle * 5));
   const r = radius * shoulder + ridge * Math.sin(Math.PI * f);
   // Steep fluted walls open onto a broad, asymmetric apron.
   const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
   const lip = Math.sin(angle * 7) * 0.32 + Math.sin(angle * 13) * 0.21 - notch;
-  const height = 10.2 * Math.pow(1 - f, 1.35) + lip * (1 - f)
+  const ridgeLobes = Math.pow(Math.max(0, Math.cos(angle - 2.3)), 6) * 4.4
+    + Math.pow(Math.max(0, Math.cos(angle - 4.35)), 10) * 3.3
+    + Math.pow(Math.max(0, Math.cos(angle - 5.4)), 8) * 2.0;
+  const foothills = ridgeLobes * Math.exp(-(((f - 0.62) / 0.26) ** 2)) * Math.sin(Math.PI * f);
+  const height = foothills + 10.2 * Math.pow(1 - f, 1.10) + lip * (1 - f)
     + ridge * Math.sin(Math.PI * f) * 0.8;
   return new THREE.Vector3(Math.cos(angle) * r + 0.38 * (1 - f), height, Math.sin(angle) * r);
 }
@@ -95,6 +103,26 @@ export function volcanoRockGeometry(): THREE.BufferGeometry {
 export function volcanoChannel(f: number, branch: number): number {
   const fork = Math.max(0, (f - 0.35) / 0.65);
   return 0.35 + (branch - 1) * 0.52 * fork * fork + Math.sin(f * 10) * 0.045 * f;
+}
+
+/** Fine stone grain fades with pixel footprint so distant cliffs do not sparkle. */
+function texturedRock(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = 'varying vec3 vRockPoint;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
+      '#include <begin_vertex>\nvRockPoint = position;');
+    shader.fragmentShader = 'varying vec3 vRockPoint;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+      #include <color_fragment>
+      vec3 cell = floor(vRockPoint * 65.0);
+      float grit = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+      float fade = 1.0 - smoothstep(0.012, 0.065, length(fwidth(vRockPoint)));
+      float mottling = sin(vRockPoint.x * 7.0 + sin(vRockPoint.z * 5.0))
+        * sin(vRockPoint.y * 9.0 + vRockPoint.z * 3.0);
+      diffuseColor.rgb *= 0.94 + mottling * 0.10 + (grit - 0.5) * 0.35 * fade;
+    `);
+  };
+  return material;
 }
 
 export class Volcano {
@@ -144,7 +172,7 @@ export class Volcano {
     this.group.position.set(this.x, y, this.z);
     this.group.scale.set(1.35, 1.8, 1.25);
     if (site >= 0) w.blockCircle(this.x, this.z, this.radius + 0.8);
-    const stone = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true });
+    const stone = texturedRock(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
     mountain.castShadow = true; mountain.receiveShadow = true;
     this.group.add(mountain);
@@ -152,7 +180,7 @@ export class Volcano {
     const rng = new RNG(w.seed + 9817), dummy = new THREE.Object3D();
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
     const outcrops = new THREE.InstancedMesh(rockGeo,
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), 78);
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true })), 78);
     const shrubs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), 240);
     for (const [mesh, vegetation] of [[outcrops, false], [shrubs, true]] as const) {
@@ -174,7 +202,7 @@ export class Volcano {
     }
     // Irregular clusters at ground level soften the boundary into the forest.
     const rubble = new THREE.InstancedMesh(rockGeo,
-      new THREE.MeshStandardMaterial({ color: 0x68727c, roughness: 1, flatShading: true }), 92);
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0x68727c, roughness: 1, flatShading: true })), 92);
     for (let i = 0; i < rubble.count; i++) {
       const angle = rng.range(0, Math.PI * 2);
       const point = volcanoSurface(1, angle).multiplyScalar(rng.range(0.84, 1.07));
@@ -186,6 +214,21 @@ export class Volcano {
       dummy.updateMatrix(); rubble.setMatrixAt(i, dummy.matrix);
     }
     rubble.castShadow = true; rubble.receiveShadow = true; this.group.add(rubble);
+    // Scree fans: many small stones in one draw call, clustered between larger outcrops.
+    const pebbles = new THREE.InstancedMesh(rockGeo,
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0x80878b, roughness: 1, flatShading: true })), 650);
+    for (let i = 0; i < pebbles.count; i++) {
+      const f = rng.range(0.50, 0.995), angle = rng.range(0, Math.PI * 2);
+      const point = volcanoSurface(f, angle);
+      const ground = (w.heightAt(this.x + point.x * 1.35, this.z + point.z * 1.25) - y) / 1.8;
+      const size = rng.range(0.035, 0.16);
+      dummy.position.set(point.x, Math.max(point.y, ground) + size * 0.3, point.z);
+      dummy.rotation.set(rng.next(), angle, rng.next());
+      dummy.scale.set(size * 1.4, size * 0.6, size);
+      dummy.updateMatrix(); pebbles.setMatrixAt(i, dummy.matrix);
+      pebbles.setColorAt(i, new THREE.Color().setScalar(rng.range(0.55, 1.1)));
+    }
+    pebbles.receiveShadow = true; this.group.add(pebbles);
     // Broad pointed leaves form recognisable tropical plants among the rock ledges.
     const leafGeometry = new THREE.BufferGeometry();
     leafGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -240,7 +283,7 @@ export class Volcano {
       for (let n = 0; n <= 64; n++) {
         const f = n / 64;
         const angle = volcanoChannel(f, k);
-        const width = (0.24 + 0.10 * Math.sin(f * 7) ** 2) / (2.85 + 5.1 * f ** 1.55);
+        const width = (0.24 + 0.10 * Math.sin(f * 7) ** 2) / (2.85 + 5.1 * f ** 1.12);
         for (const side of [-1, 1]) {
           const point = volcanoSurface(f, angle + width * side);
           point.y += 0.11;
@@ -256,7 +299,7 @@ export class Volcano {
       const bedPositions = bedGeometry.getAttribute('position');
       for (let n = 0; n <= 64; n++) {
         const f = n / 64, angle = volcanoChannel(f, k);
-        const width = 0.5 / (2.85 + 5.1 * f ** 1.55);
+        const width = 0.5 / (2.85 + 5.1 * f ** 1.12);
         for (let side = 0; side < 2; side++) {
           const p = volcanoSurface(f, angle + (side * 2 - 1) * width);
           bedPositions.setXYZ(n * 2 + side, p.x, p.y + 0.055, p.z);
@@ -290,14 +333,14 @@ export class Volcano {
     this.animate(0);
   }
   save(): VolcanoSave | undefined {
-    return this.group.visible ? { x: this.x, z: this.z, phase: this.state.phase, remaining: this.state.remaining, cycle: this.state.cycle, coolingHot: this.state.coolingHot } : undefined;
+    return this.group.visible ? { x: this.x, z: this.z, phase: this.state.phase, remaining: this.state.remaining, cycle: this.state.cycle, coolingHot: this.state.coolingHot, warningVersion: 2 } : undefined;
   }
   update(dt: number): void {
     if (!this.group.visible) return;
     const previous = this.state.phase;
     this.state.update(dt); this.age += dt;
     if (previous !== this.state.phase && this.state.phase === 'smoking')
-      this.notify('Grey smoke rises from the volcano. Use Calm on the volcano for 50 Belief to reassure your people.');
+      this.notify('The volcano will smoke for five minutes before lava appears. Use Calm on the volcano for 50 Belief to reassure your people.');
     if (previous !== this.state.phase && this.state.phase === 'erupting')
       this.notify('The volcano is erupting! Lava is spilling down its slopes. Use Calm for 50 Belief.');
     this.animate(dt);

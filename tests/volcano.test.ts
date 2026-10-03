@@ -9,7 +9,8 @@ import { WORLD } from '../src/config';
 test('smoke precedes eruption and cooling leads to a dormant interval', () => {
   const v = new VolcanoCycle(42);
   v.update(150); assert.equal(v.phase, 'smoking');
-  v.update(35); assert.equal(v.phase, 'erupting');
+  v.update(299); assert.equal(v.phase, 'smoking');
+  v.update(1); assert.equal(v.phase, 'erupting');
   v.update(65); assert.equal(v.phase, 'cooling');
   v.update(25); assert.equal(v.phase, 'dormant');
   assert.ok(v.remaining >= 240 && v.remaining <= 480);
@@ -51,7 +52,7 @@ test('cooling retains the mountain and basalt channels but removes lava and smok
   const w = new World(); generateIsland(w, WORLD.islandSeed); growIslets(w);
   const v = new Volcano(w);
   const staticCount = v.group.children.length;
-  v.update(190);
+  v.update(455);
   assert.equal(v.state.phase, 'erupting');
   assert.equal(v.group.getObjectByName('Active lava')!.visible, true);
   assert.equal(v.state.calm(() => true), true);
@@ -63,4 +64,13 @@ test('cooling retains the mountain and basalt channels but removes lava and smok
   assert.equal(beds.length, 3);
   assert.ok(beds.every(o => o.visible));
   assert.ok(v.group.children.filter(o => o.name === 'Volcanic smoke').every(o => !o.visible));
+});
+
+test('smoke countdown persists and old saves receive the longer warning', () => {
+  const old = new VolcanoCycle(42, { x: 0, z: 0, phase: 'smoking', remaining: 15, cycle: 0 });
+  assert.equal(old.remaining, 280);
+  const current = new VolcanoCycle(42, { x: 0, z: 0, phase: 'smoking', remaining: 120, cycle: 0, warningVersion: 2 });
+  current.update(0); assert.equal(current.remaining, 120);
+  current.update(119); assert.equal(current.phase, 'smoking');
+  current.update(1); assert.equal(current.phase, 'erupting');
 });

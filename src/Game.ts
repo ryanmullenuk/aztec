@@ -1704,7 +1704,8 @@ export class Game {
     // What the camera sees this frame: off-screen entities skip posing and drawing.
     View.update(this.rig.camera);
     this.breeze.update(realDt, this.rig.target, this.rig.viewRadius);
-    this.volcano.update(dt);
+    // Volcano warnings use unpaused real play time, even at increased game speed.
+    this.volcano.update(dt > 0 ? realDt : 0);
     const t = this.time.elapsed;
     // With the day/night cycle off, the light stays at warm mid-afternoon (the clock still runs for the islanders).
     this.lighting.update(this.settings.dayNight ? this.time.t : RENDER.fixedTimeOfDay, this.rig.target, this.rig.viewRadius);
