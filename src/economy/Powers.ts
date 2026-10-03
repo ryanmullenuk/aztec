@@ -7,6 +7,7 @@ import { Lightning } from '../render/Lightning';
 import { SEA_SURFACE, Water } from '../water/Water';
 import { GameTime } from '../world/Time';
 import { Economy } from './Economy';
+import { RainField } from '../render/RainField';
 
 const _fwd = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -26,9 +27,7 @@ export class Powers {
   /** Smoothed 0..1 intensities. */
   rainAmt = 0;
   stormAmt = 0;
-  private rain: THREE.LineSegments;
-  private rainPos: Float32Array;
-  private rainN = 1400;
+  private rain = new RainField();
   private sparkles: THREE.Points;
   private sparkPos: Float32Array;
   private sparkLife: Float32Array;
@@ -60,15 +59,7 @@ export class Powers {
   notify: (t: string, kind?: 'info' | 'warn') => void = () => {};
 
   constructor(private eco: Economy, private bld: BuildingSystem, private lighting: Lighting, private water: Water, private time: GameTime, private rnd: () => number) {
-    // Rain: short falling streaks around the camera target.
-    const g = new THREE.BufferGeometry();
-    this.rainPos = new Float32Array(this.rainN * 6);
-    g.setAttribute('position', new THREE.BufferAttribute(this.rainPos, 3));
-    this.rain = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xcfe4f5, transparent: true, opacity: 0, depthWrite: false, fog: true }));
-    this.rain.frustumCulled = false;
-    this.rain.renderOrder = 16;
-    this.group.add(this.rain);
-    for (let i = 0; i < this.rainN; i++) this.resetDrop(i, 0, 0, 0, true);
+    this.group.add(this.rain.lines);
 
     const n = 300;
     const sg = new THREE.BufferGeometry();
@@ -94,13 +85,6 @@ export class Powers {
     this.sparkles.frustumCulled = false;
     this.group.add(this.sparkles);
     this.group.add(this.bolt.group);
-  }
-
-  private resetDrop(i: number, cx: number, cy: number, cz: number, randomY: boolean): void {
-    const r = 40;
-    const x = cx + (this.rnd() - 0.5) * r * 2, z = cz + (this.rnd() - 0.5) * r * 2;
-    const y = cy + (randomY ? this.rnd() * 30 : 30);
-    this.rainPos.set([x, y, z, x + 0.15, y + 0.9, z + 0.05], i * 6);
   }
 
   get raining(): boolean {
@@ -261,23 +245,7 @@ export class Powers {
     const boltLight = this.bolt.update(realDt, this.lighting.state.day, this.lighting.flash);
     this.lighting.flash = Math.min(1.4, this.flash + boltLight);
 
-    // Rain streaks follow the camera.
-    const mat = this.rain.material as THREE.LineBasicMaterial;
-    mat.opacity = this.rainAmt * 0.7;
-    this.rain.visible = this.rainAmt > 0.02;
-    if (this.rain.visible) {
-      const fall = (14 + this.stormAmt * 8) * realDt;
-      const wind = (1 + this.stormAmt * 4) * realDt;
-      for (let i = 0; i < this.rainN; i++) {
-        const o = i * 6;
-        this.rainPos[o + 1] -= fall;
-        this.rainPos[o + 4] -= fall;
-        this.rainPos[o] += wind;
-        this.rainPos[o + 3] += wind;
-        if (this.rainPos[o + 1] < camTarget.y - 2 || Math.abs(this.rainPos[o] - camTarget.x) > 45 || Math.abs(this.rainPos[o + 2] - camTarget.z) > 45) this.resetDrop(i, camTarget.x, camTarget.y, camTarget.z, false);
-      }
-      (this.rain.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    }
+    this.rain.update(realDt, this.rainAmt, this.stormAmt);
     // Blessing sparkles; blessed farms keep twinkling.
     for (const f of this.bld.list) {
       if (f.complete && f.blessTimer > 0 && isFarm(f.key) && this.rnd() < realDt * 6) this.spark(f.x + (this.rnd() - 0.5) * f.w, f.y + 0.3, f.z + (this.rnd() - 0.5) * f.d);

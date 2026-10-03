@@ -49,15 +49,16 @@ export class VolcanoCycle {
 
 /** Uneven slopes and a broken crater lip shared by the rock and lava geometry. */
 export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
-  const ridge = Math.sin(angle * 9 + 0.7) * 0.58 + Math.sin(angle * 15 - 0.8) * 0.24;
+  const ridge = Math.sin(angle * 5 + 0.7) * 0.24 + Math.sin(angle * 9 - 0.8) * 0.10;
   const radius = 3.3 + 6.0 * Math.pow(f, 1.48);
   const shoulder = 1 + f * (0.10 * Math.sin(angle * 3 + 0.6) + 0.06 * Math.cos(angle * 5));
   // A long rocky spur makes space for a joined secondary peak on one side.
   const spur = Math.pow(Math.max(0, Math.cos(angle - 2.3)), 10);
-  const r = radius * shoulder + ridge * Math.sin(Math.PI * f) + spur * 1.8 * f * f;
+  const rimShape = (0.30 * Math.sin(angle * 3 + 0.4) + 0.16 * Math.cos(angle * 2)) * (1 - f);
+  const r = rimShape + radius * shoulder + ridge * Math.sin(Math.PI * f) + spur * 1.8 * f * f;
   // Steep fluted walls open onto a broad, asymmetric apron.
   const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 40) * 1.0;
-  const lip = Math.sin(angle * 7) * 0.45 + Math.sin(angle * 13) * 0.30 - notch;
+  const lip = Math.sin(angle * 2) * 0.30 + Math.sin(angle * 5) * 0.14 - notch;
   const ridgeLobes = Math.pow(Math.max(0, Math.cos(angle - 4.35)), 10) * 2.5
     + Math.pow(Math.max(0, Math.cos(angle - 5.4)), 8) * 1.6;
   const foothills = ridgeLobes * Math.exp(-(((f - 0.62) / 0.26) ** 2)) * Math.sin(Math.PI * f);
@@ -66,7 +67,7 @@ export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
   const saddle = spur * 1.1 * Math.sin(Math.PI * f);
   const height = foothills + secondaryPeak + saddle + 10.2 * Math.pow(1 - f, 1.25) + lip * (1 - f)
     + ridge * Math.sin(Math.PI * f) * 0.8;
-  return new THREE.Vector3(Math.cos(angle) * r + 0.38 * (1 - f), height, Math.sin(angle) * r);
+  return new THREE.Vector3(Math.cos(angle) * r * (1 + 0.10 * (1 - f)) + 0.38 * (1 - f), height, Math.sin(angle) * r * (1 - 0.12 * (1 - f)));
 }
 
 export function volcanoRockGeometry(): THREE.BufferGeometry {
@@ -198,7 +199,7 @@ export class Volcano {
     this.group.position.set(this.x, y, this.z);
     this.group.scale.set(1.5, 2.15, 1.4);
     if (site >= 0) w.blockCircle(this.x, this.z, this.radius + 0.8);
-    const stone = texturedRock(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
+    const stone = texturedRock(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: false }));
     const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
     mountain.castShadow = true; mountain.receiveShadow = true;
     this.group.add(mountain);
@@ -207,7 +208,7 @@ export class Volcano {
     const rng = new RNG(w.seed + 9817), dummy = new THREE.Object3D();
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
     const outcrops = new THREE.InstancedMesh(rockGeo,
-      texturedRock(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true })), 78);
+      texturedRock(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true })), 18);
     const shrubs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), 240);
     for (const [mesh, vegetation] of [[outcrops, false], [shrubs, true]] as const) {
@@ -221,30 +222,12 @@ export class Volcano {
         const ground = (w.heightAt(this.x + point.x * 1.5, this.z + point.z * 1.4) - y) / 2.15;
         dummy.position.y = Math.max(point.y, ground) + (vegetation ? 0.12 : size * 0.35);
         dummy.rotation.set(rng.range(-0.15, 0.15), angle, rng.range(-0.2, 0.2));
-        dummy.scale.set(size, size * (vegetation ? 0.65 : rng.range(1.8, 3.6)), size);
+        dummy.scale.set(size, size * (vegetation ? 0.65 : rng.range(0.7, 1.4)), size);
         dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
         mesh.setColorAt(i, new THREE.Color(vegetation ? 0x628c32 : 0x737d87).multiplyScalar(rng.range(0.65, 1.15)));
       }
       mesh.castShadow = true; mesh.receiveShadow = true; this.group.add(mesh);
     }
-    // Large fractured cliff slabs form the silhouette; small stones only dress their feet.
-    const slabGeometry = new THREE.CylinderGeometry(0.58, 1.0, 1, 5, 1);
-    const slabs = new THREE.InstancedMesh(slabGeometry,
-      texturedRock(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true })), 34);
-    slabs.name = 'Fractured volcanic cliffs';
-    for (let i = 0; i < slabs.count; i++) {
-      const angle = 1.05 + (i % 17) / 16 * 4.7 + rng.range(-0.09, 0.09);
-      const f = i < 17 ? rng.range(0.18, 0.34) : rng.range(0.52, 0.74);
-      const point = volcanoSurface(f, angle);
-      const h = i < 17 ? rng.range(3.2, 5.0) : rng.range(2.3, 4.5);
-      const width = rng.range(0.48, 0.9);
-      dummy.position.copy(point); dummy.position.y -= h * 0.30;
-      dummy.rotation.set(rng.range(-0.12, 0.12), angle + rng.range(-0.3, 0.3), rng.range(-0.15, 0.15));
-      dummy.scale.set(width, h, width * rng.range(0.7, 1.25));
-      dummy.updateMatrix(); slabs.setMatrixAt(i, dummy.matrix);
-      slabs.setColorAt(i, new THREE.Color(0x858982).multiplyScalar(rng.range(0.68, 1.08)));
-    }
-    slabs.castShadow = true; slabs.receiveShadow = true; this.group.add(slabs);
     // A lower planted crag divides the two main lava arms, like the reference.
     const crag = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 1.2, 2.8, 6),
       texturedRock(new THREE.MeshStandardMaterial({ color: 0x727b77, roughness: 1, flatShading: true })));
@@ -337,6 +320,7 @@ export class Volcano {
     this.lava = new THREE.Group(); this.lava.name = 'Active lava'; this.group.add(this.lava);
     this.pool = new THREE.Mesh(new THREE.CircleGeometry(2.5, 48).rotateX(-Math.PI / 2), this.glow);
     // Lake sits well below the broken rim.
+    this.pool.scale.set(1.1, 1, 0.88);
     this.pool.position.set(0.38, 8.8, 0); this.lava.add(this.pool);
     const bubbleGeo = new THREE.IcosahedronGeometry(0.22, 1);
     for (let i = 0; i < 9; i++) {
