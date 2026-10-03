@@ -23,6 +23,8 @@ const text = (t: string) => {
 appViewport();
 addEventListener('resize', () => appViewport());
 addEventListener('pageshow', () => appViewport());
+// iOS can resize its visible area without a window resize event.
+window.visualViewport?.addEventListener('resize', () => window.dispatchEvent(new Event('resize')));
 addEventListener('orientationchange', () => {
   appViewport();
   setTimeout(() => window.dispatchEvent(new Event('resize')), 250);

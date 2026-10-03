@@ -1,11 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { viewportSize } from '../src/render/AppViewport';
-test('Home Screen game fills iPhone portrait and landscape display', () => {
-  assert.deepEqual(viewportSize(393, 759, 393, 852, true), [393, 852]);
-  assert.deepEqual(viewportSize(852, 360, 393, 852, true), [852, 393]);
+
+test('iPhone controls stay inside the available portrait and landscape area', () => {
+  assert.deepEqual(viewportSize(393, 759), [393, 759]);
+  assert.deepEqual(viewportSize(852, 360), [852, 360]);
 });
-test('Safari tabs and iPad split screen keep their available dimensions', () => {
-  assert.deepEqual(viewportSize(393, 680, 393, 852, false), [393, 680]);
-  assert.deepEqual(viewportSize(600, 900, 1024, 1366, true), [600, 900]);
+test('visible viewport constrains controls when iOS reduces the drawable area', () => {
+  assert.deepEqual(viewportSize(393, 852, 393, 759), [393, 759]);
+  assert.deepEqual(viewportSize(852, 393, 852, 360), [852, 360]);
+});
+test('full screen and split screen retain their actual available dimensions', () => {
+  assert.deepEqual(viewportSize(393, 852, 393, 852), [393, 852]);
+  assert.deepEqual(viewportSize(600, 900), [600, 900]);
 });

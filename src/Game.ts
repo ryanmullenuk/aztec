@@ -69,7 +69,7 @@ const _pathP = new THREE.Vector3();
 export function appViewport(): [number, number] {
   const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches
     || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  const [w, h] = viewportSize(window.innerWidth, window.innerHeight, screen.width, screen.height, standalone);
+  const [w, h] = viewportSize(window.innerWidth, window.innerHeight, window.visualViewport?.width, window.visualViewport?.height);
   document.documentElement.classList.toggle('standalone-app', standalone);
   document.documentElement.style.setProperty('--app-h', `${h}px`);
   return [w, h];
