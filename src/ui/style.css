@@ -22,11 +22,13 @@
 
 html, body {
   margin: 0;
-  /* Share the available viewport height with the renderer. */
-  height: var(--app-h, 100%);
+  width: 100%;
+  min-height: 100%;
+  height: var(--app-h, 100dvh);
+  padding: 0;
   overflow: hidden;
-  /* Neutral backing for iOS system chrome; teal belongs only to the splash. */
-  background: #000;
+  /* Canvas fills the app; a coastal fallback avoids black flashes during resizing. */
+  background: #426b79;
   font-family: var(--font);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -65,6 +67,7 @@ html, body {
 
 /* Colour the entire launch surface, including any iOS area outside the visual viewport. */
 html.splash-open, html.splash-open body { background: #007d83; }
+html.brand-open, html.brand-open body { background: #000; }
 #loading {
   cursor: pointer; position: fixed; inset: 0;
   height: var(--app-h, 100dvh);

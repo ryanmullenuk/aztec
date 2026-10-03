@@ -22,6 +22,11 @@ const text = (t: string) => {
 // Keep the splash and game sized to the available app viewport.
 appViewport();
 addEventListener('resize', () => appViewport());
+addEventListener('pageshow', () => appViewport());
+addEventListener('orientationchange', () => {
+  appViewport();
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
+});
 
 /** Must run directly from the Play gesture; unsupported platforms keep standalone mode. */
 function enterFullscreen(): void {
@@ -59,6 +64,7 @@ async function boot(): Promise<void> {
     game.audio.unlock();
     loading?.classList.add('hidden');
     document.documentElement.classList.remove('splash-open');
+    game.resize();
   };
   if (btn) {
     btn.classList.remove('hidden');

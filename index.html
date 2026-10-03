@@ -17,7 +17,7 @@
     <meta name="apple-mobile-web-app-title" content="Aztlan Isle" />
     <meta name="application-name" content="Aztlan Isle" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="preload" as="image" href="./redhead-splash.jpeg" />
+    <link rel="preload" as="image" href="./redhead-intro.jpeg?v=2" />
     <style>
       /* Inline so the studio splash covers the first paint, before the game bundle loads. */
       html.brand-open, html.brand-open body { margin: 0; background: #000; }
@@ -26,7 +26,10 @@
         display: grid; place-items: center; opacity: 1;
         transition: opacity 900ms ease; touch-action: none;
       }
-      #studio-splash img { display: block; width: 100%; height: 100vh; height: 100dvh; object-fit: contain; }
+      #studio-splash { height: var(--app-h, 100dvh); }
+      .studio-logo { position: relative; overflow: hidden; width: min(72vw, 48dvh, 460px); aspect-ratio: 800 / 780; }
+      /* Frame only the supplied logo; discard the screenshot's empty margins and ghost UI. */
+      #studio-splash img { position: absolute; display: block; width: 153.25%; max-width: none; height: auto; left: -27.5%; top: -117.9487%; }
       #studio-splash.leaving { opacity: 0; }
       @media (prefers-reduced-motion: reduce) { #studio-splash { transition: none; } }
     </style>
@@ -69,7 +72,7 @@
   </head>
   <body>
     <div id="studio-splash" role="img" aria-label="Redhead Games">
-      <img src="./redhead-splash.jpeg" alt="" fetchpriority="high" />
+      <div class="studio-logo"><img src="./redhead-intro.jpeg?v=2" alt="" fetchpriority="high" /></div>
     </div>
     <canvas id="game"></canvas>
     <div id="hud"></div>

@@ -61,12 +61,16 @@ import { BeachPearls } from './entities/Pearls';
 import { SwampView } from './water/Swamp';
 import { SEA_SURFACE } from './water/Water';
 import type { Islander } from './entities/Islander';
+import { viewportSize } from './render/AppViewport';
 
 const _pathP = new THREE.Vector3();
 
-/** Use the app's available viewport, which can exclude system UI on iOS. */
+/** Give the renderer and overlays the same edge-to-edge app dimensions. */
 export function appViewport(): [number, number] {
-  const w = window.innerWidth, h = window.innerHeight;
+  const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const [w, h] = viewportSize(window.innerWidth, window.innerHeight, screen.width, screen.height, standalone);
+  document.documentElement.classList.toggle('standalone-app', standalone);
   document.documentElement.style.setProperty('--app-h', `${h}px`);
   return [w, h];
 }
