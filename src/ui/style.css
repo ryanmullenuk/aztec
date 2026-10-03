@@ -563,3 +563,46 @@ body.exploring #hud * { pointer-events: none !important; }
 .vnews { margin: 2px 0 4px; }
 b.good { color: #7ee08a; }
 p.warn { color: #ffb08a; }
+
+/* Compact clock with independently expandable inventory. */
+#hud .tl {
+  display: flex; flex-direction: column; gap: 6px;
+  width: min(238px, calc(100vw - 82px)); min-width: 0; padding: 0;
+}
+.time-panel { width: 100%; padding: 10px 12px; }
+.time-panel .clock { margin-bottom: 0; }
+.inventory-toggle {
+  width: 100%; min-height: 36px; border-radius: 10px; padding: 7px 12px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em;
+}
+.inventory-chevron { font-size: 18px; line-height: 1; transition: transform 0.15s; }
+.inventory-toggle[aria-expanded="true"] .inventory-chevron { transform: rotate(180deg); }
+.inventory-panel {
+  width: 100%; padding: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px;
+  max-height: min(45dvh, 320px); overflow-y: auto;
+}
+.inventory-panel .res { min-width: 0; gap: 7px; }
+@media (max-width: 720px) {
+  #hud .tl { width: min(218px, calc(100vw - 78px)); }
+  .time-panel { padding: 8px 10px; }
+}
+
+/* One outline treatment for every game button, including selected and hover states. */
+#hud button, #hud button:hover, #hud button:active, #hud button.on,
+#hud button.ghost, #hud button.selected, #play-btn, #loading .boot-actions button {
+  background: transparent !important;
+  background-image: none !important;
+  border: 1px solid var(--gold) !important;
+  color: var(--gold) !important;
+  box-shadow: none !important;
+}
+#hud button.on, #hud button[aria-pressed="true"], #hud button[aria-expanded="true"] {
+  outline: 1px solid var(--gold); outline-offset: 2px;
+}
+#hud button:hover:not(:disabled), #hud button:focus-visible, #play-btn:focus-visible {
+  border-color: #fff0a6 !important;
+  outline: 2px solid #fff0a6; outline-offset: 2px;
+}
+#hud button:disabled { opacity: 0.4; }
+#hud button.on .nm, #hud button.on .key, #hud button.on .cost { color: var(--gold); }

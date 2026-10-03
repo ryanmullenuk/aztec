@@ -117,9 +117,10 @@ export class UI {
   }
 
   private buildTopLeft(): void {
-    this.tl = el('div', 'panel tl');
+    this.tl = el('div', 'tl');
+    const timePanel = el('div', 'panel time-panel');
     this.isleNameEl = el('div', 'islename') as HTMLDivElement;
-    this.tl.appendChild(this.isleNameEl);
+    timePanel.appendChild(this.isleNameEl);
     const clock = el('div', 'clock');
     this.sunIcon = el('span', 'sunicon', ICONS.sun);
     this.timeEl = el('div', 'time');
@@ -127,8 +128,11 @@ export class UI {
     const tx = el('div', 'clocktext');
     tx.append(this.timeEl, this.dateEl);
     clock.append(this.sunIcon, tx);
-    this.tl.appendChild(clock);
-    const grid = el('div', 'resgrid');
+    timePanel.appendChild(clock);
+    this.tl.appendChild(timePanel);
+    const grid = el('div', 'panel resgrid inventory-panel hidden');
+    grid.id = 'inventory-panel';
+    grid.setAttribute('aria-label', 'Island inventory');
     for (const k of ['people', 'wood', 'stone', 'grain', 'fruit', 'meat', 'fish', 'pearls', 'herbs', 'spices']) {
       const r = el('div', 'res', icon(k));
       r.title = k === 'people' ? 'Islanders (housed / total)' : k === 'pearls' ? 'Pearls: found on beaches and in fishing catches; worth a lot on a voyage' : k === 'herbs' || k === 'spices' ? `${k[0].toUpperCase() + k.slice(1)}: brought home by voyages; cure the sick and injured at a Healing Centre` : k[0].toUpperCase() + k.slice(1);
@@ -137,7 +141,16 @@ export class UI {
       this.resEls[k] = v;
       grid.appendChild(r);
     }
-    this.tl.appendChild(grid);
+    const inventory = el('button', 'inventory-toggle', '<span>Inventory</span><span class="inventory-chevron" aria-hidden="true">⌄</span>');
+    inventory.type = 'button';
+    inventory.setAttribute('aria-controls', grid.id);
+    inventory.setAttribute('aria-expanded', 'false');
+    inventory.onclick = () => {
+      const open = inventory.getAttribute('aria-expanded') !== 'true';
+      inventory.setAttribute('aria-expanded', String(open));
+      grid.classList.toggle('hidden', !open);
+    };
+    this.tl.append(inventory, grid);
     this.root.appendChild(this.tl);
   }
 
