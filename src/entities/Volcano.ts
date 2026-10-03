@@ -43,6 +43,52 @@ export class VolcanoCycle {
   }
 }
 
+/** Uneven slopes and a broken crater lip shared by the rock and lava geometry. */
+export function volcanoSurface(f: number, angle: number): THREE.Vector3 {
+  const ridge = Math.sin(angle * 5 + 0.7) * 0.42 + Math.sin(angle * 9 - 0.8) * 0.2;
+  const radius = 2.25 + 5.7 * Math.pow(f, 1.28);
+  const rough = (Math.sin(angle * 13 + f * 8) + Math.cos(angle * 7 - f * 14)) * 0.11;
+  const r = radius + ridge * Math.sin(Math.PI * f) + rough * Math.sin(Math.PI * f);
+  // A breached lip provides a natural outlet for the primary lava channel.
+  const notch = Math.pow(Math.max(0, Math.cos(angle - 0.35)), 28) * 0.7;
+  const height = 9.6 * (1 - f) + (Math.sin(angle * 3) * 0.35 + Math.sin(angle * 7) * 0.18 - notch) * (1 - f)
+    + ridge * Math.sin(Math.PI * f) * 0.48;
+  return new THREE.Vector3(Math.cos(angle) * r + 0.38 * (1 - f), height, Math.sin(angle) * r);
+}
+
+export function volcanoRockGeometry(): THREE.BufferGeometry {
+  const positions: number[] = [], colours: number[] = [], indices: number[] = [];
+  const sides = 48, rings = 20;
+  const dark = new THREE.Color(0x38332f), ash = new THREE.Color(0x766b5b);
+  // Lower flank -> lip -> deep inner crater -> closed rocky floor.
+  for (let j = 0; j <= rings + 5; j++) for (let i = 0; i <= sides; i++) {
+    const angle = i / sides * Math.PI * 2;
+    let point: THREE.Vector3;
+    if (j <= rings) point = volcanoSurface(1 - j / rings, angle);
+    else {
+      const t = (j - rings) / 5;
+      point = volcanoSurface(0, angle);
+      point.x = 0.38 + (point.x - 0.38) * (1 - t);
+      point.z *= 1 - t;
+      point.y = point.y * (1 - t) + 7.0 * t;
+    }
+    positions.push(point.x, point.y, point.z);
+    const strata = 0.36 + Math.sin(point.y * 3.5 + Math.sin(angle * 6) * 0.8) * 0.09;
+    const c = dark.clone().lerp(ash, Math.max(0, strata + Math.sin(angle * 17 + j * 8) * 0.12));
+    if (j > rings) c.multiplyScalar(0.65);
+    colours.push(c.r, c.g, c.b);
+    if (j < rings + 5 && i < sides) {
+      const a = j * (sides + 1) + i, b = a + sides + 1;
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+  g.setIndex(indices); g.computeVertexNormals();
+  return g;
+}
+
 export class Volcano {
   readonly group = new THREE.Group();
   readonly state: VolcanoCycle;
@@ -52,7 +98,9 @@ export class Volcano {
   private age = 0;
   private lava: THREE.Group;
   private pool: THREE.Mesh;
-  private smoke: THREE.Mesh[] = [];
+  private smoke: THREE.Sprite[] = [];
+  private lavaTime = { value: 0 };
+  private lavaHeat = { value: 0 };
   private streams: THREE.Mesh[] = [];
   private bubbles: THREE.Mesh[] = [];
   private readonly glow = new THREE.MeshStandardMaterial({ color: 0xff6b13, emissive: 0xff3800, emissiveIntensity: 2.7, roughness: 0.7 });
@@ -87,36 +135,71 @@ export class Volcano {
     }
     this.group.position.set(this.x, y, this.z);
     if (site >= 0) w.blockCircle(this.x, this.z, this.radius + 0.8);
-    const stone = new THREE.MeshStandardMaterial({ color: 0x514841, roughness: 1, flatShading: true });
-    // Open tapered cone with a thick crater rim and a recessed glowing lake.
-    const cone = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 8, 10, 15, 4, true), stone);
-    cone.position.y = 4.6; cone.castShadow = true; cone.receiveShadow = true;
-    this.group.add(cone);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(2.15, 0.48, 4, 15), stone);
-    rim.rotation.x = Math.PI / 2; rim.position.y = 9.55; rim.castShadow = true;
-    this.group.add(rim);
-    const interior = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.35, 1.4, 15, 1, true), new THREE.MeshStandardMaterial({ color: 0x261a17, side: THREE.DoubleSide, roughness: 1 }));
-    interior.position.y = 8.9; this.group.add(interior);
+    const stone = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true });
+    const mountain = new THREE.Mesh(volcanoRockGeometry(), stone);
+    mountain.castShadow = true; mountain.receiveShadow = true;
+    this.group.add(mountain);
+    // Dark cooling crust breaks the molten surface into moving orange fissures.
+    this.glow.onBeforeCompile = shader => {
+      shader.uniforms.uLavaTime = this.lavaTime;
+      shader.uniforms.uLavaHeat = this.lavaHeat;
+      shader.vertexShader = 'varying vec3 vLavaPosition;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvLavaPosition = position;');
+      shader.fragmentShader = 'varying vec3 vLavaPosition; uniform float uLavaTime; uniform float uLavaHeat;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
+        #include <emissivemap_fragment>
+        vec2 lp = vLavaPosition.xz * 2.8 + vec2(uLavaTime * 0.035, -uLavaTime * 0.06);
+        float fracture = abs(sin(lp.x * 3.0 + sin(lp.y * 2.5)) * sin(lp.y * 3.2 + cos(lp.x)));
+        float crack = 1.0 - smoothstep(0.04, 0.24, fracture);
+        float molten = (0.16 + 0.84 * crack) * uLavaHeat;
+        diffuseColor.rgb = mix(vec3(0.075, 0.023, 0.009), diffuseColor.rgb, molten);
+        totalEmissiveRadiance *= molten;
+      `);
+    };
     this.lava = new THREE.Group(); this.group.add(this.lava);
-    this.pool = new THREE.Mesh(new THREE.CircleGeometry(1.85, 24).rotateX(-Math.PI / 2), this.glow);
-    this.pool.position.y = 9.08; this.lava.add(this.pool);
+    this.pool = new THREE.Mesh(new THREE.CircleGeometry(1.35, 36).rotateX(-Math.PI / 2), this.glow);
+    // Lake sits well below the broken rim.
+    this.pool.position.set(0.38, 7.9, 0); this.lava.add(this.pool);
     const bubbleGeo = new THREE.IcosahedronGeometry(0.22, 1);
     for (let i = 0; i < 9; i++) {
       const b = new THREE.Mesh(bubbleGeo, this.glow); this.bubbles.push(b); this.lava.add(b);
     }
-    for (let k = 0; k < 4; k++) {
-      const angle = k * Math.PI / 2 + 0.35;
-      const pts: THREE.Vector3[] = [];
-      for (let n = 0; n <= 12; n++) {
-        const f = n / 12, r = 2.2 + f * 5.8, a = angle + Math.sin(f * 9 + k) * 0.045;
-        pts.push(new THREE.Vector3(Math.cos(a) * r, 9.68 - f * 9.7, Math.sin(a) * r));
+    for (let k = 0; k < 3; k++) {
+      const positions: number[] = [], indices: number[] = [];
+      for (let n = 0; n <= 64; n++) {
+        const f = n / 64;
+        const angle = 0.35 + k * 2.25 + Math.sin(f * 9 + k) * 0.055 * f;
+        const width = (0.11 + 0.12 * Math.sin(f * 7 + k) ** 2) / (2.25 + f * 5.7);
+        for (const side of [-1, 1]) {
+          const point = volcanoSurface(f, angle + width * side);
+          point.y += 0.11;
+          positions.push(point.x, point.y, point.z);
+        }
+        if (n < 64) { const a = n * 2; indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
       }
-      const stream = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.16 + k * 0.025, 5, false), this.glow);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices); geometry.computeVertexNormals();
+      const stream = new THREE.Mesh(geometry, this.glow);
       this.streams.push(stream); this.lava.add(stream);
     }
-    const smokeGeo = new THREE.IcosahedronGeometry(1, 1);
-    for (let i = 0; i < 18; i++) {
-      const m = new THREE.Mesh(smokeGeo, new THREE.MeshStandardMaterial({ color: 0x777777, transparent: true, opacity: 0, depthWrite: false, roughness: 1 }));
+    // Soft particles overlap into a billowing plume, fading before they respawn.
+    const pixels = new Uint8Array(64 * 64 * 4);
+    for (let py = 0; py < 64; py++) for (let px = 0; px < 64; px++) {
+      const dx = (px - 31.5) / 31.5, dy = (py - 31.5) / 31.5;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const alpha = Math.max(0, 1 - d) ** 1.6;
+      const i = (py * 64 + px) * 4;
+      pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
+      pixels[i + 3] = Math.round(alpha * 255);
+    }
+    const smokeMap = new THREE.DataTexture(pixels, 64, 64);
+    smokeMap.needsUpdate = true;
+    for (let i = 0; i < 28; i++) {
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: smokeMap, color: 0x777675, transparent: true, opacity: 0, depthWrite: false, fog: true,
+      }));
       this.smoke.push(m); this.group.add(m);
     }
     this.animate(0);
@@ -139,26 +222,28 @@ export class Volcano {
     const cooling = phase === 'cooling' ? Math.min(1, this.state.remaining / 25) : 0;
     const strength = phase === 'erupting' ? 1 : this.state.coolingHot ? cooling : 0;
     this.lava.visible = strength > 0;
+    this.lavaTime.value = t; this.lavaHeat.value = strength;
     this.glow.emissiveIntensity = strength * (2.4 + Math.sin(t * 4) * 0.3);
     this.glow.color.setRGB(0.12 + strength * 0.88, 0.035 + strength * 0.3, 0.015);
-    this.pool.position.y = 9.08 + Math.sin(t * 2) * 0.07 * strength;
+    this.pool.position.y = 7.9 + Math.sin(t * 1.7) * 0.07 * strength;
     this.bubbles.forEach((b, i) => {
-      const a = i * 2.4, r = 0.5 + (i % 3) * 0.4;
-      b.position.set(Math.cos(a) * r, 9.04 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.35 * strength, Math.sin(a) * r);
+      const a = i * 2.4, r = 0.3 + (i % 3) * 0.3;
+      b.position.set(0.38 + Math.cos(a) * r, 7.86 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.35 * strength, Math.sin(a) * r);
       b.scale.setScalar(0.6 + Math.max(0, Math.sin(t * 2.5 + i)) * 0.65);
     });
     this.streams.forEach((m, i) => {
       // Fill each ribbon downhill as the overflow begins.
-      const progress = phase === 'erupting' ? Math.min(1, (65 - this.state.remaining) / 15) : cooling;
-      m.geometry.setDrawRange(0, Math.floor(progress * 24) * 5 * 6);
+      const progress = phase === 'erupting' ? Math.max(0, Math.min(1, (65 - this.state.remaining - i * 5) / 22)) : 1;
+      m.geometry.setDrawRange(0, Math.floor(progress * 64) * 6);
       m.visible = progress > 0 && (i === 0 || strength > 0.3);
     });
     this.smoke.forEach((m, i) => {
-      const f = ((t * 0.07 + i / 18) % 1);
-      m.position.set(f * 3 + Math.sin(i * 2) * f, 9.7 + f * 12, Math.cos(i * 3) * f * 1.5);
-      m.scale.setScalar(0.45 + f * 2.3);
-      const material = m.material as THREE.MeshStandardMaterial;
-      material.opacity = (this.state.active ? 0.48 : cooling * 0.25) * Math.sin(Math.PI * f);
+      const f = ((t * 0.045 + i / 28) % 1);
+      m.position.set(0.38 + f * f * 6 + Math.sin(i * 2.4 + t * 0.2) * f * 0.9, 9.1 + f * 15, Math.cos(i * 3 + t * 0.14) * f * 1.7);
+      m.scale.set(1.3 + f * 6, 1.5 + f * 5, 1);
+      const material = m.material as THREE.SpriteMaterial;
+      material.opacity = (this.state.active ? (phase === 'erupting' ? 0.8 : 0.5) : cooling * 0.4) * Math.sin(Math.PI * f);
+      material.rotation = Math.sin(t * 0.1 + i) * 0.5;
       m.visible = material.opacity > 0.01;
     });
   }
