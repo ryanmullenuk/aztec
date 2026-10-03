@@ -64,7 +64,7 @@ export function torchModel(): BuildingModel {
   return { finished: b.build(), torches: [new THREE.Vector3(0, 1.42, 0)], height: 1.5 };
 }
 
-/** Communal hearth: irregular stones, leaning split logs, benches and painted posts. */
+/** Communal hearth: irregular stones, leaning split logs and painted posts. */
 export function bonfireModel(): BuildingModel {
   const b = new GeoBuilder(), rng = new RNG(905);
   b.add(lumpy(P.cyl(1.42, 1.46, 0.035, 22), 0.025, 74, 0.5), { color: c(0xa17b4e) }, M.t(0, 0.018, 0));
@@ -83,13 +83,6 @@ export function bonfireModel(): BuildingModel {
   for (let k = 0; k < 36; k++) {
     const a = rng.range(0, Math.PI * 2), r = Math.sqrt(rng.next()) * 0.52;
     b.add(P.sphere(rng.range(0.025, 0.06), 0), { color: c(k % 3 ? 0x502619 : 0xf99026) }, M.t(Math.cos(a) * r, 0.075, Math.sin(a) * r, 0, a, 0, 1, 0.5, 1));
-  }
-  for (let k = 0; k < 6; k++) {
-    const a = k / 6 * Math.PI * 2, x = Math.cos(a) * 1.17, z = Math.sin(a) * 1.17;
-    b.add(P.cyl(0.115, 0.14, 0.92, 6), { color: K.timber }, M.t(x, 0.24, z, 0, Math.PI / 2 - a, Math.PI / 2));
-    for (const side of [-1, 1]) {
-      b.add(P.box(0.13, 0.2, 0.24), { color: K.timberDark }, M.t(x - Math.sin(a) * side * 0.31, 0.1, z + Math.cos(a) * side * 0.31, 0, -a, 0));
-    }
   }
   for (let k = 0; k < 4; k++) {
     const a = Math.PI / 4 + k * Math.PI / 2, x = Math.cos(a) * 1.24, z = Math.sin(a) * 1.24;

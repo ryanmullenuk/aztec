@@ -8,8 +8,8 @@ export function villageFire(): THREE.Mesh {
   const b = new GeoBuilder();
   for (let k = 0; k < 11; k++) {
     const a = k * 2.4, inner = k > 6;
-    const h = inner ? 0.8 + (k % 3) * 0.16 : 1.1 + (k % 4) * 0.22;
-    const r = inner ? 0.12 : 0.22;
+    const h = inner ? 1.55 + (k % 3) * 0.3 : 2.15 + (k % 4) * 0.42;
+    const r = inner ? 0.16 : 0.28;
     const g = new THREE.ConeGeometry(r, h, 5, 4);
     g.translate(0, h / 2, 0);
     const p = g.getAttribute('position');
@@ -18,12 +18,12 @@ export function villageFire(): THREE.Mesh {
       p.setX(i, p.getX(i) + Math.sin(y * 5 + k) * y * 0.13);
       p.setZ(i, p.getZ(i) + Math.cos(y * 4 + k) * y * 0.09);
     }
-    b.add(g, { color: new THREE.Color(inner ? 3.8 : 2.8, inner ? 2.8 : 0.85 + (k % 3) * 0.25, inner ? 0.55 : 0.06), sway: k * 0.7 },
+    b.add(g, { color: new THREE.Color(inner ? 3.0 : 2.4, inner ? 0.7 : 0.22 + (k % 3) * 0.07, 0.012), sway: k * 0.7 },
       M.t(Math.cos(a) * (inner ? 0.09 : 0.2), 0, Math.sin(a) * (inner ? 0.09 : 0.2)));
     g.dispose();
   }
   for (let k = 0; k < 28; k++) {
-    b.add(P.sphere(0.012 + (k % 4) * 0.004, 0), { color: new THREE.Color(3.6, 1.4 + (k % 3) * 0.4, 0.12), mat: 1, sway: k / 28 }, M.t(0, 0, 0, 0, k, 0, 0.65, 1.5, 0.65));
+    b.add(P.sphere(0.012 + (k % 4) * 0.004, 0), { color: new THREE.Color(3.0, 0.5 + (k % 3) * 0.12, 0.015), mat: 1, sway: k / 28 }, M.t(0, 0, 0, 0, k, 0, 0.65, 1.5, 0.65));
   }
   if (!material) {
     material = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true, fog: true });
@@ -39,7 +39,7 @@ export function villageFire(): THREE.Mesh {
           float angle = aVeg.x * 57.0 + life * 3.0;
           transformed *= sin(life * 3.14159);
           transformed += vec3(cos(angle) * (0.1 + life * 0.45) + life * life * 0.3,
-            0.7 + life * 2.1, sin(angle) * (0.1 + life * 0.4));
+            1.5 + life * 3.4, sin(angle) * (0.1 + life * 0.4));
         } else {
           float height = position.y;
           transformed.x += sin(uTime * 4.6 + height * 4.0 + aVeg.x) * height * 0.065;
@@ -51,6 +51,6 @@ export function villageFire(): THREE.Mesh {
   }
   const geo = b.build();
   // Include shader-displaced embers in culling bounds.
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.4, 0), 2);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2.5, 0), 3);
   return new THREE.Mesh(geo, material);
 }
